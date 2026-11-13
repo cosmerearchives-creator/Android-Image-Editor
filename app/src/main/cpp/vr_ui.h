@@ -522,7 +522,7 @@ struct Renderer {
             const char* title=page==Page::Open?"OPEN IMAGE":
                 page==Page::Projects?"MY PROJECTS":"VIEW GALLERY";
             int n=static_cast<int>(std::strlen(title));
-            label(v,title,512-n*15,page==Page::Open?615:475,5,white);
+            label(v,title,512-n*15,(page==Page::Open||page==Page::Projects)?630:475,5,white);
             if(page==Page::Open) {
                 box(v,170,665,215,50,hovered==14?purpleHover:button);
                 label(v,"SAVE PROJECT",184,678,2,white);
