@@ -890,7 +890,7 @@ void run(JNIEnv* env, jobject activity) {
             const bool pushDown=push.isActive && push.currentState>=0.5f;
             const bool pullDown=pressed.isActive && pressed.currentState>=0.5f;
             const bool immersive=page==vrui::Page::Immersive;
-            const bool canPaint=(page==vrui::Page::Open || immersive) &&
+            const bool canPaint=(page==vrui::Page::Open || immersive) && !menu.selectionMode &&
                 menu.brushMode && menu.hasDepthPixels() && !dragging &&
                 aiDepthState.load()!=3;
             float brushU=0.f,brushV=0.f;
@@ -968,6 +968,9 @@ void run(JNIEnv* env, jobject activity) {
                     menu.stereoEnabled=!menu.stereoEnabled;
                 }
             }
+            if(page==vrui::Page::Open && menu.selectionMode && triggerDown &&
+               !wasPressed && pointer && hovered<0 && overlayHover<0)
+                menu.selectAt(pointerX,pointerY);
             // Drag strength sliders while holding the right trigger.
             const bool sliderAim=immersive?toolPointer:pointer;
             const float sliderX=immersive?toolPointerX:pointerX;
@@ -996,7 +999,14 @@ void run(JNIEnv* env, jobject activity) {
             } else if(triggerDown&&!wasPressed && !dragging && activeSlider<0 &&
                        page!=vrui::Page::Immersive && hovered>=0 && overlayHover<0) {
                 if(hovered==3) page=vrui::Page::Home;
-                else if(page==vrui::Page::Open && (hovered==14 || hovered==15) && menu.hasPhoto()) {
+                else if(page==vrui::Page::Open && hovered==60 && menu.hasPhoto()) {
+                    menu.selectionMode=!menu.selectionMode;
+                    if(menu.selectionMode)menu.brushMode=false;
+                } else if(page==vrui::Page::Open && hovered==61) {
+                    menu.clearMask();menu.selectionMode=false;
+                } else if(page==vrui::Page::Open && hovered==62) {
+                    menu.invertMask();menu.selectionMode=false;
+                } else if(page==vrui::Page::Open && (hovered==14 || hovered==15) && menu.hasPhoto()) {
                     if(menu.strokeActive && menu.hasDepthPixels()){
                         if(menu.finishStroke())saveEditedDepth(env,activity,menu.depthCpu);
                     }
@@ -1042,6 +1052,7 @@ void run(JNIEnv* env, jobject activity) {
                     callQuickConvert(env,activity);
                 } else if(page==vrui::Page::Open && hovered==10) {
                     menu.brushMode=!menu.brushMode;
+                    if(menu.brushMode)menu.selectionMode=false;
                 } else if(page==vrui::Page::Open && hovered==6 && menu.hasPhoto()) {
                     menu.stereoEnabled=!menu.stereoEnabled;
                 } else if(page==vrui::Page::Open && hovered==7 && menu.hasPhoto()) {
