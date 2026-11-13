@@ -244,7 +244,10 @@ struct Renderer {
                 label(v,"IMPORT IMAGE",330,232,3,white);
                 box(v,645,36,209,52,hovered==5?purpleHover:button);
                 label(v,"RESET VIEW",665,51,2,white);
-                if(hasPhoto()) label(v,"STICK UP DOWN TO ZOOM",190,56,2,muted);
+                if(hasPhoto()) {
+                    label(v,"STICK UP DOWN TO ZOOM",190,56,2,muted);
+                    label(v,"BOTH GRIPS RESIZE ROTATE",204,304,2,muted);
+                }
             } else {
                 label(v,"COMING SOON",320,385,4,muted);
                 label(v,"VR NAVIGATION TEST",272,318,3,muted);
