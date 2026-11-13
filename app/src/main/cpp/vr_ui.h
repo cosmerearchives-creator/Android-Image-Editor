@@ -87,12 +87,33 @@ inline int buttonAt(Page page,float x,float y) {
     } else if (page==Page::Open) {
         if(y>=92&&y<=190) return 3;
         if(y>=205&&y<=291) return 4;
+        if(y>=36&&y<=88) return 5;
     } else if(y>=92&&y<=190) return 3;
     return -1;
 }
 struct Renderer {
     GLuint program=0,vao=0,vbo=0,photoProgram=0,photoTexture=0,photoVao=0,photoVbo=0;
     int photoWidth=0,photoHeight=0;
+    float zoom=1.f, centerU=0.5f, centerV=0.5f;
+    void resetPhotoView(){zoom=1.f;centerU=0.5f;centerV=0.5f;}
+    void changeZoom(float delta,float cursorX,float cursorY,bool pointer){
+        if(!hasPhoto() || std::abs(delta)<0.001f)return;
+        const float next=std::clamp(zoom*std::exp(delta),1.f,12.f);
+        if(std::abs(next-zoom)<0.00001f)return;
+        float w=704.f,h=300.f;
+        const float ratio=float(photoWidth)/float(photoHeight);
+        if(ratio>w/h)h=w/ratio;else w=h*ratio;
+        const float x=512.f-w/2.f,y=450.f-h/2.f;
+        const float px=pointer?std::clamp((cursorX-x)/w,0.f,1.f):0.5f;
+        const float py=pointer?std::clamp((cursorY-y)/h,0.f,1.f):0.5f;
+        // Hold the content under the aim cursor fixed while zooming.
+        centerU+= (px-0.5f)*(1.f/zoom-1.f/next);
+        centerV+= (py-0.5f)*(1.f/zoom-1.f/next);
+        zoom=next;
+        const float edge=0.5f/zoom;
+        centerU=std::clamp(centerU,edge,1.f-edge);
+        centerV=std::clamp(centerV,edge,1.f-edge);
+    }
     bool hasPhoto() const {return photoTexture!=0;}
     static GLuint shader(GLenum type,const char* source) {
         GLuint s=glCreateShader(type);glShaderSource(s,1,&source,nullptr);
@@ -172,6 +193,7 @@ struct Renderer {
         glTexImage2D(GL_TEXTURE_2D,0,GL_RGBA8,width,height,0,GL_RGBA,GL_UNSIGNED_BYTE,rgba.data());
         glBindTexture(GL_TEXTURE_2D,0);
         photoWidth=width;photoHeight=height;
+        resetPhotoView();
     }
     void drawPhoto(){
         if(!photoTexture || !photoProgram)return;
@@ -181,9 +203,12 @@ struct Renderer {
         if(ratio > w/h) h=w/ratio; else w=h*ratio;
         const float x=512.f-w/2.f,y=450.f-h/2.f;
         // Explicit normalized texture coordinates preserve source orientation.
+        const float half=0.5f/zoom;
+        const float u0=centerU-half,u1=centerU+half;
+        const float v0=centerV-half,v1=centerV+half;
         const float vertices[]={
-            x,y,0.f,1.f, x+w,y,1.f,1.f, x,y+h,0.f,0.f,
-            x+w,y,1.f,1.f, x+w,y+h,1.f,0.f, x,y+h,0.f,0.f
+            x,y,u0,v1, x+w,y,u1,v1, x,y+h,u0,v0,
+            x+w,y,u1,v1, x+w,y+h,u1,v0, x,y+h,u0,v0
         };
         glUseProgram(photoProgram);
         glBindTexture(GL_TEXTURE_2D,photoTexture);
@@ -217,6 +242,9 @@ struct Renderer {
                 if(!hasPhoto()) label(v,"NO IMAGE IMPORTED",235,411,4,muted);
                 box(v,170,205,684,86,hovered==4?purpleHover:button);
                 label(v,"IMPORT IMAGE",330,232,3,white);
+                box(v,645,36,209,52,hovered==5?purpleHover:button);
+                label(v,"RESET VIEW",665,51,2,white);
+                if(hasPhoto()) label(v,"STICK UP DOWN TO ZOOM",190,56,2,muted);
             } else {
                 label(v,"COMING SOON",320,385,4,muted);
                 label(v,"VR NAVIGATION TEST",272,318,3,muted);
