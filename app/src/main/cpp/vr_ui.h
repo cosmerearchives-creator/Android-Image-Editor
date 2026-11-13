@@ -85,7 +85,12 @@ inline int buttonAt(Page page,float x,float y) {
         if(y>=444&&y<=540)return 0;
         if(y>=315&&y<=411)return 1;
         if(y>=186&&y<=282)return 2;
+        if(y>=58&&y<=154)return 11;
     } else if (page==Page::Open) {
+        if(y>=665&&y<=715) {
+            if(x>=645&&x<=746)return 12;
+            if(x>=754)return 13;
+        }
         if(y>=92&&y<=190) return 3;
         if(y>=205&&y<=291) {
             if(x<=333)return 4;
@@ -109,6 +114,57 @@ struct Renderer {
     bool brushMode=false;
     bool painting=false;
     bool paintingLeft=false;
+    // Stroke-wise history; cap memory (~1 MiB each stack at 16 snapshots).
+    std::vector<std::vector<uint8_t>> undoHistory,redoHistory;
+    std::vector<uint8_t> strokeBefore;
+    bool strokeActive=false;
+    bool canUndo() const {return !undoHistory.empty();}
+    bool canRedo() const {return !redoHistory.empty();}
+    void beginStroke() {
+        if(strokeActive||!hasDepthPixels())return;
+        strokeBefore=depthCpu;
+        strokeActive=true;
+    }
+    bool finishStroke() {
+        if(!strokeActive)return false;
+        strokeActive=false;
+        bool modified=strokeBefore!=depthCpu;
+        if(modified) {
+            if(undoHistory.size()>=16)undoHistory.erase(undoHistory.begin());
+            undoHistory.push_back(std::move(strokeBefore));
+            redoHistory.clear();
+        }
+        strokeBefore.clear();
+        return modified;
+    }
+    void restoreGpuDepth() {
+        if(!hasDepthPixels()||!depthTexture)return;
+        glActiveTexture(GL_TEXTURE1);
+        glBindTexture(GL_TEXTURE_2D,depthTexture);
+        glPixelStorei(GL_UNPACK_ALIGNMENT,1);
+        glTexSubImage2D(GL_TEXTURE_2D,0,0,0,256,256,GL_RED,
+                        GL_UNSIGNED_BYTE,depthCpu.data());
+        glBindTexture(GL_TEXTURE_2D,0);
+        glActiveTexture(GL_TEXTURE0);
+    }
+    bool undoDepth() {
+        if(strokeActive||undoHistory.empty()||!hasDepthPixels())return false;
+        if(redoHistory.size()>=16)redoHistory.erase(redoHistory.begin());
+        redoHistory.push_back(depthCpu);
+        depthCpu=std::move(undoHistory.back());
+        undoHistory.pop_back();
+        restoreGpuDepth();
+        return true;
+    }
+    bool redoDepth() {
+        if(strokeActive||redoHistory.empty()||!hasDepthPixels())return false;
+        if(undoHistory.size()>=16)undoHistory.erase(undoHistory.begin());
+        undoHistory.push_back(depthCpu);
+        depthCpu=std::move(redoHistory.back());
+        redoHistory.pop_back();
+        restoreGpuDepth();
+        return true;
+    }
     float brushRadius=13.f; // pixels of 256x256 depth image
     std::vector<uint8_t> depthCpu;
     bool hasDepthPixels() const {return depthCpu.size()==256u*256u;}
@@ -158,6 +214,8 @@ struct Renderer {
         if(depthTexture)glDeleteTextures(1,&depthTexture);
         depthTexture=0;
         depthCpu.clear();
+        undoHistory.clear();redoHistory.clear();strokeBefore.clear();
+        strokeActive=false;
     }
     void uploadQuickDepth(const std::vector<uint8_t>& gray,int width,int height){
         clearQuickDepth();
@@ -177,6 +235,9 @@ struct Renderer {
     }
     int photoWidth=0,photoHeight=0;
     bool stereoEnabled=false;
+    // 0 idle, 1 checking, 2 downloading, 3 up-to-date,
+    // 4 installer opened, 5 error, 6 permission required.
+    int updateState=0,updatePercent=0;
     int depthLevel=1;
     float depthStrength() const {
         return stereoEnabled ? (depthLevel==0?0.45f:(depthLevel==1?0.8f:1.2f)) : 0.f;
@@ -357,13 +418,30 @@ struct Renderer {
                 int length=static_cast<int>(std::strlen(names[i]));
                 label(v,names[i],512-length*9,ys[i]+30,3,white);
             }
-            label(v,"SELECT WITH RIGHT TRIGGER",230,114,3,muted);
+            box(v,170,58,684,96,hovered==11?purpleHover:button);
+            label(v,"CHECK FOR UPDATES",290,90,3,white);
+            switch(updateState) {
+                case 1:label(v,"CHECKING",715,168,2,muted);break;
+                case 2: {
+                    const std::string status="DOWNLOAD "+std::to_string(updatePercent)+"%";
+                    label(v,status.c_str(),695,168,2,muted);break;
+                }
+                case 3:label(v,"UP TO DATE",695,168,2,muted);break;
+                case 4:label(v,"INSTALLER OPEN",650,168,2,muted);break;
+                case 5:label(v,"UPDATE FAILED",665,168,2,muted);break;
+                case 6:label(v,"ALLOW INSTALL",670,168,2,muted);break;
+                default:break;
+            }
         } else {
             const char* title=page==Page::Open?"OPEN IMAGE":
                 page==Page::Projects?"MY PROJECTS":"VIEW GALLERY";
             int n=static_cast<int>(std::strlen(title));
             label(v,title,512-n*15,page==Page::Open?615:475,5,white);
             if(page==Page::Open) {
+                box(v,645,665,101,50,hovered==12&&canUndo()?purpleHover:button);
+                label(v,"UNDO",658,678,2,canUndo()?white:muted);
+                box(v,754,665,100,50,hovered==13&&canRedo()?purpleHover:button);
+                label(v,"REDO",765,678,2,canRedo()?white:muted);
                 if(brushMode && hasDepthPixels()) {
                     label(v,"L PUSH R PULL",702,630,2,muted);
                     const std::string brushText="SIZE "+std::to_string(int(brushRadius));
