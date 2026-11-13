@@ -32,6 +32,22 @@ public final class VrActivity extends Activity {
     private native void notifyDepthChanged();
     private native void notifyProjectListChanged();
 
+    /** Persist the floating controls separately from individual projects. */
+    @SuppressWarnings("unused")
+    public float[] loadFloatingPanelPose(){
+        android.content.SharedPreferences pref=getSharedPreferences("vr_layout",MODE_PRIVATE);
+        return new float[]{
+            pref.getFloat("x",3.4f),pref.getFloat("y",0f),
+            pref.getFloat("z",-1.7f),pref.getFloat("scale",1f)};
+    }
+    @SuppressWarnings("unused")
+    public void saveFloatingPanelPose(float x,float y,float z,float scale){
+        getSharedPreferences("vr_layout",MODE_PRIVATE).edit()
+            .putFloat("x",x).putFloat("y",y).putFloat("z",z)
+            .putFloat("scale",scale).apply();
+    }
+
+
     /** Used by the VR Projects library. */
     @SuppressWarnings("unused")
     public String[] listLocalProjects(){
