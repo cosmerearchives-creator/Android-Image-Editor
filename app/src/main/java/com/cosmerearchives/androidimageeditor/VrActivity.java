@@ -409,7 +409,7 @@ public final class VrActivity extends Activity {
                 notifyProjectListChanged();
                 notifyImageChanged();
                 runOnUiThread(() -> Toast.makeText(this, "Image ready in VR", Toast.LENGTH_SHORT).show());
-            } catch (IOException | RuntimeException error) {
+            } catch (Exception error) {
                 Log.e(TAG, "Image import failed", error);
                 runOnUiThread(() -> Toast.makeText(this, "Image import failed: " + error.getMessage(),
                         Toast.LENGTH_LONG).show());
