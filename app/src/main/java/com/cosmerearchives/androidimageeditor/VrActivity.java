@@ -3,6 +3,14 @@ package com.cosmerearchives.androidimageeditor;
 import android.app.Activity;
 import android.content.Intent;
 import android.net.Uri;
+import android.content.pm.PackageInfo;
+import android.content.pm.PackageManager;
+import android.provider.Settings;
+import androidx.core.content.FileProvider;
+import java.io.File;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.atomic.AtomicBoolean;
 import android.os.Bundle;
 import android.util.Log;
 import android.widget.Toast;
@@ -12,6 +20,7 @@ import java.io.IOException;
 public final class VrActivity extends Activity {
     private static final String TAG = "ImageEditorXR";
     private static final int PICK_IMAGE = 7;
+    private static final int INSTALL_PERMISSION = 8;
     static { System.loadLibrary("image_editor_xr"); }
     private Thread xrThread;
     private volatile boolean resumed;
@@ -21,6 +30,76 @@ public final class VrActivity extends Activity {
     private native void requestNativeStop();
     private native void notifyImageChanged();
     private native void notifyDepthChanged();
+    private native void reportVrUpdateStatus(int state,int percent);
+    private final ExecutorService updateWorker=Executors.newSingleThreadExecutor();
+    private final AtomicBoolean updateRunning=new AtomicBoolean(false);
+    private File pendingUpdate;
+
+    /** Run the original signed GitHub updater directly from the immersive home menu. */
+    @SuppressWarnings("unused")
+    public void requestVrUpdateCheck() {
+        if(!updateRunning.compareAndSet(false,true))return;
+        reportVrUpdateStatus(1,0);
+        updateWorker.execute(() -> {
+            try {
+                PackageInfo installed=getPackageManager().getPackageInfo(getPackageName(),
+                        PackageManager.GET_SIGNING_CERTIFICATES);
+                ReleaseUpdater updater=new ReleaseUpdater(getApplicationContext(),installed);
+                File apk=updater.downloadUpdate(message -> {
+                    // Only expose coarse progress to VR; network and signature checks
+                    // stay in the existing, tested ReleaseUpdater implementation.
+                    int percent=0;
+                    int end=message.lastIndexOf('%');
+                    if(end>=0) {
+                        int start=end-1;
+                        while(start>=0 && Character.isDigit(message.charAt(start))) start--;
+                        try {percent=Integer.parseInt(message.substring(start+1,end));}
+                        catch(NumberFormatException ignored){}
+                    }
+                    if(message.startsWith("Downloading"))reportVrUpdateStatus(2,percent);
+                    else reportVrUpdateStatus(1,0);
+                });
+                runOnUiThread(() -> {
+                    if(isFinishing()||isDestroyed())return;
+                    if(apk==null)reportVrUpdateStatus(3,100);
+                    else {
+                        pendingUpdate=apk;
+                        openVerifiedInstaller();
+                    }
+                });
+            } catch(Exception error) {
+                Log.e(TAG,"VR update check failed",error);
+                reportVrUpdateStatus(5,0);
+                runOnUiThread(() -> Toast.makeText(this,
+                        "Update check failed: "+error.getMessage(),Toast.LENGTH_LONG).show());
+            } finally {
+                updateRunning.set(false);
+            }
+        });
+    }
+
+    private void openVerifiedInstaller() {
+        if(pendingUpdate==null)return;
+        try {
+            if(!getPackageManager().canRequestPackageInstalls()) {
+                reportVrUpdateStatus(6,0);
+                Intent settings=new Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                        Uri.parse("package:"+getPackageName()));
+                startActivityForResult(settings,INSTALL_PERMISSION);
+                return;
+            }
+            Uri uri=FileProvider.getUriForFile(this,getPackageName()+".updates",pendingUpdate);
+            Intent installer=new Intent(Intent.ACTION_VIEW)
+                    .setDataAndType(uri,"application/vnd.android.package-archive")
+                    .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            reportVrUpdateStatus(4,100);
+            startActivity(installer);
+        } catch(RuntimeException error) {
+            Log.e(TAG,"Unable to launch verified installer",error);
+            reportVrUpdateStatus(5,0);
+            Toast.makeText(this,"Could not open installer",Toast.LENGTH_LONG).show();
+        }
+    }
     // Serialize brush snapshots so an earlier stroke cannot overwrite a newer one.
     private final java.util.concurrent.ExecutorService depthSaver =
         java.util.concurrent.Executors.newSingleThreadExecutor();
@@ -114,6 +193,7 @@ public final class VrActivity extends Activity {
         resumed = false;
         requestNativeStop();
         if(xrThread==null)depthSaver.shutdown();
+        updateWorker.shutdownNow();
         super.onDestroy();
     }
 
@@ -134,6 +214,11 @@ public final class VrActivity extends Activity {
 
     @Override protected void onActivityResult(int request, int result, Intent data) {
         super.onActivityResult(request, result, data);
+        if(request==INSTALL_PERMISSION){
+            if(getPackageManager().canRequestPackageInstalls())openVerifiedInstaller();
+            else reportVrUpdateStatus(6,0);
+            return;
+        }
         if (request != PICK_IMAGE || result != RESULT_OK || data == null || data.getData() == null)
             return;
         final Uri selected = data.getData();
