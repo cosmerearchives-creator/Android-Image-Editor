@@ -21,6 +21,26 @@ public final class VrActivity extends Activity {
     private native void requestNativeStop();
     private native void notifyImageChanged();
     private native void notifyDepthChanged();
+    // Serialize brush snapshots so an earlier stroke cannot overwrite a newer one.
+    private final java.util.concurrent.ExecutorService depthSaver =
+        java.util.concurrent.Executors.newSingleThreadExecutor();
+
+    /** Called from XR at the end of a brush stroke. Copies bytes before returning. */
+    @SuppressWarnings("unused")
+    public void saveEditedDepth(byte[] gray) {
+        if(gray==null || gray.length!=256*256)return;
+        final byte[] snapshot=gray.clone();
+        depthSaver.execute(() -> {
+            try {
+                QuickDepth.saveEdited(getApplicationContext(),snapshot);
+            } catch (IOException | RuntimeException e) {
+                Log.e(TAG,"Saving corrected depth failed",e);
+                runOnUiThread(() -> Toast.makeText(this,
+                        "Could not save depth corrections", Toast.LENGTH_LONG).show());
+            }
+        });
+    }
+
     private final java.util.concurrent.atomic.AtomicBoolean converting =
         new java.util.concurrent.atomic.AtomicBoolean(false);
 
@@ -82,6 +102,7 @@ public final class VrActivity extends Activity {
     @Override protected void onDestroy() {
         resumed = false;
         requestNativeStop();
+        depthSaver.shutdown();
         super.onDestroy();
     }
 
