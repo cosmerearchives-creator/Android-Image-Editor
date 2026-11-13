@@ -114,6 +114,46 @@ struct Renderer {
     bool brushMode=false;
     bool painting=false;
     bool paintingLeft=false;
+    bool paintingRight=false;
+    bool brushSoft=true;
+    bool edgeAware=true;
+    float brushStrength=1.0f;
+    float disparityStrength=0.8f;
+    std::vector<float> photoLuminance;
+    static bool onTools(float x,float y,bool immersive){
+        // Toolbar hit areas are excluded from depth painting.
+        if(immersive) return (y>=682 && y<=765)||(y>=0 && y<=98);
+        return (y>=665 && y<=765)||(y<=300)||(y>=615);
+    }
+    int toolbarAt(float x,float y,bool immersive) const {
+        if(immersive) {
+            if(y>=689&&y<=755){
+                if(x>=20&&x<=142)return 20; // 2D/3D
+                if(x>=155&&x<=330)return 21; // brush on/off
+                if(x>=345&&x<=498)return 22; // hard/soft
+                if(x>=510&&x<=650)return 23; // edge
+                if(x>=670&&x<=790)return 24; // undo
+                if(x>=802&&x<=925)return 25; // redo
+            }
+            if(y>=18&&y<=91){
+                if(x>=30&&x<=485)return 26; // depth slider
+                if(x>=520&&x<=990)return 27; // brush strength slider
+            }
+        } else if(y>=335&&y<=405){
+            if(x>=180&&x<=495)return 26;
+            if(x>=510&&x<=845)return 27;
+        }
+        return -1;
+    }
+    void slideAt(int target,float x,bool immersive) {
+        if(target==26){
+            const float lo=immersive?30.f:180.f,hi=immersive?485.f:495.f;
+            disparityStrength=std::clamp((x-lo)/(hi-lo)*2.f,0.f,2.f);
+        } else if(target==27) {
+            const float lo=immersive?520.f:510.f,hi=immersive?990.f:845.f;
+            brushStrength=std::clamp(0.1f+(x-lo)/(hi-lo)*2.9f,0.1f,3.f);
+        }
+    }
     // Stroke-wise history; cap memory (~1 MiB each stack at 16 snapshots).
     std::vector<std::vector<uint8_t>> undoHistory,redoHistory;
     std::vector<uint8_t> strokeBefore;
@@ -179,10 +219,10 @@ struct Renderer {
         v=centerV+(.5f-(sy-y)/h)/zoom;
         return u>=0.f&&u<=1.f&&v>=0.f&&v<=1.f;
     }
-    bool brushAt(float sx,float sy,bool pullTowardViewer) {
+    bool brushAt(float sx,float sy,bool pullTowardViewer,bool immersive=false) {
         if(!brushMode||!hasDepthPixels())return false;
         float u=0.f,v=0.f;
-        if(!hitPhoto(sx,sy,false,u,v))return false;
+        if(!hitPhoto(sx,sy,immersive,u,v))return false;
         const float cx=u*255.f,cy=(1.f-v)*255.f;
         const int radius=static_cast<int>(std::ceil(brushRadius));
         const int xa=std::max(0,static_cast<int>(cx)-radius),
@@ -193,9 +233,17 @@ struct Renderer {
         for(int y=ya;y<=yb;++y)for(int x=xa;x<=xb;++x){
             const float dist=std::hypot(float(x)-cx,float(y)-cy);
             if(dist>brushRadius)continue;
-            const float falloff=std::pow(std::max(0.f,1.f-dist/brushRadius),1.2f);
+            const float falloff=brushSoft
+                ?std::pow(std::max(0.f,1.f-dist/brushRadius),1.2f):1.f;
             const size_t i=size_t(y)*256u+size_t(x);
-            const int delta=std::max(1,static_cast<int>(std::lround(8.f*falloff)));
+            // Optional protection against painting across visible photo edges.
+            const float edgePenalty=(edgeAware && photoLuminance.size()==256u*256u)
+                ?std::exp(-std::abs(photoLuminance[i]-photoLuminance[
+                    size_t(std::clamp(int(cy),0,255))*256u+
+                    size_t(std::clamp(int(cx),0,255))])*10.f):1.f;
+            const int delta=std::max(0,static_cast<int>(std::lround(
+                8.f*brushStrength*falloff*edgePenalty)));
+            if(!delta)continue;
             const int value=std::clamp(int(depthCpu[i])+(pullTowardViewer?delta:-delta),0,255);
             if(value!=int(depthCpu[i])){depthCpu[i]=static_cast<uint8_t>(value);edited=true;}
         }
@@ -238,9 +286,9 @@ struct Renderer {
     // 0 idle, 1 checking, 2 downloading, 3 up-to-date,
     // 4 installer opened, 5 error, 6 permission required.
     int updateState=0,updatePercent=0;
-    int depthLevel=1;
+    int depthLevel=1; // Legacy preset remains for compatibility with old controls.
     float depthStrength() const {
-        return stereoEnabled ? (depthLevel==0?0.45f:(depthLevel==1?0.8f:1.2f)) : 0.f;
+        return stereoEnabled ? disparityStrength : 0.f;
     }
     float zoom=1.f, centerU=0.5f, centerV=0.5f;
     void resetPhotoView(){zoom=1.f;centerU=0.5f;centerV=0.5f;}
@@ -362,6 +410,15 @@ struct Renderer {
         glTexImage2D(GL_TEXTURE_2D,0,GL_RGBA8,width,height,0,GL_RGBA,GL_UNSIGNED_BYTE,rgba.data());
         glBindTexture(GL_TEXTURE_2D,0);
         photoWidth=width;photoHeight=height;
+        // Cached at depth-map resolution; used only for brush edge guidance.
+        photoLuminance.resize(256u*256u);
+        for(int y=0;y<256;++y)for(int x=0;x<256;++x) {
+            const int sx=std::min(width-1,x*width/256);
+            const int sy=std::min(height-1,y*height/256);
+            const size_t offset=(size_t(sy)*width+sx)*4;
+            photoLuminance[size_t(y)*256+x]=
+                (0.2126f*rgba[offset]+0.7152f*rgba[offset+1]+0.0722f*rgba[offset+2])/255.f;
+        }
         resetPhotoView();
     }
     void drawPhoto(float eyeSign,bool immersive=false){
