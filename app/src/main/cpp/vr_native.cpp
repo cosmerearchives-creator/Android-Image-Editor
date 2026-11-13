@@ -16,6 +16,44 @@ namespace {
 std::atomic<bool> stopRequested{false};
 std::atomic<bool> imageNeedsReload{true};
 std::atomic<bool> depthNeedsReload{true};
+std::atomic<bool> projectsNeedReload{true};
+void callSaveProject(JNIEnv* env,jobject activity,bool asNew){
+    jclass cls=env->GetObjectClass(activity);
+    jmethodID method=env->GetMethodID(cls,"requestSaveProject","(Z)V");
+    if(method)env->CallVoidMethod(activity,method,static_cast<jboolean>(asNew));
+    if(env->ExceptionCheck()){env->ExceptionDescribe();env->ExceptionClear();}
+    env->DeleteLocalRef(cls);
+}
+void callOpenProject(JNIEnv* env,jobject activity,int index){
+    jclass cls=env->GetObjectClass(activity);
+    jmethodID method=env->GetMethodID(cls,"requestOpenProject","(I)V");
+    if(method)env->CallVoidMethod(activity,method,static_cast<jint>(index));
+    if(env->ExceptionCheck()){env->ExceptionDescribe();env->ExceptionClear();}
+    env->DeleteLocalRef(cls);
+}
+void refreshProjectList(JNIEnv* env,jobject activity,vrui::Renderer& menu){
+    jclass cls=env->GetObjectClass(activity);
+    jmethodID method=env->GetMethodID(cls,"listLocalProjects","()[Ljava/lang/String;");
+    if(method){
+        jobjectArray list=static_cast<jobjectArray>(env->CallObjectMethod(activity,method));
+        if(list){
+            std::vector<std::string> titles;
+            const jsize count=std::min(100,env->GetArrayLength(list));
+            for(jsize i=0;i<count;i++){
+                jstring item=static_cast<jstring>(env->GetObjectArrayElement(list,i));
+                if(!item)continue;
+                const char* chars=env->GetStringUTFChars(item,nullptr);
+                if(chars){titles.emplace_back(chars);env->ReleaseStringUTFChars(item,chars);}
+                env->DeleteLocalRef(item);
+            }
+            menu.setProjects(std::move(titles));
+            env->DeleteLocalRef(list);
+        }
+    }
+    if(env->ExceptionCheck()){env->ExceptionDescribe();env->ExceptionClear();}
+    env->DeleteLocalRef(cls);
+}
+
 std::atomic<int> vrUpdateState{0};
 std::atomic<int> vrUpdatePercent{0};
 void requestUpdateFromVr(JNIEnv* env,jobject activity) {
@@ -428,6 +466,8 @@ void run(JNIEnv* env, jobject activity) {
     float leftPointerX=0.f,leftPointerY=0.f;
     bool leftPointer=false;
     bool wasA=false,wasB=false;
+    float lastLeftStrokeX=0.f,lastLeftStrokeY=0.f,lastRightStrokeX=0.f,lastRightStrokeY=0.f;
+    bool leftStrokeActive=false,rightStrokeActive=false;
     int activeSlider=-1;
     XrVector3f toolPosition{3.4f,0.f,-1.7f};
     XrVector3f toolDragHand{},toolDragStart{};
@@ -745,9 +785,30 @@ void run(JNIEnv* env, jobject activity) {
             menu.paintingRight=paintRight;
             if(menu.painting && !wasPainting)menu.beginStroke();
             bool painted=false;
-            if(canPaint){
-                if(paintLeft)painted|=menu.brushAt(leftPointerX,leftPointerY,false,immersive);
-                if(paintRight)painted|=menu.brushAt(pointerX,pointerY,true,immersive);
+            if(canPaint) {
+                // Interpolate between tracked hand positions, preventing dotted or
+                // jagged gaps during fast controller motion.
+                auto stroke=[&](bool active,bool& previous,float& lastX,float& lastY,
+                                float x,float y,bool pull){
+                    if(!active){previous=false;return false;}
+                    if(!previous){lastX=x;lastY=y;previous=true;}
+                    const float dx=x-lastX,dy=y-lastY;
+                    const float distance=std::hypot(dx,dy);
+                    const int count=std::clamp(int(std::ceil(distance/7.f)),1,18);
+                    bool changed=false;
+                    for(int n=1;n<=count;n++){
+                        const float t=float(n)/float(count);
+                        changed|=menu.brushAt(lastX+dx*t,lastY+dy*t,pull,immersive);
+                    }
+                    lastX=x;lastY=y;
+                    return changed;
+                };
+                painted|=stroke(paintLeft,leftStrokeActive,lastLeftStrokeX,lastLeftStrokeY,
+                                leftPointerX,leftPointerY,false);
+                painted|=stroke(paintRight,rightStrokeActive,lastRightStrokeX,lastRightStrokeY,
+                                pointerX,pointerY,true);
+            }else{
+                leftStrokeActive=false;rightStrokeActive=false;
             }
             strokeEdited|=painted;
             if(wasPainting && !menu.painting) {
@@ -787,7 +848,9 @@ void run(JNIEnv* env, jobject activity) {
             const bool sliderAim=immersive?toolPointer:pointer;
             const float sliderX=immersive?toolPointerX:pointerX;
             if(!dragging && !toolDragging && sliderAim && triggerDown && !wasPressed &&
-               (overlayHover==26 || overlayHover==27 || overlayHover==29))
+               (overlayHover==26 || overlayHover==27 || overlayHover==29 ||
+                overlayHover==30 || overlayHover==31 || overlayHover==32 ||
+                overlayHover==33))
                 activeSlider=overlayHover;
             if(!triggerDown)activeSlider=-1;
             if(activeSlider>=0 && sliderAim && !dragging && !toolDragging)
@@ -805,6 +868,23 @@ void run(JNIEnv* env, jobject activity) {
             } else if(triggerDown&&!wasPressed && !dragging && activeSlider<0 &&
                        page!=vrui::Page::Immersive && hovered>=0 && overlayHover<0) {
                 if(hovered==3) page=vrui::Page::Home;
+                else if(page==vrui::Page::Open && (hovered==14 || hovered==15) && menu.hasPhoto()) {
+                    if(menu.strokeActive && menu.hasDepthPixels()){
+                        if(menu.finishStroke())saveEditedDepth(env,activity,menu.depthCpu);
+                    }
+                    callSaveProject(env,activity,hovered==15);
+                } else if(page==vrui::Page::Projects && hovered>=40 && hovered<=43) {
+                    const int projectIndex=menu.projectPage*4+hovered-40;
+                    if(projectIndex<int(menu.projectNames.size())){
+                        callOpenProject(env,activity,projectIndex);
+                        page=vrui::Page::Open;
+                    }
+                } else if(page==vrui::Page::Projects && hovered==46) {
+                    menu.projectPage=std::max(0,menu.projectPage-1);
+                } else if(page==vrui::Page::Projects && hovered==47) {
+                    const int pages=std::max(1,int((menu.projectNames.size()+3)/4));
+                    menu.projectPage=std::min(pages-1,menu.projectPage+1);
+                }
                 else if(page==vrui::Page::Home && hovered==11) {
                     requestUpdateFromVr(env,activity);
                 } else if(page==vrui::Page::Open && hovered==12) {
@@ -869,6 +949,7 @@ void run(JNIEnv* env, jobject activity) {
                                    images[index].image, 0);
             menu.updateState=vrUpdateState.load();
             menu.updatePercent=vrUpdatePercent.load();
+            if(projectsNeedReload.exchange(false))refreshProjectList(env,activity,menu);
             if(imageNeedsReload.exchange(false)) {
                 refreshImage(env,activity,menu);
                 menu.brushMode=false;
@@ -983,4 +1064,9 @@ Java_com_cosmerearchives_androidimageeditor_VrActivity_reportVrUpdateStatus(
         JNIEnv*,jobject,jint state,jint percent) {
     vrUpdateState.store(static_cast<int>(state));
     vrUpdatePercent.store(std::max(0,std::min(100,static_cast<int>(percent))));
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_cosmerearchives_androidimageeditor_VrActivity_notifyProjectListChanged(JNIEnv*,jobject){
+    projectsNeedReload.store(true);
 }
