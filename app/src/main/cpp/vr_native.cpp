@@ -16,6 +16,15 @@ namespace {
 std::atomic<bool> stopRequested{false};
 std::atomic<bool> imageNeedsReload{true};
 std::atomic<bool> depthNeedsReload{true};
+std::atomic<int> vrUpdateState{0};
+std::atomic<int> vrUpdatePercent{0};
+void requestUpdateFromVr(JNIEnv* env,jobject activity) {
+    jclass cls=env->GetObjectClass(activity);
+    jmethodID method=env->GetMethodID(cls,"requestVrUpdateCheck","()V");
+    if(method)env->CallVoidMethod(activity,method);
+    if(env->ExceptionCheck()){env->ExceptionDescribe();env->ExceptionClear();}
+    env->DeleteLocalRef(cls);
+}
 void saveEditedDepth(JNIEnv* env,jobject activity,const std::vector<uint8_t>& gray) {
     if(gray.size()!=256u*256u)return;
     jclass cls=env->GetObjectClass(activity);
@@ -645,14 +654,18 @@ void run(JNIEnv* env, jobject activity) {
             const bool paintRight=canPaint && pullDown && pointer;
             menu.painting=paintLeft||paintRight;
             menu.paintingLeft=paintLeft;
+            if(menu.painting && !wasPainting)menu.beginStroke();
             bool painted=false;
             if(canPaint){
                 if(paintLeft)painted|=menu.brushAt(leftPointerX,leftPointerY,false);
                 if(paintRight)painted|=menu.brushAt(pointerX,pointerY,true);
             }
             strokeEdited|=painted;
-            if(wasPainting && !menu.painting && strokeEdited) {
-                saveEditedDepth(env,activity,menu.depthCpu);
+            if(wasPainting && !menu.painting) {
+                const bool changed=menu.finishStroke();
+                if(changed && menu.hasDepthPixels()) {
+                    saveEditedDepth(env,activity,menu.depthCpu);
+                }
                 strokeEdited=false;
             }
             wasPainting=menu.painting;
@@ -678,6 +691,13 @@ void run(JNIEnv* env, jobject activity) {
                 }
             } else if(triggerDown&&!wasPressed && hovered>=0) {
                 if(hovered==3) page=vrui::Page::Home;
+                else if(page==vrui::Page::Home && hovered==11) {
+                    requestUpdateFromVr(env,activity);
+                } else if(page==vrui::Page::Open && hovered==12) {
+                    if(menu.undoDepth())saveEditedDepth(env,activity,menu.depthCpu);
+                } else if(page==vrui::Page::Open && hovered==13) {
+                    if(menu.redoDepth())saveEditedDepth(env,activity,menu.depthCpu);
+                }
                 else if(page==vrui::Page::Open && hovered==8 && menu.hasPhoto()) {
                     // Preserve the editor layout while immersing; the photo starts
                     // unzoomed on a large, gaze-explorable world-anchored canvas.
@@ -731,6 +751,8 @@ void run(JNIEnv* env, jobject activity) {
             glBindFramebuffer(GL_FRAMEBUFFER, r.fbo);
             glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D,
                                    images[index].image, 0);
+            menu.updateState=vrUpdateState.load();
+            menu.updatePercent=vrUpdatePercent.load();
             if(imageNeedsReload.exchange(false)) {
                 refreshImage(env,activity,menu);
                 menu.brushMode=false;
@@ -779,7 +801,9 @@ void run(JNIEnv* env, jobject activity) {
         end.layers = layerCount ? layers : nullptr;
         check(xrEndFrame(r.session, &end), "xrEndFrame");
     }
-    if(strokeEdited && menu.hasDepthPixels())saveEditedDepth(env,activity,menu.depthCpu);
+    if(menu.strokeActive && menu.hasDepthPixels()) {
+        if(menu.finishStroke()) saveEditedDepth(env,activity,menu.depthCpu);
+    }
     if (running) xrRequestExitSession(r.session);
     log("OpenXR session stopped");
 }
@@ -808,4 +832,11 @@ Java_com_cosmerearchives_androidimageeditor_VrActivity_notifyImageChanged(JNIEnv
 extern "C" JNIEXPORT void JNICALL
 Java_com_cosmerearchives_androidimageeditor_VrActivity_notifyDepthChanged(JNIEnv*, jobject) {
     depthNeedsReload.store(true);
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_cosmerearchives_androidimageeditor_VrActivity_reportVrUpdateStatus(
+        JNIEnv*,jobject,jint state,jint percent) {
+    vrUpdateState.store(static_cast<int>(state));
+    vrUpdatePercent.store(std::max(0,std::min(100,static_cast<int>(percent))));
 }
