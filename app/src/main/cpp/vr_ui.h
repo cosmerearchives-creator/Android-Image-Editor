@@ -91,7 +91,7 @@ inline int buttonAt(Page page,float x,float y) {
     return -1;
 }
 struct Renderer {
-    GLuint program=0,vao=0,vbo=0,photoProgram=0,photoTexture=0;
+    GLuint program=0,vao=0,vbo=0,photoProgram=0,photoTexture=0,photoVao=0,photoVbo=0;
     int photoWidth=0,photoHeight=0;
     bool hasPhoto() const {return photoTexture!=0;}
     static GLuint shader(GLenum type,const char* source) {
@@ -145,7 +145,18 @@ struct Renderer {
         photoProgram=glCreateProgram();glAttachShader(photoProgram,pv);glAttachShader(photoProgram,pf);
         glLinkProgram(photoProgram);glDeleteShader(pv);glDeleteShader(pf);
         GLint ok=0;glGetProgramiv(photoProgram,GL_LINK_STATUS,&ok);
-        return ok!=0;
+        if(!ok)return false;
+        glGenVertexArrays(1,&photoVao);
+        glGenBuffers(1,&photoVbo);
+        glBindVertexArray(photoVao);
+        glBindBuffer(GL_ARRAY_BUFFER,photoVbo);
+        glEnableVertexAttribArray(0);
+        glVertexAttribPointer(0,2,GL_FLOAT,GL_FALSE,4*sizeof(float),nullptr);
+        glEnableVertexAttribArray(2);
+        glVertexAttribPointer(2,2,GL_FLOAT,GL_FALSE,4*sizeof(float),
+            reinterpret_cast<const void*>(2*sizeof(float)));
+        glBindVertexArray(0);
+        return true;
     }
     void uploadPhoto(const std::vector<uint8_t>& rgba,int width,int height){
         if(photoTexture){glDeleteTextures(1,&photoTexture);photoTexture=0;}
@@ -176,27 +187,18 @@ struct Renderer {
         };
         glUseProgram(photoProgram);
         glBindTexture(GL_TEXTURE_2D,photoTexture);
-        // A temporary attribute layout avoids changing the batched menu VBO.
-        GLuint buffer=0;glGenBuffers(1,&buffer);
-        glBindVertexArray(0);
-        glBindBuffer(GL_ARRAY_BUFFER,buffer);
-        glBufferData(GL_ARRAY_BUFFER,sizeof(vertices),vertices,GL_STREAM_DRAW);
-        glEnableVertexAttribArray(0);
-        glVertexAttribPointer(0,2,GL_FLOAT,GL_FALSE,4*sizeof(float),nullptr);
-        glEnableVertexAttribArray(2);
-        glVertexAttribPointer(2,2,GL_FLOAT,GL_FALSE,4*sizeof(float),
-            reinterpret_cast<const void*>(2*sizeof(float)));
+        glBindVertexArray(photoVao);
+        glBindBuffer(GL_ARRAY_BUFFER,photoVbo);
+        glBufferData(GL_ARRAY_BUFFER,sizeof(vertices),vertices,GL_DYNAMIC_DRAW);
         glDrawArrays(GL_TRIANGLES,0,6);
-        glDisableVertexAttribArray(0);
-        glDisableVertexAttribArray(2);
-        glDeleteBuffers(1,&buffer);
+        glBindVertexArray(0);
         glBindTexture(GL_TEXTURE_2D,0);
     }
     void draw(Page page,int hovered,float cursorX,float cursorY,bool pointer){
         std::vector<float> v;v.reserve(42000);
         box(v,42,48,940,674,panel);
         label(v,"ANDROID IMAGE EDITOR",172,645,5,white);
-        label(v,"QUEST 2 VR STUDIO",312,594,3,muted);
+        if(page==Page::Home)label(v,"QUEST 2 VR STUDIO",312,594,3,muted);
         if(page==Page::Home){
             const char* names[]={"OPEN IMAGE","MY PROJECTS","VIEW GALLERY"};
             const int ys[]={444,315,186};
@@ -245,6 +247,8 @@ struct Renderer {
     }
     ~Renderer(){if(photoTexture)glDeleteTextures(1,&photoTexture);
         if(photoProgram)glDeleteProgram(photoProgram);
+        if(photoVbo)glDeleteBuffers(1,&photoVbo);
+        if(photoVao)glDeleteVertexArrays(1,&photoVao);
         if(vbo)glDeleteBuffers(1,&vbo);if(vao)glDeleteVertexArrays(1,&vao);
         if(program)glDeleteProgram(program);}
 };
