@@ -20,6 +20,29 @@ public final class VrActivity extends Activity {
     private native void runNative();
     private native void requestNativeStop();
     private native void notifyImageChanged();
+    private native void notifyDepthChanged();
+    private final java.util.concurrent.atomic.AtomicBoolean converting =
+        new java.util.concurrent.atomic.AtomicBoolean(false);
+
+    /** Runs Quick Convert off the XR/UI threads and reloads the depth texture when done. */
+    @SuppressWarnings("unused")
+    public void requestQuickConvert() {
+        if(!converting.compareAndSet(false,true))return;
+        new Thread(() -> {
+            try {
+                QuickDepth.convert(getApplicationContext());
+                runOnUiThread(() -> Toast.makeText(this, "Quick depth map saved",
+                        Toast.LENGTH_SHORT).show());
+            } catch (IOException | RuntimeException e) {
+                Log.e(TAG, "Quick Convert failed", e);
+                runOnUiThread(() -> Toast.makeText(this,
+                        "Quick Convert failed: " + e.getMessage(), Toast.LENGTH_LONG).show());
+            } finally {
+                converting.set(false);
+                notifyDepthChanged();
+            }
+        }, "quick-convert").start();
+    }
 
     @Override public void onCreate(Bundle saved) {
         super.onCreate(saved);
