@@ -30,6 +30,73 @@ public final class VrActivity extends Activity {
     private native void requestNativeStop();
     private native void notifyImageChanged();
     private native void notifyDepthChanged();
+    private native void reportAiDepthStatus(int state,int progress);
+    private final java.util.concurrent.atomic.AtomicBoolean aiCancel =
+        new java.util.concurrent.atomic.AtomicBoolean(false);
+    private final java.util.concurrent.atomic.AtomicBoolean aiRunning =
+        new java.util.concurrent.atomic.AtomicBoolean(false);
+    private final java.util.concurrent.ExecutorService aiWorker =
+        java.util.concurrent.Executors.newSingleThreadExecutor();
+
+    /** Starts an optional ~27 MB verified model download, then fully local inference. */
+    @SuppressWarnings("unused")
+    public void requestAiDepthConvert() {
+        if(!aiRunning.compareAndSet(false,true))return;
+        aiCancel.set(false);
+        final long generation=depthGeneration.get();
+        reportAiDepthStatus(1,0);
+        aiWorker.execute(() -> {
+            try{
+                byte[] preview=AiDepth.infer(getApplicationContext(),aiCancel,
+                    progress -> reportAiDepthStatus(progress<55?1:2,progress));
+                if(aiCancel.get() || generation!=depthGeneration.get()){
+                    reportAiDepthStatus(5,0);
+                    return;
+                }
+                QuickDepth.saveCandidate(getApplicationContext(),preview);
+                reportAiDepthStatus(3,100);
+                notifyDepthChanged();
+                runOnUiThread(() -> Toast.makeText(this,
+                    "AI depth preview ready — apply or discard",Toast.LENGTH_LONG).show());
+            }catch(Exception error){
+                boolean canceled=aiCancel.get() || generation!=depthGeneration.get();
+                Log.w(TAG,"AI conversion stopped",error);
+                reportAiDepthStatus(canceled?5:4,0);
+                if(!canceled)runOnUiThread(() -> Toast.makeText(this,
+                    "AI conversion unavailable: "+error.getMessage(),
+                    Toast.LENGTH_LONG).show());
+            }finally{aiRunning.set(false);}
+        });
+    }
+    @SuppressWarnings("unused")
+    public void cancelAiDepthConvert(){
+        aiCancel.set(true);
+        if(!aiRunning.get()){
+            QuickDepth.discardCandidate(getApplicationContext());
+            reportAiDepthStatus(0,0);
+            notifyDepthChanged();
+        } else reportAiDepthStatus(5,0);
+    }
+    @SuppressWarnings("unused")
+    public void applyAiDepthPreview(){
+        if(aiRunning.get())return;
+        depthGeneration.incrementAndGet();
+        try{depthSaver.execute(() -> {
+            try{
+                if(QuickDepth.applyCandidate(getApplicationContext())){
+                    reportAiDepthStatus(0,0);
+                    notifyDepthChanged();
+                    runOnUiThread(() -> Toast.makeText(this,
+                        "AI depth applied",Toast.LENGTH_SHORT).show());
+                }
+            }catch(Exception error){
+                Log.e(TAG,"AI depth apply failed",error);
+                runOnUiThread(() -> Toast.makeText(this,
+                    "Couldn't apply AI preview",Toast.LENGTH_LONG).show());
+            }
+        });}catch(java.util.concurrent.RejectedExecutionException ignored){}
+    }
+
     private native void notifyProjectListChanged();
 
     /** Persist the floating controls separately from individual projects. */
@@ -72,9 +139,12 @@ public final class VrActivity extends Activity {
 
     @SuppressWarnings("unused")
     public void requestOpenProject(int index){
+        aiCancel.set(true);
         depthGeneration.incrementAndGet();
         try {depthSaver.execute(() -> {
             try {
+                QuickDepth.discardCandidate(getApplicationContext());
+                reportAiDepthStatus(0,0);
                 ProjectStore.open(getApplicationContext(),index);
                 notifyImageChanged();
                 notifyDepthChanged();
@@ -192,7 +262,10 @@ public final class VrActivity extends Activity {
     @SuppressWarnings("unused")
     public void requestQuickConvert() {
         if(!converting.compareAndSet(false,true))return;
+        aiCancel.set(true);
         depthGeneration.incrementAndGet();
+        QuickDepth.discardCandidate(getApplicationContext());
+        reportAiDepthStatus(0,0);
         new Thread(() -> {
             try {
                 QuickDepth.convert(getApplicationContext());
@@ -212,6 +285,7 @@ public final class VrActivity extends Activity {
     @Override public void onCreate(Bundle saved) {
         super.onCreate(saved);
         getWindow().getDecorView().setKeepScreenOn(true);
+        reportAiDepthStatus(QuickDepth.hasCandidate(getApplicationContext())?3:0,0);
     }
 
     private void startVrIfNeeded() {
@@ -250,6 +324,8 @@ public final class VrActivity extends Activity {
         requestNativeStop();
         if(xrThread==null)depthSaver.shutdown();
         updateWorker.shutdownNow();
+        aiCancel.set(true);
+        aiWorker.shutdownNow();
         super.onDestroy();
     }
 
@@ -278,7 +354,9 @@ public final class VrActivity extends Activity {
         if (request != PICK_IMAGE || result != RESULT_OK || data == null || data.getData() == null)
             return;
         final Uri selected = data.getData();
+        aiCancel.set(true);
         depthGeneration.incrementAndGet();
+        reportAiDepthStatus(0,0);
         Toast.makeText(this, "Importing image locally…", Toast.LENGTH_SHORT).show();
         new Thread(() -> {
             try {
