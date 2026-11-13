@@ -731,13 +731,13 @@ void run(JNIEnv* env, jobject activity) {
                 menu.brushMode && menu.hasDepthPixels() && !dragging;
             float brushU=0.f,brushV=0.f;
             const bool paintLeft=canPaint && pushDown && leftPointer &&
-                !menu.onTools(leftPointerX,leftPointerY,immersive) &&
+                (immersive || menu.toolbarAt(leftPointerX,leftPointerY,false)<0) &&
                 !(immersive && leftToolPointer) &&
                 menu.hitPhoto(leftPointerX,leftPointerY,immersive,brushU,brushV);
             // Trigger presses on Undo, Redo, Back or any other menu item
             // must not start a brush stroke or block Undo/Redo.
             const bool paintRight=canPaint && pullDown && pointer &&
-                !menu.onTools(pointerX,pointerY,immersive) &&
+                (immersive || menu.toolbarAt(pointerX,pointerY,false)<0) &&
                 !(immersive && toolPointer) &&
                 menu.hitPhoto(pointerX,pointerY,immersive,brushU,brushV);
             menu.painting=paintLeft||paintRight;
