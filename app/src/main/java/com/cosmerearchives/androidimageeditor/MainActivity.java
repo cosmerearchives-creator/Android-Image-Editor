@@ -66,7 +66,12 @@ public final class MainActivity extends Activity {
         panel.addView(check);
         Button enterVr = new Button(this);
         enterVr.setText("Enter Quest VR (prototype)");
-        enterVr.setOnClickListener(view -> startActivity(new Intent(this, VrActivity.class)));
+        enterVr.setOnClickListener(view -> {
+            startActivity(new Intent(this, VrActivity.class));
+            // Do not leave the flat launcher underneath the immersive activity:
+            // some Quest OS builds reveal it when the Android image picker closes.
+            finish();
+        });
         panel.addView(enterVr);
         setContentView(panel);
         checkForUpdates();
