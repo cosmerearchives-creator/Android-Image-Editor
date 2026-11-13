@@ -747,7 +747,12 @@ void run(JNIEnv* env, jobject activity) {
                 glClear(GL_COLOR_BUFFER_BIT);
                 glDisable(GL_SCISSOR_TEST);
                 const float eyeSign=eye==0?-1.f:1.f;
-                menu.draw(page,hovered,pointerX,pointerY,pointer,eyeSign);
+                // Show the active left-hand push cursor during strokes; normally
+                // keep the right-hand menu pointer visible.
+                const bool showLeft=page==vrui::Page::Open && menu.brushMode &&
+                                    menu.paintingLeft && leftPointer;
+                menu.draw(page,hovered,showLeft?leftPointerX:pointerX,
+                          showLeft?leftPointerY:pointerY,showLeft||pointer,eyeSign);
             }
             glBindFramebuffer(GL_FRAMEBUFFER,0);
             glFlush();
