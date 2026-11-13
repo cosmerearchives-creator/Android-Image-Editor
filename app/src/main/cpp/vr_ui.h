@@ -86,7 +86,11 @@ inline int buttonAt(Page page,float x,float y) {
         if(y>=186&&y<=282)return 2;
     } else if (page==Page::Open) {
         if(y>=92&&y<=190) return 3;
-        if(y>=205&&y<=291) return x<510?4:8;
+        if(y>=205&&y<=291) {
+            if(x<=383)return 4;
+            if(x<=617)return 8;
+            return 9;
+        }
         if(y>=36&&y<=88) {
             if(x>=645)return 5;
             if(x<=409)return 6;
@@ -96,7 +100,29 @@ inline int buttonAt(Page page,float x,float y) {
     return -1;
 }
 struct Renderer {
-    GLuint program=0,vao=0,vbo=0,photoProgram=0,photoTexture=0,photoVao=0,photoVbo=0;
+    GLuint program=0,vao=0,vbo=0,photoProgram=0,photoTexture=0,
+           photoVao=0,photoVbo=0,depthTexture=0;
+    bool hasQuickDepth() const {return depthTexture!=0;}
+    bool quickConverting=false;
+    void clearQuickDepth() {
+        if(depthTexture)glDeleteTextures(1,&depthTexture);
+        depthTexture=0;
+    }
+    void uploadQuickDepth(const std::vector<uint8_t>& gray,int width,int height){
+        clearQuickDepth();
+        if(width!=256||height!=256||gray.size()!=size_t(width)*size_t(height))return;
+        glGenTextures(1,&depthTexture);
+        glActiveTexture(GL_TEXTURE1);
+        glBindTexture(GL_TEXTURE_2D,depthTexture);
+        glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_S,GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_T,GL_CLAMP_TO_EDGE);
+        glPixelStorei(GL_UNPACK_ALIGNMENT,1);
+        glTexImage2D(GL_TEXTURE_2D,0,GL_R8,width,height,0,GL_RED,GL_UNSIGNED_BYTE,gray.data());
+        glBindTexture(GL_TEXTURE_2D,0);
+        glActiveTexture(GL_TEXTURE0);
+    }
     int photoWidth=0,photoHeight=0;
     bool stereoEnabled=false;
     int depthLevel=1;
@@ -167,6 +193,8 @@ struct Renderer {
             precision mediump float;
             in vec2 uv;
             uniform sampler2D photograph;
+            uniform sampler2D quickDepth;
+            uniform int useQuickDepth;
             uniform float eyeSign;
             uniform float depthStrength;
             out vec4 frag;
@@ -180,7 +208,9 @@ struct Renderer {
             void main() {
                 vec2 sampleUv=uv;
                 for(int i=0;i<2;i++){
-                    float depth=guessedDepth(sampleUv);
+                    float depth=useQuickDepth==1
+                        ?texture(quickDepth,clamp(sampleUv,vec2(0.001),vec2(0.999))).r
+                        :guessedDepth(sampleUv);
                     sampleUv.x=uv.x + eyeSign*depthStrength*(depth-0.5)*0.035;
                     sampleUv=clamp(sampleUv,vec2(0.001),vec2(0.999));
                 }
@@ -237,14 +267,24 @@ struct Renderer {
             x+w,y,u1,v1, x+w,y+h,u1,v0, x,y+h,u0,v0
         };
         glUseProgram(photoProgram);
+        glUniform1i(glGetUniformLocation(photoProgram,"photograph"),0);
+        glUniform1i(glGetUniformLocation(photoProgram,"quickDepth"),1);
+        glUniform1i(glGetUniformLocation(photoProgram,"useQuickDepth"),hasQuickDepth()?1:0);
         glUniform1f(glGetUniformLocation(photoProgram,"eyeSign"),eyeSign);
         glUniform1f(glGetUniformLocation(photoProgram,"depthStrength"),depthStrength());
+        glActiveTexture(GL_TEXTURE0);
         glBindTexture(GL_TEXTURE_2D,photoTexture);
+        glActiveTexture(GL_TEXTURE1);
+        glBindTexture(GL_TEXTURE_2D,depthTexture);
+        glActiveTexture(GL_TEXTURE0);
         glBindVertexArray(photoVao);
         glBindBuffer(GL_ARRAY_BUFFER,photoVbo);
         glBufferData(GL_ARRAY_BUFFER,sizeof(vertices),vertices,GL_DYNAMIC_DRAW);
         glDrawArrays(GL_TRIANGLES,0,6);
         glBindVertexArray(0);
+        glActiveTexture(GL_TEXTURE1);
+        glBindTexture(GL_TEXTURE_2D,0);
+        glActiveTexture(GL_TEXTURE0);
         glBindTexture(GL_TEXTURE_2D,0);
     }
     void draw(Page page,int hovered,float cursorX,float cursorY,bool pointer,float eyeSign=0.f){
@@ -273,10 +313,12 @@ struct Renderer {
             label(v,title,512-n*15,page==Page::Open?615:475,5,white);
             if(page==Page::Open) {
                 if(!hasPhoto()) label(v,"NO IMAGE IMPORTED",235,411,4,muted);
-                box(v,170,205,330,86,hovered==4?purpleHover:button);
-                label(v,"IMPORT",250,233,3,white);
-                box(v,520,205,334,86,hovered==8?purpleHover:purple);
-                label(v,"IMMERSIVE",590,233,3,white);
+                box(v,170,205,213,86,hovered==4?purpleHover:button);
+                label(v,"IMPORT",201,233,3,white);
+                box(v,390,205,227,86,hovered==8?purpleHover:purple);
+                label(v,"IMMERSIVE",412,233,3,white);
+                box(v,625,205,229,86,hovered==9?purpleHover:button);
+                label(v,"QUICK",680,233,3,white);
                 box(v,170,36,239,52,hovered==6?purpleHover:(stereoEnabled?purple:button));
                 label(v,stereoEnabled?"3D ON":"3D OFF",218,51,2,white);
                 box(v,420,36,219,52,hovered==7?purpleHover:button);
@@ -285,7 +327,7 @@ struct Renderer {
                 box(v,645,36,209,52,hovered==5?purpleHover:button);
                 label(v,"RESET VIEW",665,51,2,white);
                 if(hasPhoto()) {
-                    label(v,stereoEnabled?"STEREO TEST":"FLAT IMAGE",210,310,2,muted);
+                    label(v,hasQuickDepth()?"QUICK DEPTH MAP":quickConverting?"CONVERTING DEPTH":"HEURISTIC DEPTH",180,310,2,muted);
                     label(v,"BOTH GRIPS RESIZE ROTATE",204,304,2,muted);
                 }
             } else {
@@ -316,7 +358,8 @@ struct Renderer {
             }
         }
     }
-    ~Renderer(){if(photoTexture)glDeleteTextures(1,&photoTexture);
+    ~Renderer(){clearQuickDepth();
+        if(photoTexture)glDeleteTextures(1,&photoTexture);
         if(photoProgram)glDeleteProgram(photoProgram);
         if(photoVbo)glDeleteBuffers(1,&photoVbo);
         if(photoVao)glDeleteVertexArrays(1,&photoVao);
