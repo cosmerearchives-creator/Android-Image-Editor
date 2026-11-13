@@ -32,12 +32,12 @@ struct XrResources {
     EGLSurface surface{EGL_NO_SURFACE};
     GLuint fbo{0};
     ~XrResources() {
-        if (session != XR_NULL_HANDLE) xrDestroySession(session);
-        if (actionSet != XR_NULL_HANDLE) xrDestroyActionSet(actionSet);
-        if (space != XR_NULL_HANDLE) xrDestroySpace(space);
-        if (swapchain != XR_NULL_HANDLE) xrDestroySwapchain(swapchain);
-        if (instance != XR_NULL_HANDLE) xrDestroyInstance(instance);
         if (fbo) glDeleteFramebuffers(1, &fbo);
+        if (swapchain != XR_NULL_HANDLE) xrDestroySwapchain(swapchain);
+        if (space != XR_NULL_HANDLE) xrDestroySpace(space);
+        if (actionSet != XR_NULL_HANDLE) xrDestroyActionSet(actionSet);
+        if (session != XR_NULL_HANDLE) xrDestroySession(session);
+        if (instance != XR_NULL_HANDLE) xrDestroyInstance(instance);
         if (display != EGL_NO_DISPLAY) {
             eglMakeCurrent(display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
             if (surface != EGL_NO_SURFACE) eglDestroySurface(display, surface);
