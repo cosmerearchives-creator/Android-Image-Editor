@@ -1105,6 +1105,7 @@ void run(JNIEnv* env, jobject activity) {
                 const float eyeSign=eye==0?-1.f:1.f;
                 // Both controllers have independent visible pointers.
                 menu.draw(page,hovered,pointerX,pointerY,false,eyeSign);
+                if(page==vrui::Page::AiDepth)menu.drawAiOverlay();
                 if(!immersive)menu.drawTools(page,overlayHover);
                 menu.drawHandCursor(leftPointerX,leftPointerY,leftPointer,
                                     true,paintLeft,immersive);
