@@ -114,6 +114,46 @@ struct Renderer {
     bool brushMode=false;
     bool painting=false;
     bool paintingLeft=false;
+    bool paintingRight=false;
+    bool brushSoft=true;
+    bool edgeAware=true;
+    float brushStrength=1.0f;
+    float disparityStrength=0.8f;
+    std::vector<float> photoLuminance;
+    static bool onTools(float x,float y,bool immersive){
+        // Toolbar hit areas are excluded from depth painting.
+        if(immersive) return (y>=682 && y<=765)||(y>=0 && y<=98);
+        return (y>=665 && y<=765)||(y<=300)||(y>=615);
+    }
+    int toolbarAt(float x,float y,bool immersive) const {
+        if(immersive) {
+            if(y>=689&&y<=755){
+                if(x>=20&&x<=142)return 20; // 2D/3D
+                if(x>=155&&x<=330)return 21; // brush on/off
+                if(x>=345&&x<=498)return 22; // hard/soft
+                if(x>=510&&x<=650)return 23; // edge
+                if(x>=670&&x<=790)return 24; // undo
+                if(x>=802&&x<=925)return 25; // redo
+            }
+            if(y>=18&&y<=91){
+                if(x>=30&&x<=485)return 26; // depth slider
+                if(x>=520&&x<=990)return 27; // brush strength slider
+            }
+        } else if(y>=335&&y<=405){
+            if(x>=180&&x<=495)return 26;
+            if(x>=510&&x<=845)return 27;
+        }
+        return -1;
+    }
+    void slideAt(int target,float x,bool immersive) {
+        if(target==26){
+            const float lo=immersive?30.f:180.f,hi=immersive?485.f:495.f;
+            disparityStrength=std::clamp((x-lo)/(hi-lo)*2.f,0.f,2.f);
+        } else if(target==27) {
+            const float lo=immersive?520.f:510.f,hi=immersive?990.f:845.f;
+            brushStrength=std::clamp(0.1f+(x-lo)/(hi-lo)*2.9f,0.1f,3.f);
+        }
+    }
     // Stroke-wise history; cap memory (~1 MiB each stack at 16 snapshots).
     std::vector<std::vector<uint8_t>> undoHistory,redoHistory;
     std::vector<uint8_t> strokeBefore;
@@ -179,10 +219,10 @@ struct Renderer {
         v=centerV+(.5f-(sy-y)/h)/zoom;
         return u>=0.f&&u<=1.f&&v>=0.f&&v<=1.f;
     }
-    bool brushAt(float sx,float sy,bool pullTowardViewer) {
+    bool brushAt(float sx,float sy,bool pullTowardViewer,bool immersive=false) {
         if(!brushMode||!hasDepthPixels())return false;
         float u=0.f,v=0.f;
-        if(!hitPhoto(sx,sy,false,u,v))return false;
+        if(!hitPhoto(sx,sy,immersive,u,v))return false;
         const float cx=u*255.f,cy=(1.f-v)*255.f;
         const int radius=static_cast<int>(std::ceil(brushRadius));
         const int xa=std::max(0,static_cast<int>(cx)-radius),
@@ -193,9 +233,17 @@ struct Renderer {
         for(int y=ya;y<=yb;++y)for(int x=xa;x<=xb;++x){
             const float dist=std::hypot(float(x)-cx,float(y)-cy);
             if(dist>brushRadius)continue;
-            const float falloff=std::pow(std::max(0.f,1.f-dist/brushRadius),1.2f);
+            const float falloff=brushSoft
+                ?std::pow(std::max(0.f,1.f-dist/brushRadius),1.2f):1.f;
             const size_t i=size_t(y)*256u+size_t(x);
-            const int delta=std::max(1,static_cast<int>(std::lround(8.f*falloff)));
+            // Optional protection against painting across visible photo edges.
+            const float edgePenalty=(edgeAware && photoLuminance.size()==256u*256u)
+                ?std::exp(-std::abs(photoLuminance[i]-photoLuminance[
+                    size_t(std::clamp(int(cy),0,255))*256u+
+                    size_t(std::clamp(int(cx),0,255))])*10.f):1.f;
+            const int delta=std::max(0,static_cast<int>(std::lround(
+                8.f*brushStrength*falloff*edgePenalty)));
+            if(!delta)continue;
             const int value=std::clamp(int(depthCpu[i])+(pullTowardViewer?delta:-delta),0,255);
             if(value!=int(depthCpu[i])){depthCpu[i]=static_cast<uint8_t>(value);edited=true;}
         }
@@ -238,9 +286,9 @@ struct Renderer {
     // 0 idle, 1 checking, 2 downloading, 3 up-to-date,
     // 4 installer opened, 5 error, 6 permission required.
     int updateState=0,updatePercent=0;
-    int depthLevel=1;
+    int depthLevel=1; // Legacy preset remains for compatibility with old controls.
     float depthStrength() const {
-        return stereoEnabled ? (depthLevel==0?0.45f:(depthLevel==1?0.8f:1.2f)) : 0.f;
+        return stereoEnabled ? disparityStrength : 0.f;
     }
     float zoom=1.f, centerU=0.5f, centerV=0.5f;
     void resetPhotoView(){zoom=1.f;centerU=0.5f;centerV=0.5f;}
@@ -362,6 +410,15 @@ struct Renderer {
         glTexImage2D(GL_TEXTURE_2D,0,GL_RGBA8,width,height,0,GL_RGBA,GL_UNSIGNED_BYTE,rgba.data());
         glBindTexture(GL_TEXTURE_2D,0);
         photoWidth=width;photoHeight=height;
+        // Cached at depth-map resolution; used only for brush edge guidance.
+        photoLuminance.resize(256u*256u);
+        for(int y=0;y<256;++y)for(int x=0;x<256;++x) {
+            const int sx=std::min(width-1,x*width/256);
+            const int sy=std::min(height-1,y*height/256);
+            const size_t offset=(size_t(sy)*width+sx)*4;
+            photoLuminance[size_t(y)*256+x]=
+                (0.2126f*rgba[offset]+0.7152f*rgba[offset+1]+0.0722f*rgba[offset+2])/255.f;
+        }
         resetPhotoView();
     }
     void drawPhoto(float eyeSign,bool immersive=false){
@@ -474,66 +531,103 @@ struct Renderer {
             box(v,170,92,684,98,hovered==3?purpleHover:purple);
             label(v,"BACK",440,121,4,white);
         }
-        if(pointer){
-            box(v,cursorX-13,cursorY-2,26,4,white);
-            box(v,cursorX-2,cursorY-13,4,26,white);
-        }
         glUseProgram(program);glBindVertexArray(vao);glBindBuffer(GL_ARRAY_BUFFER,vbo);
         glBufferData(GL_ARRAY_BUFFER,v.size()*sizeof(float),v.data(),GL_STREAM_DRAW);
         glDrawArrays(GL_TRIANGLES,0,static_cast<GLsizei>(v.size()/5));
         glBindVertexArray(0);
-        if(page==Page::Open && hasPhoto()) {
-            drawPhoto(eyeSign);
-            if(pointer) {
-                std::vector<float> cursor;
-                box(cursor,cursorX-13,cursorY-2,26,4,white);
-                box(cursor,cursorX-2,cursorY-13,4,26,white);
-                glUseProgram(program);glBindVertexArray(vao);glBindBuffer(GL_ARRAY_BUFFER,vbo);
-                glBufferData(GL_ARRAY_BUFFER,cursor.size()*sizeof(float),cursor.data(),GL_STREAM_DRAW);
-                glDrawArrays(GL_TRIANGLES,0,static_cast<GLsizei>(cursor.size()/5));
-                glBindVertexArray(0);
+        if(page==Page::Open && hasPhoto()) drawPhoto(eyeSign);
+    }
+    void submitUi(const std::vector<float>& triangles) {
+        if(triangles.empty())return;
+        glUseProgram(program);
+        glBindVertexArray(vao);
+        glBindBuffer(GL_ARRAY_BUFFER,vbo);
+        glBufferData(GL_ARRAY_BUFFER,triangles.size()*sizeof(float),
+                     triangles.data(),GL_STREAM_DRAW);
+        glDrawArrays(GL_TRIANGLES,0,static_cast<GLsizei>(triangles.size()/5));
+        glBindVertexArray(0);
+    }
+    void drawTools(Page page,int hover) {
+        if(page!=Page::Open && page!=Page::Immersive)return;
+        const bool immersive=page==Page::Immersive;
+        std::vector<float> v;
+        if(immersive){
+            box(v,9,683,1010,80,{0.075f,0.055f,0.13f});
+            const int ids[]={20,21,22,23,24,25};
+            const float xs[]={20,155,345,510,670,802};
+            const float ws[]={122,175,153,140,120,123};
+            const char* captions[]={
+                stereoEnabled?"3D ON":"3D OFF",brushMode?"BRUSH ON":"BRUSH OFF",
+                brushSoft?"SOFT":"HARD",edgeAware?"EDGE ON":"EDGE OFF","UNDO","REDO"
+            };
+            for(int i=0;i<6;++i){
+                const bool active=(i==0&&stereoEnabled)||(i==1&&brushMode)||
+                                  (i==2&&brushSoft)||(i==3&&edgeAware);
+                box(v,xs[i],689,ws[i],66,hover==ids[i]?purpleHover:
+                     active?purple:button);
+                label(v,captions[i],int(xs[i]+7),710,2,white);
             }
-            // Brush outline is drawn after the photo, at actual depth-map brush size.
-            if(brushMode && hasDepthPixels() && pointer) {
-                float u=0.f,v=0.f;
-                if(hitPhoto(cursorX,cursorY,false,u,v)) {
-                    float w=704.f,h=300.f;
-                    const float aspect=float(photoWidth)/float(photoHeight);
-                    if(aspect>w/h)h=w/aspect;else w=h*aspect;
-                    const float radiusX=brushRadius*w*zoom/256.f;
-                    const float radiusY=brushRadius*h*zoom/256.f;
-                    std::vector<float> ring;
-                    const Color feedback=painting?(paintingLeft?Color{0.30f,0.60f,1.f}:
-                                                    Color{1.f,0.35f,0.68f}):Color{0.9f,0.8f,1.f};
-                    constexpr int segments=28;
-                    for(int i=0;i<segments;i++){
-                        float a=float(i)*6.283185307f/segments;
-                        float b=float(i+1)*6.283185307f/segments;
-                        float px=cursorX+std::cos(a)*radiusX;
-                        float py=cursorY+std::sin(a)*radiusY;
-                        float qx=cursorX+std::cos(b)*radiusX;
-                        float qy=cursorY+std::sin(b)*radiusY;
-                        // Draw narrow rectangles along each segment.
-                        const float dx=qx-px,dy=qy-py,length=std::hypot(dx,dy);
-                        if(length<0.0001f)continue;
-                        const float nx=-dy/length,ny=dx/length;
-                        const float t=1.3f;
-                        const float pts[6][2]={
-                          {px+nx*t,py+ny*t},{qx+nx*t,qy+ny*t},{px-nx*t,py-ny*t},
-                          {qx+nx*t,qy+ny*t},{qx-nx*t,qy-ny*t},{px-nx*t,py-ny*t}
-                        };
-                        for(const auto& p:pts){
-                            ring.push_back(p[0]);ring.push_back(p[1]);
-                            ring.push_back(feedback.r);ring.push_back(feedback.g);
-                            ring.push_back(feedback.b);
-                        }
+            box(v,10,4,1004,94,{0.075f,0.055f,0.13f});
+        }
+        const float dl=immersive?30.f:180.f, dr=immersive?485.f:495.f;
+        const float bl=immersive?520.f:510.f, br=immersive?990.f:845.f;
+        if(!immersive) box(v,170,330,684,84,{0.095f,0.075f,0.14f});
+        const float y=immersive?41.f:348.f;
+        label(v,"DEPTH",int(dl+4),int(y+27),2,white);
+        label(v,"BRUSH POWER",int(bl+4),int(y+27),2,white);
+        box(v,dl,y,dr-dl,7,{0.25f,0.20f,0.32f});
+        box(v,dl,y,(dr-dl)*disparityStrength/2.f,7,purpleHover);
+        box(v,dl+(dr-dl)*disparityStrength/2.f-5,y-6,10,19,white);
+        box(v,bl,y,br-bl,7,{0.25f,0.20f,0.32f});
+        box(v,bl,y,(br-bl)*(brushStrength-0.1f)/2.9f,7,purpleHover);
+        box(v,bl+(br-bl)*(brushStrength-0.1f)/2.9f-5,y-6,10,19,white);
+        submitUi(v);
+    }
+    void drawHandCursor(float x,float y,bool valid,bool left,bool active,
+                        bool immersive) {
+        if(!valid)return;
+        std::vector<float> v;
+        // Both cursors are rendered independently even when both hands point
+        // to the photo. Plus is right/pull; minus is left/push.
+        if(brushMode && hasDepthPixels()) {
+            float u=0.f,w=0.f;
+            if(hitPhoto(x,y,immersive,u,w)) {
+                float pw=immersive?1024.f:704.f,ph=immersive?768.f:300.f;
+                const float ratio=float(photoWidth)/float(photoHeight);
+                if(ratio>pw/ph)ph=pw/ratio;else pw=ph*ratio;
+                const float rx=std::max(2.f,brushRadius*pw*zoom/256.f);
+                const float ry=std::max(2.f,brushRadius*ph*zoom/256.f);
+                const Color tint=left?Color{0.31f,0.65f,1.f}:Color{1.f,0.36f,0.67f};
+                const Color ink=active?tint:white;
+                constexpr int segs=48;
+                for(int i=0;i<segs;i++){
+                    const float a=float(i)*6.283185307f/segs;
+                    const float b=float(i+1)*6.283185307f/segs;
+                    const float ax=x+std::cos(a)*rx,ay=y+std::sin(a)*ry;
+                    const float bx=x+std::cos(b)*rx,by=y+std::sin(b)*ry;
+                    const float dx=bx-ax,dy=by-ay,len=std::hypot(dx,dy);
+                    if(len<0.0001f)continue;
+                    const float nx=-dy/len,ny=dx/len,t=1.4f;
+                    const float points[6][2]={
+                        {ax+nx*t,ay+ny*t},{bx+nx*t,by+ny*t},{ax-nx*t,ay-ny*t},
+                        {bx+nx*t,by+ny*t},{bx-nx*t,by-ny*t},{ax-nx*t,ay-ny*t}
+                    };
+                    for(const auto& p:points){
+                        v.push_back(p[0]);v.push_back(p[1]);
+                        v.push_back(ink.r);v.push_back(ink.g);v.push_back(ink.b);
                     }
-                    glUseProgram(program);glBindVertexArray(vao);glBindBuffer(GL_ARRAY_BUFFER,vbo);
-                    glBufferData(GL_ARRAY_BUFFER,ring.size()*sizeof(float),ring.data(),GL_STREAM_DRAW);
-                    glDrawArrays(GL_TRIANGLES,0,static_cast<GLsizei>(ring.size()/5));
-                    glBindVertexArray(0);
                 }
+                box(v,x-11,y-2,22,4,ink);
+                if(!left)box(v,x-2,y-11,4,22,ink);
+                submitUi(v);
+                return;
             }
+        }
+        // Normal pointer remains right-hand-only when not painting.
+        if(!left) {
+            box(v,x-9,y-1,18,2,white);
+            box(v,x-1,y-9,2,18,white);
+            submitUi(v);
         }
     }
     ~Renderer(){clearQuickDepth();
