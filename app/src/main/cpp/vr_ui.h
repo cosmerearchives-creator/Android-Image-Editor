@@ -87,6 +87,7 @@ inline int buttonAt(Page page,float x,float y) {
         if(y>=186&&y<=282)return 2;
         if(y>=58&&y<=154)return 11;
     } else if (page==Page::Open) {
+        if(y>=590&&y<=650)return x<390?60:x<610?61:62;
         if(y>=665&&y<=715) {
             if(x<=385)return 14;
             if(x<=610)return 15;
@@ -129,6 +130,62 @@ struct Renderer {
                     // 3 preview ready, 4 error, 5 canceled.
     int aiPercent=0;
     bool aiPreview=false;
+
+    // v0.8: connected-color selection, constrained depth sculpting.
+    bool selectionMode=false;
+    std::vector<uint8_t> selectionMask;
+    GLuint selectionTexture=0;
+    bool hasSelection()const{return selectionMask.size()==65536u;}
+    void uploadMask(){
+        if(!hasSelection())return;
+        if(!selectionTexture)glGenTextures(1,&selectionTexture);
+        glActiveTexture(GL_TEXTURE2);
+        glBindTexture(GL_TEXTURE_2D,selectionTexture);
+        glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_S,GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_T,GL_CLAMP_TO_EDGE);
+        glPixelStorei(GL_UNPACK_ALIGNMENT,1);
+        glTexImage2D(GL_TEXTURE_2D,0,GL_R8,256,256,0,GL_RED,GL_UNSIGNED_BYTE,selectionMask.data());
+        glBindTexture(GL_TEXTURE_2D,0);
+        glActiveTexture(GL_TEXTURE0);
+    }
+    void clearMask(){
+        selectionMask.clear();
+        if(selectionTexture)glDeleteTextures(1,&selectionTexture);
+        selectionTexture=0;
+    }
+    void invertMask(){
+        if(!hasSelection())return;
+        for(auto& p:selectionMask)p=p?0:255;
+        uploadMask();
+    }
+    bool selectAt(float sx,float sy){
+        if(photoRgb.size()!=65536u*3u)return false;
+        float u=0.f,v=0.f;
+        if(!hitPhoto(sx,sy,false,u,v))return false;
+        int x=std::clamp(int(u*255),0,255),y=std::clamp(int((1.f-v)*255),0,255);
+        int start=y*256+x;
+        std::vector<uint8_t> chosen(65536u,0);
+        std::vector<int> pending{start};
+        chosen[start]=255;
+        const int red=photoRgb[3*start],green=photoRgb[3*start+1],blue=photoRgb[3*start+2];
+        for(size_t i=0;i<pending.size();i++){
+            int p=pending[i],px=p%256,py=p/256;
+            const int around[]={px? p-1:-1,px<255?p+1:-1,py?p-256:-1,py<255?p+256:-1};
+            for(int q:around){
+                if(q<0||chosen[q])continue;
+                int dr=int(photoRgb[3*q])-red,dg=int(photoRgb[3*q+1])-green,
+                    db=int(photoRgb[3*q+2])-blue;
+                if(dr*dr+dg*dg+db*db>4225)continue;
+                chosen[q]=255;pending.push_back(q);
+            }
+        }
+        selectionMask=std::move(chosen);
+        uploadMask();
+        selectionMode=false;
+        return true;
+    }
     bool brushMode=false;
     bool painting=false;
     bool paintingLeft=false;
@@ -277,6 +334,7 @@ struct Renderer {
             const float falloff=relative<=hardness?1.f:
                 std::pow(std::clamp((1.f-relative)/std::max(0.01f,1.f-hardness),0.f,1.f),1.3f);
             const size_t i=size_t(y)*256u+size_t(x);
+            if(hasSelection()&&!selectionMask[i])continue;
             // Compare *color* rather than luminance alone so same-brightness,
             // different-hue object boundaries are protected too.
             float edgePenalty=1.f;
@@ -403,6 +461,8 @@ struct Renderer {
             in vec2 uv;
             uniform sampler2D photograph;
             uniform sampler2D quickDepth;
+             uniform sampler2D selectionMask;
+             uniform int hasSelection;
             uniform int useQuickDepth;
             uniform float eyeSign;
             uniform float depthStrength;
@@ -424,6 +484,8 @@ struct Renderer {
                     sampleUv=clamp(sampleUv,vec2(0.001),vec2(0.999));
                 }
                 frag=texture(photograph,sampleUv);
+                 if(hasSelection==1 && texture(selectionMask,sampleUv).r>0.5)
+                    frag.rgb=mix(frag.rgb,vec3(0.35,0.25,0.85),0.32);
             }
         )";
         GLuint pv=shader(GL_VERTEX_SHADER,photoVs),pf=shader(GL_FRAGMENT_SHADER,photoFs);
@@ -434,6 +496,9 @@ struct Renderer {
         if(!ok)return false;
         glGenVertexArrays(1,&photoVao);
         glGenBuffers(1,&photoVbo);
+        glActiveTexture(GL_TEXTURE2);
+        glBindTexture(GL_TEXTURE_2D,selectionTexture);
+        glActiveTexture(GL_TEXTURE0);
         glBindVertexArray(photoVao);
         glBindBuffer(GL_ARRAY_BUFFER,photoVbo);
         glEnableVertexAttribArray(0);
@@ -446,6 +511,7 @@ struct Renderer {
     }
     void uploadPhoto(const std::vector<uint8_t>& rgba,int width,int height){
         if(photoTexture){glDeleteTextures(1,&photoTexture);photoTexture=0;}
+        clearMask();selectionMode=false;
         photoWidth=0;photoHeight=0;
         if(width<=0||height<=0||rgba.size()!=size_t(width)*size_t(height)*4)return;
         glGenTextures(1,&photoTexture);
@@ -492,6 +558,8 @@ struct Renderer {
         glUseProgram(photoProgram);
         glUniform1i(glGetUniformLocation(photoProgram,"photograph"),0);
         glUniform1i(glGetUniformLocation(photoProgram,"quickDepth"),1);
+        glUniform1i(glGetUniformLocation(photoProgram,"selectionMask"),2);
+        glUniform1i(glGetUniformLocation(photoProgram,"hasSelection"),hasSelection()?1:0);
         glUniform1i(glGetUniformLocation(photoProgram,"useQuickDepth"),hasQuickDepth()?1:0);
         glUniform1f(glGetUniformLocation(photoProgram,"eyeSign"),eyeSign);
         glUniform1f(glGetUniformLocation(photoProgram,"depthStrength"),depthStrength());
@@ -505,6 +573,8 @@ struct Renderer {
         glBufferData(GL_ARRAY_BUFFER,sizeof(vertices),vertices,GL_DYNAMIC_DRAW);
         glDrawArrays(GL_TRIANGLES,0,6);
         glBindVertexArray(0);
+        glActiveTexture(GL_TEXTURE2);
+        glBindTexture(GL_TEXTURE_2D,0);
         glActiveTexture(GL_TEXTURE1);
         glBindTexture(GL_TEXTURE_2D,0);
         glActiveTexture(GL_TEXTURE0);
@@ -557,11 +627,17 @@ struct Renderer {
                 label(v,"UNDO",658,678,2,canUndo()?white:muted);
                 box(v,754,665,100,50,hovered==13&&canRedo()?purpleHover:button);
                 label(v,"REDO",765,678,2,canRedo()?white:muted);
+                box(v,170,590,210,58,hovered==60?purpleHover:(selectionMode?purple:button));
+                label(v,selectionMode?"PICK AREA":"SELECT AREA",184,610,2,white);
+                box(v,390,590,210,58,hovered==61?purpleHover:button);
+                label(v,"CLEAR MASK",404,610,2,hasSelection()?white:muted);
+                box(v,610,590,244,58,hovered==62?purpleHover:button);
+                label(v,"INVERT MASK",624,610,2,hasSelection()?white:muted);
                 if(brushMode && hasDepthPixels()) {
-                    label(v,"L PUSH R PULL",702,630,2,muted);
+                    label(v,"L PUSH R PULL",700,574,2,muted);
                     const std::string brushText="LEFT "+std::to_string(int(leftRadius))+
                         " RIGHT "+std::to_string(int(rightRadius));
-                    label(v,brushText.c_str(),690,604,2,muted);
+                    label(v,brushText.c_str(),690,550,2,muted);
                 }
                 if(!hasPhoto()) label(v,"NO IMAGE IMPORTED",235,411,4,muted);
                 box(v,170,205,163,86,hovered==4?purpleHover:button);
@@ -780,7 +856,7 @@ struct Renderer {
         if(!left)box(v,x-2,y-9,4,18,tint);
         submitUi(v);
     }
-    ~Renderer(){clearQuickDepth();
+    ~Renderer(){clearMask();clearQuickDepth();
         if(photoTexture)glDeleteTextures(1,&photoTexture);
         if(photoProgram)glDeleteProgram(photoProgram);
         if(photoVbo)glDeleteBuffers(1,&photoVbo);
