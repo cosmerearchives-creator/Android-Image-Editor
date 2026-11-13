@@ -843,53 +843,66 @@ struct Renderer {
         box(v,192,540,636.f*float(aiPercent)/100.f,8,purpleHover);
         submitUi(v);
     }
+    // Cursor outlines are always legible in Quest: strong dark halo, vivid
+    // hand-specific stroke, and a visibly different color while sculpting.
     void drawHandCursor(float x,float y,bool valid,bool left,bool active,
                         bool immersive) {
         if(!valid)return;
         std::vector<float> v;
-        // Both cursors are rendered independently even when both hands point
-        // to the photo. Plus is right/pull; minus is left/push.
-        if(brushMode) {
+        const Color idle=left?Color{0.26f,0.77f,1.f}:Color{1.f,0.42f,0.73f};
+        const Color ink=active?Color{0.34f,1.f,0.31f}:idle;
+        const Color outline{0.015f,0.012f,0.025f};
+        if(brushMode && hasPhoto()){
+            float radius=26.f;
             float u=0.f,w=0.f;
-            if(hitPhoto(x,y,immersive,u,w)) {
+            if(hitPhoto(x,y,immersive,u,w)){
                 float pw=immersive?1024.f:704.f,ph=immersive?768.f:300.f;
-                const float ratio=float(photoWidth)/float(photoHeight);
-                if(ratio>pw/ph)ph=pw/ratio;else pw=ph*ratio;
-                const float radiusValue=left?leftRadius:rightRadius;
-                const float rx=std::max(2.f,radiusValue*pw*zoom/256.f);
-                const float ry=std::max(2.f,radiusValue*ph*zoom/256.f);
-                const Color tint=left?Color{0.31f,0.65f,1.f}:Color{1.f,0.36f,0.67f};
-                // Bright green while trigger is actively changing depth; idle ring is hand-specific.
-                const Color ink=active?Color{0.35f,1.f,0.45f}:tint;
-                constexpr int segs=48;
-                for(int i=0;i<segs;i++){
-                    const float a=float(i)*6.283185307f/segs;
-                    const float b=float(i+1)*6.283185307f/segs;
-                    const float ax=x+std::cos(a)*rx,ay=y+std::sin(a)*ry;
-                    const float bx=x+std::cos(b)*rx,by=y+std::sin(b)*ry;
-                    const float dx=bx-ax,dy=by-ay,len=std::hypot(dx,dy);
-                    if(len<0.0001f)continue;
-                    const float nx=-dy/len,ny=dx/len,t=1.4f;
+                const float aspect=float(photoWidth)/float(photoHeight);
+                if(aspect>pw/ph)ph=pw/aspect;else pw=ph*aspect;
+                // The brush operates on 256x256 depth pixels. Use the larger
+                // projected dimension for a circular, clearly readable guide.
+                const float brushPixels=left?leftRadius:rightRadius;
+                radius=std::max(26.f,brushPixels*std::max(pw,ph)*zoom/256.f);
+            }
+            radius=std::min(radius,300.f);
+            constexpr int segments=64;
+            auto outlineRing=[&](float thick,Color color){
+                for(int i=0;i<segments;i++){
+                    const float a=float(i)*6.283185307f/segments;
+                    const float b=float(i+1)*6.283185307f/segments;
+                    const float ax=x+std::cos(a)*radius,ay=y+std::sin(a)*radius;
+                    const float bx=x+std::cos(b)*radius,by=y+std::sin(b)*radius;
+                    const float dx=bx-ax,dy=by-ay,length=std::hypot(dx,dy);
+                    if(length<0.0001f)continue;
+                    const float nx=-dy/length*thick*.5f;
+                    const float ny=dx/length*thick*.5f;
                     const float points[6][2]={
-                        {ax+nx*t,ay+ny*t},{bx+nx*t,by+ny*t},{ax-nx*t,ay-ny*t},
-                        {bx+nx*t,by+ny*t},{bx-nx*t,by-ny*t},{ax-nx*t,ay-ny*t}
+                        {ax+nx,ay+ny},{bx+nx,by+ny},{ax-nx,ay-ny},
+                        {bx+nx,by+ny},{bx-nx,by-ny},{ax-nx,ay-ny}
                     };
                     for(const auto& p:points){
                         v.push_back(p[0]);v.push_back(p[1]);
-                        v.push_back(ink.r);v.push_back(ink.g);v.push_back(ink.b);
+                        v.push_back(color.r);v.push_back(color.g);v.push_back(color.b);
                     }
                 }
-                box(v,x-11,y-2,22,4,ink);
-                if(!left)box(v,x-2,y-11,4,22,ink);
-                submitUi(v);
-                return;
+            };
+            outlineRing(8.f,outline);
+            outlineRing(4.5f,ink);
+            // Center symbols remain distinct: left pushes (-), right pulls (+).
+            box(v,x-15,y-5,30,10,outline);
+            box(v,x-12,y-3,24,6,ink);
+            if(!left){
+                box(v,x-5,y-15,10,30,outline);
+                box(v,x-3,y-12,6,24,ink);
+            }
+        }else{
+            box(v,x-12,y-4,24,8,outline);
+            box(v,x-10,y-2,20,4,idle);
+            if(!left){
+                box(v,x-4,y-12,8,24,outline);
+                box(v,x-2,y-10,4,20,idle);
             }
         }
-        // Keep a distinct left-hand marker even when the depth map has
-        // not been generated. A valid left aim must never disappear.
-        const Color tint=left?Color{0.31f,0.65f,1.f}:white;
-        box(v,x-9,y-2,18,4,tint);
-        if(!left)box(v,x-2,y-9,4,18,tint);
         submitUi(v);
     }
     ~Renderer(){clearMask();clearQuickDepth();
