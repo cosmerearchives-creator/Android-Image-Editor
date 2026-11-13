@@ -1,0 +1,36 @@
+name: Publish signed stable APK on version change
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - version.properties
+
+permissions:
+  contents: read
+
+jobs:
+  stable-release:
+    runs-on: ubuntu-24.04
+    environment: stable-release
+    concurrency:
+      group: android-stable-release
+      cancel-in-progress: false
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Build and test
+        run: bash scripts/ci-build.sh
+      - name: Sign and verify using permanent identity
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          EXPECTED_CERT: ${{ vars.ANDROID_SIGNING_CERT_SHA256 }}
+        run: bash scripts/sign-release.sh
+      - name: Publish verified APK
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash scripts/publish-release.sh

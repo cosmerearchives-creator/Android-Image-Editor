@@ -64,6 +64,10 @@ public final class MainActivity extends Activity {
         check.setText("Check for Updates");
         check.setOnClickListener(view -> checkForUpdates());
         panel.addView(check);
+        Button enterVr = new Button(this);
+        enterVr.setText("Enter Quest VR (prototype)");
+        enterVr.setOnClickListener(view -> startActivity(new Intent(this, VrActivity.class)));
+        panel.addView(enterVr);
         setContentView(panel);
         checkForUpdates();
     }

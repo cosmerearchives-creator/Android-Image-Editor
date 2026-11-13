@@ -16,4 +16,14 @@ if [[ ! -f "$ANDROID_HOME/platforms/android-35/android.jar" ||
   echo "::error::Install Android SDK Platform 35 and Build Tools 35.0.0."
   exit 1
 fi
+# Native Quest OpenXR build needs pinned NDK and CMake packages.
+if [[ ! -d "$ANDROID_HOME/ndk/26.3.11579264" ||
+      ! -d "$ANDROID_HOME/cmake/3.22.1" ]]; then
+  SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+  if [[ ! -x "$SDKMANAGER" ]]; then
+    echo "::error::Android SDK command-line tools missing; cannot install NDK/CMake."
+    exit 1
+  fi
+  "$SDKMANAGER" --install "ndk;26.3.11579264" "cmake;3.22.1"
+fi
 "$work/gradle-8.9/bin/gradle" --no-daemon --console=plain --stacktrace :app:assembleRelease
