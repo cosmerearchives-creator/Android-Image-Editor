@@ -524,14 +524,19 @@ struct Renderer {
             int n=static_cast<int>(std::strlen(title));
             label(v,title,512-n*15,page==Page::Open?615:475,5,white);
             if(page==Page::Open) {
+                box(v,170,665,215,50,hovered==14?purpleHover:button);
+                label(v,"SAVE PROJECT",184,678,2,white);
+                box(v,395,665,215,50,hovered==15?purpleHover:button);
+                label(v,"SAVE AS NEW",409,678,2,white);
                 box(v,645,665,101,50,hovered==12&&canUndo()?purpleHover:button);
                 label(v,"UNDO",658,678,2,canUndo()?white:muted);
                 box(v,754,665,100,50,hovered==13&&canRedo()?purpleHover:button);
                 label(v,"REDO",765,678,2,canRedo()?white:muted);
                 if(brushMode && hasDepthPixels()) {
                     label(v,"L PUSH R PULL",702,630,2,muted);
-                    const std::string brushText="SIZE "+std::to_string(int(brushRadius));
-                    label(v,brushText.c_str(),702,604,2,muted);
+                    const std::string brushText="LEFT "+std::to_string(int(leftRadius))+
+                        " RIGHT "+std::to_string(int(rightRadius));
+                    label(v,brushText.c_str(),690,604,2,muted);
                 }
                 if(!hasPhoto()) label(v,"NO IMAGE IMPORTED",235,411,4,muted);
                 box(v,170,205,163,86,hovered==4?purpleHover:button);
@@ -553,6 +558,25 @@ struct Renderer {
                     label(v,hasQuickDepth()?"QUICK DEPTH MAP":quickConverting?"CONVERTING DEPTH":"HEURISTIC DEPTH",180,310,2,muted);
                     label(v,"BOTH GRIPS RESIZE ROTATE",204,304,2,muted);
                 }
+            } else if(page==Page::Projects) {
+                const int ys[]={495,405,315,225};
+                for(int i=0;i<4;i++){
+                    int index=projectPage*4+i;
+                    if(index>=int(projectNames.size()))break;
+                    box(v,170,float(ys[i]),684,64,hovered==40+i?purpleHover:button);
+                    std::string shown=projectNames[index];
+                    for(char& ch:shown) if(ch>='a'&&ch<='z')ch=char(ch-32);
+                    if(shown.size()>22)shown.resize(22);
+                    label(v,shown.c_str(),196,ys[i]+18,3,white);
+                }
+                if(projectNames.empty())label(v,"NO SAVED PROJECTS",240,400,3,muted);
+                box(v,170,580,329,50,hovered==46?purpleHover:button);
+                label(v,"PREVIOUS",243,592,2,white);
+                box(v,515,580,339,50,hovered==47?purpleHover:button);
+                label(v,"NEXT PAGE",573,592,2,white);
+                const std::string pageText="PAGE "+std::to_string(projectPage+1)+
+                    " / "+std::to_string(std::max(1,int((projectNames.size()+3)/4)));
+                label(v,pageText.c_str(),360,558,2,muted);
             } else {
                 label(v,"COMING SOON",320,385,4,muted);
                 label(v,"VR NAVIGATION TEST",272,318,3,muted);
@@ -614,18 +638,36 @@ struct Renderer {
             label(v,names[i],int(bx[i]+18),int(by[i]+33),3,
                   (i==4&&!canUndo())||(i==5&&!canRedo())?muted:white);
         }
-        const int sy[]={323,208,93};
-        const char* captions[]={"DEPTH STRENGTH","LEFT PUSH POWER","RIGHT PULL POWER"};
-        const float frac[]={disparityStrength/2.f,
-                            (leftStrength-0.1f)/2.9f,
-                            (rightStrength-0.1f)/2.9f};
+        // All controls are explicit: depth plus two separate size, power and
+        // hardness controls. Every brush parameter is labeled on the panel.
+        const float full=disparityStrength/2.f;
+        label(v,"STEREO DEPTH",45,379,3,white);
+        box(v,45,348,930,12,{0.26f,0.20f,0.32f});
+        box(v,45,348,930*full,12,purpleHover);
+        box(v,45+930*full-6,339,12,30,white);
+        const float leftValues[]={ (leftStrength-.1f)/2.9f,
+                                   (leftRadius-3.f)/57.f,leftHardness };
+        const float rightValues[]={ (rightStrength-.1f)/2.9f,
+                                    (rightRadius-3.f)/57.f,rightHardness };
+        const char* namesL[]={"LEFT PUSH POWER","LEFT BRUSH SIZE","LEFT HARDNESS"};
+        const char* namesR[]={"RIGHT PULL POWER","RIGHT BRUSH SIZE","RIGHT HARDNESS"};
+        const int ys[]={265,180,95};
         for(int i=0;i<3;i++){
-            label(v,captions[i],45,sy[i]+35,3,white);
-            const float y=float(sy[i]);
-            box(v,45,y,928,15,{0.26f,0.20f,0.32f});
-            box(v,45,y,928*frac[i],15,purpleHover);
-            box(v,45+928*frac[i]-9,y-12,18,39,white);
+            const float y=float(ys[i]);
+            label(v,namesL[i],45,int(y+30),2,white);
+            label(v,namesR[i],540,int(y+30),2,white);
+            const float vals[]={leftValues[i],rightValues[i]};
+            const float xs[]={45.f,540.f};
+            for(int j=0;j<2;j++){
+                float x=xs[j];
+                box(v,x,y,435,12,{0.26f,0.20f,0.32f});
+                box(v,x,y,435*vals[j],12,purpleHover);
+                box(v,x+435*vals[j]-6,y-9,12,30,white);
+            }
         }
+        const std::string sizes="L "+std::to_string(int(leftRadius))+
+            " PX     R "+std::to_string(int(rightRadius))+" PX";
+        label(v,sizes.c_str(),350,151,2,muted);
         if(pointer){
             box(v,pointerX-16,pointerY-3,32,6,white);
             box(v,pointerX-3,pointerY-16,6,32,white);
