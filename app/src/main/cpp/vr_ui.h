@@ -824,7 +824,8 @@ struct Renderer {
                 const float rx=std::max(2.f,radiusValue*pw*zoom/256.f);
                 const float ry=std::max(2.f,radiusValue*ph*zoom/256.f);
                 const Color tint=left?Color{0.31f,0.65f,1.f}:Color{1.f,0.36f,0.67f};
-                const Color ink=active?tint:tint;
+                // Bright green while trigger is actively changing depth; idle ring is hand-specific.
+                const Color ink=active?Color{0.35f,1.f,0.45f}:tint;
                 constexpr int segs=48;
                 for(int i=0;i<segs;i++){
                     const float a=float(i)*6.283185307f/segs;
