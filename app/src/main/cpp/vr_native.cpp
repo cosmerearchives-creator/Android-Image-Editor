@@ -15,6 +15,49 @@
 namespace {
 std::atomic<bool> stopRequested{false};
 std::atomic<bool> imageNeedsReload{true};
+std::atomic<bool> depthNeedsReload{true};
+void callQuickConvert(JNIEnv* env,jobject activity) {
+    jclass cls=env->GetObjectClass(activity);
+    jmethodID method=env->GetMethodID(cls,"requestQuickConvert","()V");
+    if(method)env->CallVoidMethod(activity,method);
+    if(env->ExceptionCheck()){env->ExceptionDescribe();env->ExceptionClear();}
+    env->DeleteLocalRef(cls);
+}
+void refreshDepth(JNIEnv* env,jobject activity,vrui::Renderer& menu) {
+    menu.clearQuickDepth();
+    menu.quickConverting=false;
+    jclass activityClass=env->GetObjectClass(activity);
+    jmethodID contextMethod=env->GetMethodID(activityClass,"getApplicationContext",
+                                              "()Landroid/content/Context;");
+    jobject ctx=env->CallObjectMethod(activity,contextMethod);
+    jclass cls=env->FindClass("com/cosmerearchives/androidimageeditor/QuickDepth");
+    if(cls&&ctx) {
+        jmethodID method=env->GetStaticMethodID(cls,"loadPixels","(Landroid/content/Context;)[I");
+        if(method) {
+            jintArray pixels=static_cast<jintArray>(env->CallStaticObjectMethod(cls,method,ctx));
+            if(pixels) {
+                const jsize count=env->GetArrayLength(pixels);
+                if(count==256*256+2){
+                    jint sizes[2]{0,0};
+                    env->GetIntArrayRegion(pixels,0,2,sizes);
+                    if(sizes[0]==256 && sizes[1]==256) {
+                        std::vector<jint> argb(256*256);
+                        env->GetIntArrayRegion(pixels,2,256*256,argb.data());
+                        std::vector<uint8_t> gray(256*256);
+                        for(size_t i=0;i<gray.size();++i)
+                            gray[i]=static_cast<uint8_t>(argb[i] & 0xFF);
+                        menu.uploadQuickDepth(gray,256,256);
+                    }
+                }
+                env->DeleteLocalRef(pixels);
+            }
+        }
+    }
+    if(env->ExceptionCheck()){env->ExceptionDescribe();env->ExceptionClear();}
+    if(cls)env->DeleteLocalRef(cls);
+    if(ctx)env->DeleteLocalRef(ctx);
+    env->DeleteLocalRef(activityClass);
+}
 std::atomic<bool> resumeImagePage{false};
 void callPicker(JNIEnv* env,jobject activity) {
     jclass activityClass=env->GetObjectClass(activity);
@@ -554,6 +597,10 @@ void run(JNIEnv* env, jobject activity) {
                     panelAngle=0.f;
                     dragMode=DragMode::None;
                     page=vrui::Page::Immersive;
+                } else if(page==vrui::Page::Open && hovered==9 &&
+                          menu.hasPhoto() && !menu.quickConverting) {
+                    menu.quickConverting=true;
+                    callQuickConvert(env,activity);
                 } else if(page==vrui::Page::Open && hovered==6 && menu.hasPhoto()) {
                     menu.stereoEnabled=!menu.stereoEnabled;
                 } else if(page==vrui::Page::Open && hovered==7 && menu.hasPhoto()) {
@@ -585,7 +632,11 @@ void run(JNIEnv* env, jobject activity) {
             glBindFramebuffer(GL_FRAMEBUFFER, r.fbo);
             glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D,
                                    images[index].image, 0);
-            if(imageNeedsReload.exchange(false)) refreshImage(env,activity,menu);
+            if(imageNeedsReload.exchange(false)) {
+                refreshImage(env,activity,menu);
+                depthNeedsReload.store(true);
+            }
+            if(depthNeedsReload.exchange(false))refreshDepth(env,activity,menu);
             glDisable(GL_DEPTH_TEST);
             glDisable(GL_BLEND);
             for(int eye=0;eye<2;++eye) {
@@ -632,6 +683,7 @@ extern "C" JNIEXPORT void JNICALL
 Java_com_cosmerearchives_androidimageeditor_VrActivity_runNative(JNIEnv* env, jobject activity) {
     stopRequested.store(false);
     imageNeedsReload.store(true);
+    depthNeedsReload.store(true);
     try { run(env, activity); }
     catch (const char* message) {
         __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, "OpenXR startup/render error: %s", message);
@@ -645,4 +697,9 @@ Java_com_cosmerearchives_androidimageeditor_VrActivity_requestNativeStop(JNIEnv*
 extern "C" JNIEXPORT void JNICALL
 Java_com_cosmerearchives_androidimageeditor_VrActivity_notifyImageChanged(JNIEnv*, jobject) {
     imageNeedsReload.store(true);
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_cosmerearchives_androidimageeditor_VrActivity_notifyDepthChanged(JNIEnv*, jobject) {
+    depthNeedsReload.store(true);
 }
