@@ -15,6 +15,7 @@
 namespace {
 std::atomic<bool> stopRequested{false};
 std::atomic<bool> imageNeedsReload{true};
+std::atomic<bool> resumeImagePage{false};
 void callPicker(JNIEnv* env,jobject activity) {
     jclass activityClass=env->GetObjectClass(activity);
     jmethodID request=env->GetMethodID(activityClass,"requestImageImport","()V");
@@ -249,7 +250,7 @@ void run(JNIEnv* env, jobject activity) {
     glGenFramebuffers(1, &r.fbo);
     vrui::Renderer menu;
     if (!menu.initialize()) throw "VR menu shader initialization";
-    vrui::Page page = vrui::Page::Home;
+    vrui::Page page = resumeImagePage.exchange(false) ? vrui::Page::Open : vrui::Page::Home;
     bool wasPressed = false;
     bool running = false;
     log("OpenXR compositor initialized");
@@ -336,6 +337,7 @@ void run(JNIEnv* env, jobject activity) {
             if (triggerDown && !wasPressed && hovered >= 0) {
                 if (hovered == 3) page = vrui::Page::Home;
                 else if (page == vrui::Page::Open && hovered == 4) {
+                    resumeImagePage.store(true);
                     callPicker(env,activity);
                 } else if (page == vrui::Page::Home) {
                     page = hovered == 0 ? vrui::Page::Open :
