@@ -87,6 +87,9 @@ struct XrResources {
     XrAction aimAction{XR_NULL_HANDLE};
     XrAction stickAction{XR_NULL_HANDLE};
     XrAction gripAction{XR_NULL_HANDLE};
+    XrAction leftGripAction{XR_NULL_HANDLE};
+    XrAction leftAimAction{XR_NULL_HANDLE};
+    XrSpace leftAimSpace{XR_NULL_HANDLE};
     XrSpace aimSpace{XR_NULL_HANDLE};
     EGLDisplay display{EGL_NO_DISPLAY};
     EGLContext context{EGL_NO_CONTEXT};
@@ -95,6 +98,7 @@ struct XrResources {
     ~XrResources() {
         if (fbo) glDeleteFramebuffers(1, &fbo);
         if (aimSpace != XR_NULL_HANDLE) xrDestroySpace(aimSpace);
+        if (leftAimSpace != XR_NULL_HANDLE) xrDestroySpace(leftAimSpace);
         if (swapchain != XR_NULL_HANDLE) xrDestroySwapchain(swapchain);
         if (space != XR_NULL_HANDLE) xrDestroySpace(space);
         if (actionSet != XR_NULL_HANDLE) xrDestroyActionSet(actionSet);
@@ -190,6 +194,7 @@ void run(JNIEnv* env, jobject activity) {
     std::strcpy(actionSetInfo.localizedActionSetName, "Gallery");
     check(xrCreateActionSet(r.instance, &actionSetInfo, &r.actionSet), "xrCreateActionSet");
     XrPath rightHand = path(r.instance, "/user/hand/right");
+    XrPath leftHand = path(r.instance, "/user/hand/left");
     XrActionCreateInfo actionInfo{XR_TYPE_ACTION_CREATE_INFO};
     actionInfo.actionType = XR_ACTION_TYPE_FLOAT_INPUT;
     std::strcpy(actionInfo.actionName, "select");
@@ -218,15 +223,31 @@ void run(JNIEnv* env, jobject activity) {
     gripInfo.countSubactionPaths=1;
     gripInfo.subactionPaths=&rightHand;
     check(xrCreateAction(r.actionSet,&gripInfo,&r.gripAction),"xrCreateGripAction");
+    XrActionCreateInfo leftAimInfo{XR_TYPE_ACTION_CREATE_INFO};
+    leftAimInfo.actionType=XR_ACTION_TYPE_POSE_INPUT;
+    std::strcpy(leftAimInfo.actionName,"left_aim");
+    std::strcpy(leftAimInfo.localizedActionName,"Left Controller Aim");
+    leftAimInfo.countSubactionPaths=1;
+    leftAimInfo.subactionPaths=&leftHand;
+    check(xrCreateAction(r.actionSet,&leftAimInfo,&r.leftAimAction),"xrCreateLeftAimAction");
+    XrActionCreateInfo leftGripInfo{XR_TYPE_ACTION_CREATE_INFO};
+    leftGripInfo.actionType=XR_ACTION_TYPE_FLOAT_INPUT;
+    std::strcpy(leftGripInfo.actionName,"left_move_grip");
+    std::strcpy(leftGripInfo.localizedActionName,"Left Move Canvas");
+    leftGripInfo.countSubactionPaths=1;
+    leftGripInfo.subactionPaths=&leftHand;
+    check(xrCreateAction(r.actionSet,&leftGripInfo,&r.leftGripAction),"xrCreateLeftGripAction");
     const XrActionSuggestedBinding suggested[] = {
         {r.triggerAction, path(r.instance, "/user/hand/right/input/trigger/value")},
         {r.aimAction, path(r.instance, "/user/hand/right/input/aim/pose")},
         {r.stickAction, path(r.instance, "/user/hand/right/input/thumbstick")},
-        {r.gripAction, path(r.instance, "/user/hand/right/input/squeeze/value")}
+        {r.gripAction, path(r.instance, "/user/hand/right/input/squeeze/value")},
+        {r.leftAimAction, path(r.instance, "/user/hand/left/input/aim/pose")},
+        {r.leftGripAction, path(r.instance, "/user/hand/left/input/squeeze/value")}
     };
     XrInteractionProfileSuggestedBinding profile{XR_TYPE_INTERACTION_PROFILE_SUGGESTED_BINDING};
     profile.interactionProfile = path(r.instance, "/interaction_profiles/oculus/touch_controller");
-    profile.countSuggestedBindings = 4;
+    profile.countSuggestedBindings = 6;
     profile.suggestedBindings = suggested;
     check(xrSuggestInteractionProfileBindings(r.instance, &profile), "xrSuggestInteractionProfileBindings");
     XrSessionActionSetsAttachInfo attach{XR_TYPE_SESSION_ACTION_SETS_ATTACH_INFO};
@@ -238,6 +259,11 @@ void run(JNIEnv* env, jobject activity) {
     aimSpaceInfo.subactionPath = rightHand;
     aimSpaceInfo.poseInActionSpace.orientation.w = 1.f;
     check(xrCreateActionSpace(r.session, &aimSpaceInfo, &r.aimSpace), "xrCreateActionSpace");
+    XrActionSpaceCreateInfo leftSpaceInfo{XR_TYPE_ACTION_SPACE_CREATE_INFO};
+    leftSpaceInfo.action=r.leftAimAction;
+    leftSpaceInfo.subactionPath=leftHand;
+    leftSpaceInfo.poseInActionSpace.orientation.w=1.f;
+    check(xrCreateActionSpace(r.session,&leftSpaceInfo,&r.leftAimSpace),"xrCreateLeftActionSpace");
 
     uint32_t formatsCount = 0;
     check(xrEnumerateSwapchainFormats(r.session, 0, &formatsCount, nullptr), "swapchain formats count");
@@ -270,10 +296,15 @@ void run(JNIEnv* env, jobject activity) {
     if (!menu.initialize()) throw "VR menu shader initialization";
     vrui::Page page = resumeImagePage.exchange(false) ? vrui::Page::Open : vrui::Page::Home;
     bool wasPressed = false;
-    bool dragging=false;
+    // One grip translates the canvas. Two grips translate, scale, and rotate around Z.
+    enum class DragMode {None, Right, Left, Both};
+    DragMode dragMode=DragMode::None;
     XrVector3f dragOrigin{0.f,0.f,0.f};
     XrVector3f dragPanel{0.f,0.f,-1.9f};
     XrVector3f panelPosition{0.f,0.f,-1.9f};
+    float panelScale=1.f, panelAngle=0.f;
+    float startScale=1.f,startAngle=0.f,startDistance=1.f,startHandAngle=0.f;
+    XrVector3f startMidpoint{0.f,0.f,0.f};
     auto lastFrame=std::chrono::steady_clock::now();
     bool running = false;
     log("OpenXR compositor initialized");
@@ -333,6 +364,11 @@ void run(JNIEnv* env, jobject activity) {
             gripGet.subactionPath=rightHand;
             XrActionStateFloat grip{XR_TYPE_ACTION_STATE_FLOAT};
             xrGetActionStateFloat(r.session,&gripGet,&grip);
+            XrActionStateGetInfo leftGripGet{XR_TYPE_ACTION_STATE_GET_INFO};
+            leftGripGet.action=r.leftGripAction;
+            leftGripGet.subactionPath=leftHand;
+            XrActionStateFloat leftGrip{XR_TYPE_ACTION_STATE_FLOAT};
+            xrGetActionStateFloat(r.session,&leftGripGet,&leftGrip);
             const auto now=std::chrono::steady_clock::now();
             const float dt=std::clamp(std::chrono::duration<float>(now-lastFrame).count(),0.f,0.1f);
             lastFrame=now;
@@ -342,6 +378,23 @@ void run(JNIEnv* env, jobject activity) {
             float pointerX = 0.f, pointerY = 0.f;
             bool validAim=false;
             XrVector3f aimPosition{0.f,0.f,0.f};
+            bool validLeftAim=false;
+            XrVector3f leftPosition{0.f,0.f,0.f};
+            XrActionStateGetInfo leftAimGet{XR_TYPE_ACTION_STATE_GET_INFO};
+            leftAimGet.action=r.leftAimAction;
+            leftAimGet.subactionPath=leftHand;
+            XrActionStatePose leftAimState{XR_TYPE_ACTION_STATE_POSE};
+            if(XR_SUCCEEDED(xrGetActionStatePose(r.session,&leftAimGet,&leftAimState))
+                && leftAimState.isActive) {
+                XrSpaceLocation leftLocation{XR_TYPE_SPACE_LOCATION};
+                if(XR_SUCCEEDED(xrLocateSpace(r.leftAimSpace,r.space,frameState.predictedDisplayTime,
+                                               &leftLocation)) &&
+                    (leftLocation.locationFlags & XR_SPACE_LOCATION_POSITION_VALID_BIT) &&
+                    (leftLocation.locationFlags & XR_SPACE_LOCATION_ORIENTATION_VALID_BIT)) {
+                    validLeftAim=true;
+                    leftPosition=leftLocation.pose.position;
+                }
+            }
             XrActionStateGetInfo aimGet{XR_TYPE_ACTION_STATE_GET_INFO};
             aimGet.action = r.aimAction;
             aimGet.subactionPath = rightHand;
@@ -364,26 +417,62 @@ void run(JNIEnv* env, jobject activity) {
                         if (t > 0.f) {
                             const float x = location.pose.position.x + dx*t;
                             const float y = location.pose.position.y + dy*t;
-                            pointerX = ((x-panelPosition.x) / 1.45f + 0.5f)*1024.f;
-                            pointerY = ((y-panelPosition.y) / 1.08f + 0.5f)*768.f;
+                            const float px=x-panelPosition.x,py=y-panelPosition.y;
+                            const float co=std::cos(panelAngle),si=std::sin(panelAngle);
+                            const float localX=(co*px+si*py)/panelScale;
+                            const float localY=(-si*px+co*py)/panelScale;
+                            pointerX = (localX / 1.45f + 0.5f)*1024.f;
+                            pointerY = (localY / 1.08f + 0.5f)*768.f;
                             pointer = pointerX>=0.f && pointerX<=1024.f &&
                                       pointerY>=0.f && pointerY<=768.f;
                         }
                     }
                 }
             }
-            const bool gripDown=validAim && grip.isActive && grip.currentState>0.6f;
-            if(page==vrui::Page::Open && gripDown && !dragging) {
-                dragging=true;
-                dragOrigin=aimPosition;
+            const bool rightHeld=page==vrui::Page::Open && validAim &&
+                grip.isActive && grip.currentState>0.6f;
+            const bool leftHeld=page==vrui::Page::Open && validLeftAim &&
+                leftGrip.isActive && leftGrip.currentState>0.6f;
+            const DragMode nextMode=rightHeld && leftHeld ? DragMode::Both :
+                rightHeld ? DragMode::Right : leftHeld ? DragMode::Left : DragMode::None;
+            if(nextMode!=dragMode) {
+                dragMode=nextMode;
                 dragPanel=panelPosition;
+                if(dragMode==DragMode::Both) {
+                    startMidpoint={(aimPosition.x+leftPosition.x)*0.5f,
+                                   (aimPosition.y+leftPosition.y)*0.5f,
+                                   (aimPosition.z+leftPosition.z)*0.5f};
+                    const float vx=aimPosition.x-leftPosition.x;
+                    const float vy=aimPosition.y-leftPosition.y;
+                    startDistance=std::max(0.05f,std::hypot(vx,vy));
+                    startHandAngle=std::atan2(vy,vx);
+                    startScale=panelScale;
+                    startAngle=panelAngle;
+                } else if(dragMode!=DragMode::None) {
+                    dragOrigin=dragMode==DragMode::Right?aimPosition:leftPosition;
+                }
             }
-            if(!gripDown) dragging=false;
-            if(dragging) {
-                panelPosition.x=std::clamp(dragPanel.x+aimPosition.x-dragOrigin.x,-2.f,2.f);
-                panelPosition.y=std::clamp(dragPanel.y+aimPosition.y-dragOrigin.y,-1.5f,1.5f);
-                panelPosition.z=std::clamp(dragPanel.z+aimPosition.z-dragOrigin.z,-4.f,-0.55f);
+            if(dragMode==DragMode::Both) {
+                const XrVector3f midpoint{(aimPosition.x+leftPosition.x)*0.5f,
+                                           (aimPosition.y+leftPosition.y)*0.5f,
+                                           (aimPosition.z+leftPosition.z)*0.5f};
+                const float vx=aimPosition.x-leftPosition.x;
+                const float vy=aimPosition.y-leftPosition.y;
+                const float d=std::max(0.05f,std::hypot(vx,vy));
+                panelScale=std::clamp(startScale*d/startDistance,0.5f,4.f);
+                // Keep rotation planar for predictable ray intersection and no tilt discomfort.
+                panelAngle=startAngle+std::remainder(std::atan2(vy,vx)-startHandAngle,
+                                                      6.283185307179586f);
+                panelPosition.x=std::clamp(dragPanel.x+midpoint.x-startMidpoint.x,-2.f,2.f);
+                panelPosition.y=std::clamp(dragPanel.y+midpoint.y-startMidpoint.y,-1.5f,1.5f);
+                panelPosition.z=std::clamp(dragPanel.z+midpoint.z-startMidpoint.z,-4.f,-0.55f);
+            } else if(dragMode!=DragMode::None) {
+                const auto& hand=dragMode==DragMode::Right?aimPosition:leftPosition;
+                panelPosition.x=std::clamp(dragPanel.x+hand.x-dragOrigin.x,-2.f,2.f);
+                panelPosition.y=std::clamp(dragPanel.y+hand.y-dragOrigin.y,-1.5f,1.5f);
+                panelPosition.z=std::clamp(dragPanel.z+hand.z-dragOrigin.z,-4.f,-0.55f);
             }
+            const bool dragging=dragMode!=DragMode::None;
             if(page==vrui::Page::Open && stick.isActive && !dragging &&
                std::abs(stick.currentState.y)>0.15f) {
                 menu.changeZoom(stick.currentState.y * dt * 1.5f,pointerX,pointerY,pointer);
@@ -395,6 +484,9 @@ void run(JNIEnv* env, jobject activity) {
                 else if (page == vrui::Page::Open && hovered == 5) {
                     menu.resetPhotoView();
                     panelPosition={0.f,0.f,-1.9f};
+                    panelScale=1.f;
+                    panelAngle=0.f;
+                    dragMode=DragMode::None;
                 }
                 else if (page == vrui::Page::Open && hovered == 4) {
                     resumeImagePage.store(true);
@@ -431,7 +523,9 @@ void run(JNIEnv* env, jobject activity) {
             quad.eyeVisibility = XR_EYE_VISIBILITY_BOTH;
             quad.pose.orientation.w = 1.f;
             quad.pose.position=panelPosition;
-            quad.size = {1.45f, 1.08f};
+            quad.pose.orientation.z=std::sin(panelAngle*0.5f);
+            quad.pose.orientation.w=std::cos(panelAngle*0.5f);
+            quad.size = {1.45f*panelScale, 1.08f*panelScale};
             quad.subImage.swapchain = r.swapchain;
             quad.subImage.imageRect.extent = {1024, 768};
             layerCount = 1;
