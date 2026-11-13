@@ -219,9 +219,11 @@ struct XrResources {
     XrAction gripAction{XR_NULL_HANDLE};
     XrAction leftGripAction{XR_NULL_HANDLE};
     XrAction leftAimAction{XR_NULL_HANDLE};
+    XrAction leftGripPoseAction{XR_NULL_HANDLE};
     XrAction compareAction{XR_NULL_HANDLE};
     XrAction exitViewAction{XR_NULL_HANDLE};
     XrSpace leftAimSpace{XR_NULL_HANDLE};
+    XrSpace leftGripPoseSpace{XR_NULL_HANDLE};
     XrSpace aimSpace{XR_NULL_HANDLE};
     EGLDisplay display{EGL_NO_DISPLAY};
     EGLContext context{EGL_NO_CONTEXT};
@@ -231,6 +233,7 @@ struct XrResources {
         if (fbo) glDeleteFramebuffers(1, &fbo);
         if (aimSpace != XR_NULL_HANDLE) xrDestroySpace(aimSpace);
         if (leftAimSpace != XR_NULL_HANDLE) xrDestroySpace(leftAimSpace);
+        if (leftGripPoseSpace != XR_NULL_HANDLE) xrDestroySpace(leftGripPoseSpace);
         if (swapchain != XR_NULL_HANDLE) xrDestroySwapchain(swapchain);
         if (space != XR_NULL_HANDLE) xrDestroySpace(space);
         if (actionSet != XR_NULL_HANDLE) xrDestroyActionSet(actionSet);
@@ -376,6 +379,13 @@ void run(JNIEnv* env, jobject activity) {
     leftAimInfo.countSubactionPaths=1;
     leftAimInfo.subactionPaths=&leftHand;
     check(xrCreateAction(r.actionSet,&leftAimInfo,&r.leftAimAction),"xrCreateLeftAimAction");
+    XrActionCreateInfo leftPoseInfo{XR_TYPE_ACTION_CREATE_INFO};
+    leftPoseInfo.actionType=XR_ACTION_TYPE_POSE_INPUT;
+    std::strcpy(leftPoseInfo.actionName,"left_grip_pose");
+    std::strcpy(leftPoseInfo.localizedActionName,"Left Controller Fallback Pose");
+    leftPoseInfo.countSubactionPaths=1;
+    leftPoseInfo.subactionPaths=&leftHand;
+    check(xrCreateAction(r.actionSet,&leftPoseInfo,&r.leftGripPoseAction),"xrCreateLeftGripPoseAction");
     XrActionCreateInfo leftGripInfo{XR_TYPE_ACTION_CREATE_INFO};
     leftGripInfo.actionType=XR_ACTION_TYPE_FLOAT_INPUT;
     std::strcpy(leftGripInfo.actionName,"left_move_grip");
@@ -403,6 +413,7 @@ void run(JNIEnv* env, jobject activity) {
         {r.stickAction, path(r.instance, "/user/hand/right/input/thumbstick")},
         {r.gripAction, path(r.instance, "/user/hand/right/input/squeeze/value")},
         {r.leftAimAction, path(r.instance, "/user/hand/left/input/aim/pose")},
+        {r.leftGripPoseAction, path(r.instance, "/user/hand/left/input/grip/pose")},
         {r.leftGripAction, path(r.instance, "/user/hand/left/input/squeeze/value")},
         {r.compareAction, path(r.instance, "/user/hand/right/input/a/click")},
         {r.exitViewAction, path(r.instance, "/user/hand/right/input/thumbstick/click")},
@@ -411,7 +422,7 @@ void run(JNIEnv* env, jobject activity) {
     };
     XrInteractionProfileSuggestedBinding profile{XR_TYPE_INTERACTION_PROFILE_SUGGESTED_BINDING};
     profile.interactionProfile = path(r.instance, "/interaction_profiles/oculus/touch_controller");
-    profile.countSuggestedBindings = 10;
+    profile.countSuggestedBindings = 11;
     profile.suggestedBindings = suggested;
     check(xrSuggestInteractionProfileBindings(r.instance, &profile), "xrSuggestInteractionProfileBindings");
     XrSessionActionSetsAttachInfo attach{XR_TYPE_SESSION_ACTION_SETS_ATTACH_INFO};
@@ -428,6 +439,12 @@ void run(JNIEnv* env, jobject activity) {
     leftSpaceInfo.subactionPath=leftHand;
     leftSpaceInfo.poseInActionSpace.orientation.w=1.f;
     check(xrCreateActionSpace(r.session,&leftSpaceInfo,&r.leftAimSpace),"xrCreateLeftActionSpace");
+    XrActionSpaceCreateInfo leftFallbackInfo{XR_TYPE_ACTION_SPACE_CREATE_INFO};
+    leftFallbackInfo.action=r.leftGripPoseAction;
+    leftFallbackInfo.subactionPath=leftHand;
+    leftFallbackInfo.poseInActionSpace.orientation.w=1.f;
+    check(xrCreateActionSpace(r.session,&leftFallbackInfo,&r.leftGripPoseSpace),
+          "xrCreateLeftGripPoseSpace");
 
     uint32_t formatsCount = 0;
     check(xrEnumerateSwapchainFormats(r.session, 0, &formatsCount, nullptr), "swapchain formats count");
@@ -611,6 +628,28 @@ void run(JNIEnv* env, jobject activity) {
                                                panelAngle,leftPointerX,leftPointerY);
                 }
             }
+            // Some Quest runtimes temporarily deactivate left aim while grip is
+            // tracked; retain a left cursor using the grip pose as a fallback.
+            if(!validLeftAim){
+                XrActionStateGetInfo fallbackGet{XR_TYPE_ACTION_STATE_GET_INFO};
+                fallbackGet.action=r.leftGripPoseAction;
+                fallbackGet.subactionPath=leftHand;
+                XrActionStatePose fallbackState{XR_TYPE_ACTION_STATE_POSE};
+                if(XR_SUCCEEDED(xrGetActionStatePose(r.session,&fallbackGet,&fallbackState))
+                    && fallbackState.isActive){
+                    XrSpaceLocation fallback{XR_TYPE_SPACE_LOCATION};
+                    if(XR_SUCCEEDED(xrLocateSpace(r.leftGripPoseSpace,r.space,
+                                                  frameState.predictedDisplayTime,&fallback)) &&
+                       (fallback.locationFlags & XR_SPACE_LOCATION_POSITION_VALID_BIT) &&
+                       (fallback.locationFlags & XR_SPACE_LOCATION_ORIENTATION_VALID_BIT)){
+                        validLeftAim=true;
+                        leftPose=fallback.pose;
+                        leftPosition=fallback.pose.position;
+                        leftPointer=pointerOnPanel(fallback.pose,panelPosition,panelScale,
+                                                   panelAngle,leftPointerX,leftPointerY);
+                    }
+                }
+            }
             XrActionStateGetInfo aimGet{XR_TYPE_ACTION_STATE_GET_INFO};
             aimGet.action = r.aimAction;
             aimGet.subactionPath = rightHand;
@@ -761,7 +800,7 @@ void run(JNIEnv* env, jobject activity) {
             if((page==vrui::Page::Open || page==vrui::Page::Immersive) &&
                 menu.brushMode && menu.hasDepthPixels()
                 && brushSizeStick.isActive && std::abs(brushSizeStick.currentState.y)>0.15f) {
-                menu.brushRadius=std::clamp(menu.brushRadius+
+                menu.leftRadius=std::clamp(menu.leftRadius+
                     brushSizeStick.currentState.y*dt*23.f,3.f,60.f);
             }
             const bool pushDown=push.isActive && push.currentState>=0.5f;
@@ -859,7 +898,11 @@ void run(JNIEnv* env, jobject activity) {
                 switch(hit) {
                     case 20: menu.stereoEnabled=!menu.stereoEnabled;break;
                     case 21: menu.brushMode=!menu.brushMode;break;
-                    case 22: menu.brushSoft=!menu.brushSoft;break;
+                    case 22:
+                        menu.brushSoft=!menu.brushSoft;
+                        menu.leftHardness=menu.brushSoft?0.f:1.f;
+                        menu.rightHardness=menu.brushSoft?0.f:1.f;
+                        break;
                     case 23: menu.edgeAware=!menu.edgeAware;break;
                     case 24: if(menu.undoDepth())saveEditedDepth(env,activity,menu.depthCpu);break;
                     case 25: if(menu.redoDepth())saveEditedDepth(env,activity,menu.depthCpu);break;
