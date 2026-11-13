@@ -16,7 +16,7 @@ struct Color {float r,g,b;};
 constexpr Color white{0.96f,0.95f,1.0f}, muted{0.67f,0.63f,0.76f},
     purple{0.34f,0.22f,0.52f}, purpleHover{0.52f,0.36f,0.76f},
     panel{0.095f,0.075f,0.14f}, button{0.17f,0.14f,0.25f};
-enum class Page {Home, Open, Projects, Gallery, Immersive, AiDepth};
+enum class Page {Home, Open, Projects, Gallery, Immersive, AiDepth, Collage};
 inline void box(std::vector<float>& vertices,float x,float y,float w,float h,Color c) {
     float a[6][2]={{x,y},{x+w,y},{x,y+h},{x+w,y},{x+w,y+h},{x,y+h}};
     for(auto& p:a) {vertices.push_back(p[0]);vertices.push_back(p[1]);
@@ -87,6 +87,7 @@ inline int buttonAt(Page page,float x,float y) {
         if(y>=186&&y<=282)return 2;
         if(y>=58&&y<=154)return 11;
     } else if (page==Page::Open) {
+        if(y>=730&&y<=765)return 70;
         if(y>=590&&y<=650)return x<390?60:x<610?61:62;
         if(y>=665&&y<=715) {
             if(x<=385)return 14;
@@ -106,6 +107,12 @@ inline int buttonAt(Page page,float x,float y) {
             if(x<=409)return 6;
             if(x>=420&&x<=639)return 7;
         }
+    } else if(page==Page::Collage){
+        if(y>=665&&y<=715)return x<512?71:72;
+        if(y>=590&&y<=650){if(x<342)return 73;if(x<512)return 74;if(x<682)return 75;return 76;}
+        if(y>=205&&y<=291){if(x<342)return 77;if(x<512)return 78;if(x<682)return 79;return 80;}
+        if(y>=36&&y<=88)return x<512?81:82;
+        if(y>=92&&y<=190)return 3;
     } else if (page==Page::AiDepth) {
         if(y>=92&&y<=190)return 3;
         if(y>=205&&y<=291){
@@ -132,6 +139,7 @@ struct Renderer {
     bool aiPreview=false;
 
     // v0.8: connected-color selection, constrained depth sculpting.
+    int collageCount=0,collageActive=0;
     bool selectionMode=false;
     std::vector<uint8_t> selectionMask;
     GLuint selectionTexture=0;
@@ -615,7 +623,8 @@ struct Renderer {
         } else {
             const char* title=page==Page::Open?"OPEN IMAGE":
                 page==Page::Projects?"MY PROJECTS":
-                page==Page::AiDepth?"AI DEPTH":"VIEW GALLERY";
+                page==Page::AiDepth?"AI DEPTH":
+                page==Page::Collage?"COLLAGE LAYERS":"VIEW GALLERY";
             int n=static_cast<int>(std::strlen(title));
             label(v,title,512-n*15,(page==Page::Open||page==Page::Projects)?630:475,5,white);
             if(page==Page::Open) {
@@ -627,6 +636,8 @@ struct Renderer {
                 label(v,"UNDO",658,678,2,canUndo()?white:muted);
                 box(v,754,665,100,50,hovered==13&&canRedo()?purpleHover:button);
                 label(v,"REDO",765,678,2,canRedo()?white:muted);
+                box(v,170,730,684,36,hovered==70?purpleHover:purple);
+                label(v,"COLLAGE LAYERS",387,738,2,white);
                 box(v,170,590,210,58,hovered==60?purpleHover:(selectionMode?purple:button));
                 label(v,selectionMode?"PICK AREA":"SELECT AREA",184,610,2,white);
                 box(v,390,590,210,58,hovered==61?purpleHover:button);
@@ -658,6 +669,30 @@ struct Renderer {
                     label(v,hasQuickDepth()?"QUICK DEPTH MAP":quickConverting?"CONVERTING DEPTH":"HEURISTIC DEPTH",180,310,2,muted);
                     label(v,"BOTH GRIPS RESIZE ROTATE",204,304,2,muted);
                 }
+            } else if(page==Page::Collage){
+                const std::string count="LAYER "+std::to_string(collageCount?collageActive+1:0)+
+                    " OF "+std::to_string(collageCount);
+                label(v,count.c_str(),182,590,3,white);
+                const char* top[]={"PREV LAYER","NEXT LAYER"};
+                for(int i=0;i<2;i++){
+                    int x=170+i*344;
+                    box(v,float(x),665,337,50,hovered==71+i?purpleHover:button);
+                    label(v,top[i],x+25,680,3,white);
+                }
+                const char* moves[]={"MOVE LEFT","MOVE RIGHT","MOVE UP","MOVE DOWN"};
+                const char* sizes[]={"SHRINK","GROW","PUSH BACK","PULL FRONT"};
+                for(int i=0;i<4;i++){
+                    int x=170+i*172;
+                    box(v,float(x),590,164,58,hovered==73+i?purpleHover:button);
+                    label(v,moves[i],x+8,610,2,white);
+                    box(v,float(x),205,164,86,hovered==77+i?purpleHover:button);
+                    label(v,sizes[i],x+8,237,2,white);
+                }
+                box(v,170,36,337,52,hovered==81?purpleHover:purple);
+                label(v,"ADD IMAGE",212,52,3,white);
+                box(v,517,36,337,52,hovered==82?purpleHover:button);
+                label(v,"BACK TO EDITOR",535,52,2,white);
+                label(v,"SELECT LAYER THEN POSITION SIZE DEPTH",182,320,2,muted);
             } else if(page==Page::AiDepth) {
                 const char* status=aiState==1?"DOWNLOADING AI MODEL":
                     aiState==2?"AI CONVERSION RUNNING":
@@ -707,7 +742,7 @@ struct Renderer {
         glBufferData(GL_ARRAY_BUFFER,v.size()*sizeof(float),v.data(),GL_STREAM_DRAW);
         glDrawArrays(GL_TRIANGLES,0,static_cast<GLsizei>(v.size()/5));
         glBindVertexArray(0);
-        if((page==Page::Open||page==Page::AiDepth) && hasPhoto()) drawPhoto(eyeSign);
+        if((page==Page::Open||page==Page::AiDepth||page==Page::Collage) && hasPhoto()) drawPhoto(eyeSign);
     }
     void submitUi(const std::vector<float>& triangles) {
         if(triangles.empty())return;
