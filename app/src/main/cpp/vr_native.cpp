@@ -3,6 +3,8 @@
 #include <chrono>
 #include <thread>
 #include <vector>
+#include <cmath>
+#include "vr_ui.h"
 #include <cstring>
 #include <android/log.h>
 #include <EGL/egl.h>
@@ -27,12 +29,15 @@ struct XrResources {
     XrSwapchain swapchain{XR_NULL_HANDLE};
     XrActionSet actionSet{XR_NULL_HANDLE};
     XrAction triggerAction{XR_NULL_HANDLE};
+    XrAction aimAction{XR_NULL_HANDLE};
+    XrSpace aimSpace{XR_NULL_HANDLE};
     EGLDisplay display{EGL_NO_DISPLAY};
     EGLContext context{EGL_NO_CONTEXT};
     EGLSurface surface{EGL_NO_SURFACE};
     GLuint fbo{0};
     ~XrResources() {
         if (fbo) glDeleteFramebuffers(1, &fbo);
+        if (aimSpace != XR_NULL_HANDLE) xrDestroySpace(aimSpace);
         if (swapchain != XR_NULL_HANDLE) xrDestroySwapchain(swapchain);
         if (space != XR_NULL_HANDLE) xrDestroySpace(space);
         if (actionSet != XR_NULL_HANDLE) xrDestroyActionSet(actionSet);
@@ -135,17 +140,31 @@ void run(JNIEnv* env, jobject activity) {
     actionInfo.countSubactionPaths = 1;
     actionInfo.subactionPaths = &rightHand;
     check(xrCreateAction(r.actionSet, &actionInfo, &r.triggerAction), "xrCreateAction");
-    XrActionSuggestedBinding suggested{r.triggerAction,
-        path(r.instance, "/user/hand/right/input/trigger/value")};
+    XrActionCreateInfo aimInfo{XR_TYPE_ACTION_CREATE_INFO};
+    aimInfo.actionType = XR_ACTION_TYPE_POSE_INPUT;
+    std::strcpy(aimInfo.actionName, "aim");
+    std::strcpy(aimInfo.localizedActionName, "Controller Aim");
+    aimInfo.countSubactionPaths = 1;
+    aimInfo.subactionPaths = &rightHand;
+    check(xrCreateAction(r.actionSet, &aimInfo, &r.aimAction), "xrCreateAimAction");
+    const XrActionSuggestedBinding suggested[] = {
+        {r.triggerAction, path(r.instance, "/user/hand/right/input/trigger/value")},
+        {r.aimAction, path(r.instance, "/user/hand/right/input/aim/pose")}
+    };
     XrInteractionProfileSuggestedBinding profile{XR_TYPE_INTERACTION_PROFILE_SUGGESTED_BINDING};
     profile.interactionProfile = path(r.instance, "/interaction_profiles/oculus/touch_controller");
-    profile.countSuggestedBindings = 1;
-    profile.suggestedBindings = &suggested;
+    profile.countSuggestedBindings = 2;
+    profile.suggestedBindings = suggested;
     check(xrSuggestInteractionProfileBindings(r.instance, &profile), "xrSuggestInteractionProfileBindings");
     XrSessionActionSetsAttachInfo attach{XR_TYPE_SESSION_ACTION_SETS_ATTACH_INFO};
     attach.countActionSets = 1;
     attach.actionSets = &r.actionSet;
     check(xrAttachSessionActionSets(r.session, &attach), "xrAttachSessionActionSets");
+    XrActionSpaceCreateInfo aimSpaceInfo{XR_TYPE_ACTION_SPACE_CREATE_INFO};
+    aimSpaceInfo.action = r.aimAction;
+    aimSpaceInfo.subactionPath = rightHand;
+    aimSpaceInfo.poseInActionSpace.orientation.w = 1.f;
+    check(xrCreateActionSpace(r.session, &aimSpaceInfo, &r.aimSpace), "xrCreateActionSpace");
 
     uint32_t formatsCount = 0;
     check(xrEnumerateSwapchainFormats(r.session, 0, &formatsCount, nullptr), "swapchain formats count");
@@ -174,7 +193,10 @@ void run(JNIEnv* env, jobject activity) {
     check(xrEnumerateSwapchainImages(r.swapchain, imagesCount, &imagesCount,
           reinterpret_cast<XrSwapchainImageBaseHeader*>(images.data())), "swapchain images");
     glGenFramebuffers(1, &r.fbo);
-
+    vrui::Renderer menu;
+    if (!menu.initialize()) throw "VR menu shader initialization";
+    vrui::Page page = vrui::Page::Home;
+    bool wasPressed = false;
     bool running = false;
     log("OpenXR compositor initialized");
     while (!stopRequested.load()) {
@@ -223,6 +245,49 @@ void run(JNIEnv* env, jobject activity) {
             XrActionStateFloat pressed{XR_TYPE_ACTION_STATE_FLOAT};
             xrGetActionStateFloat(r.session, &get, &pressed);
 
+            // Point at a fixed, world-anchored quad using the right controller's aim pose.
+            // The OpenXR action pose is queried at the compositor's predicted display time.
+            bool pointer = false;
+            float pointerX = 0.f, pointerY = 0.f;
+            XrActionStateGetInfo aimGet{XR_TYPE_ACTION_STATE_GET_INFO};
+            aimGet.action = r.aimAction;
+            aimGet.subactionPath = rightHand;
+            XrActionStatePose aimState{XR_TYPE_ACTION_STATE_POSE};
+            if (XR_SUCCEEDED(xrGetActionStatePose(r.session, &aimGet, &aimState)) && aimState.isActive) {
+                XrSpaceLocation location{XR_TYPE_SPACE_LOCATION};
+                if (XR_SUCCEEDED(xrLocateSpace(r.aimSpace, r.space, frameState.predictedDisplayTime,
+                                               &location)) &&
+                    (location.locationFlags & XR_SPACE_LOCATION_POSITION_VALID_BIT) &&
+                    (location.locationFlags & XR_SPACE_LOCATION_ORIENTATION_VALID_BIT)) {
+                    const auto& q = location.pose.orientation;
+                    // Rotate (0,0,-1) by the controller's normalized quaternion.
+                    const float dx = -2.f*(q.x*q.z + q.w*q.y);
+                    const float dy = -2.f*(q.y*q.z - q.w*q.x);
+                    const float dz = -1.f + 2.f*(q.x*q.x + q.y*q.y);
+                    if (dz < -0.001f) {
+                        const float t = (-1.9f - location.pose.position.z)/dz;
+                        if (t > 0.f) {
+                            const float x = location.pose.position.x + dx*t;
+                            const float y = location.pose.position.y + dy*t;
+                            pointerX = (x / 1.45f + 0.5f)*1024.f;
+                            pointerY = (y / 1.08f + 0.5f)*768.f;
+                            pointer = pointerX>=0.f && pointerX<=1024.f &&
+                                      pointerY>=0.f && pointerY<=768.f;
+                        }
+                    }
+                }
+            }
+            const int hovered = pointer ? vrui::buttonAt(page,pointerX,pointerY) : -1;
+            const bool triggerDown = pressed.isActive && pressed.currentState >= 0.5f;
+            if (triggerDown && !wasPressed && hovered >= 0) {
+                if (hovered == 3) page = vrui::Page::Home;
+                else if (page == vrui::Page::Home) {
+                    page = hovered == 0 ? vrui::Page::Open :
+                           hovered == 1 ? vrui::Page::Projects : vrui::Page::Gallery;
+                }
+            }
+            wasPressed = triggerDown;
+
             uint32_t index = 0;
             XrSwapchainImageAcquireInfo acquire{XR_TYPE_SWAPCHAIN_IMAGE_ACQUIRE_INFO};
             check(xrAcquireSwapchainImage(r.swapchain, &acquire, &index), "acquire image");
@@ -236,16 +301,9 @@ void run(JNIEnv* env, jobject activity) {
             glDisable(GL_SCISSOR_TEST);
             glClearColor(0.045f, 0.038f, 0.08f, 1.f);
             glClear(GL_COLOR_BUFFER_BIT);
-            glEnable(GL_SCISSOR_TEST);
-            // Minimal purple home-screen prototype: two distinct interactive states.
-            glScissor(90, 295, 844, 190);
-            bool selected = pressed.isActive && pressed.currentState > 0.35f;
-            glClearColor(selected ? 0.55f : 0.24f, 0.17f, selected ? 0.84f : 0.43f, 1.f);
-            glClear(GL_COLOR_BUFFER_BIT);
-            glScissor(270, 110, 484, 95);
-            glClearColor(0.12f, 0.10f, 0.20f, 1.f);
-            glClear(GL_COLOR_BUFFER_BIT);
-            glDisable(GL_SCISSOR_TEST);
+            glDisable(GL_DEPTH_TEST);
+            glDisable(GL_BLEND);
+            menu.draw(page,hovered,pointerX,pointerY,pointer);
             glBindFramebuffer(GL_FRAMEBUFFER, 0);
             glFlush();
             XrSwapchainImageReleaseInfo release{XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO};
