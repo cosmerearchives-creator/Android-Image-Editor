@@ -14,6 +14,61 @@
 
 namespace {
 std::atomic<bool> stopRequested{false};
+std::atomic<bool> imageNeedsReload{true};
+std::atomic<bool> resumeImagePage{false};
+void callPicker(JNIEnv* env,jobject activity) {
+    jclass activityClass=env->GetObjectClass(activity);
+    jmethodID request=env->GetMethodID(activityClass,"requestImageImport","()V");
+    if(request) env->CallVoidMethod(activity,request);
+    if(env->ExceptionCheck()) {
+        env->ExceptionDescribe();
+        env->ExceptionClear();
+    }
+    env->DeleteLocalRef(activityClass);
+}
+void refreshImage(JNIEnv* env,jobject activity,vrui::Renderer& menu) {
+    jclass activityClass=env->GetObjectClass(activity);
+    jmethodID appContext=env->GetMethodID(activityClass,"getApplicationContext",
+                                           "()Landroid/content/Context;");
+    jobject context=env->CallObjectMethod(activity,appContext);
+    jclass storage=env->FindClass("com/cosmerearchives/androidimageeditor/ImageStorage");
+    if(!storage || !context) {
+        if(env->ExceptionCheck()){env->ExceptionDescribe();env->ExceptionClear();}
+        env->DeleteLocalRef(activityClass);
+        if(context)env->DeleteLocalRef(context);
+        return;
+    }
+    jmethodID pixels=env->GetStaticMethodID(storage,"loadPixels","(Landroid/content/Context;)[I");
+    jintArray data=static_cast<jintArray>(env->CallStaticObjectMethod(storage,pixels,context));
+    if(env->ExceptionCheck()) {env->ExceptionDescribe();env->ExceptionClear();}
+    if(data) {
+        jsize count=env->GetArrayLength(data);
+        if(count>=3){
+            jint dimensions[2]{};
+            env->GetIntArrayRegion(data,0,2,dimensions);
+            int width=dimensions[0],height=dimensions[1];
+            if(width>0&&height>0&&width<=2048&&height<=2048&&
+               static_cast<int64_t>(width)*height+2==count) {
+                std::vector<jint> argb(static_cast<size_t>(width)*height);
+                env->GetIntArrayRegion(data,2,width*height,argb.data());
+                std::vector<uint8_t> rgba(argb.size()*4);
+                for(size_t i=0;i<argb.size();i++){
+                    uint32_t p=static_cast<uint32_t>(argb[i]);
+                    rgba[i*4]=static_cast<uint8_t>((p>>16)&255);
+                    rgba[i*4+1]=static_cast<uint8_t>((p>>8)&255);
+                    rgba[i*4+2]=static_cast<uint8_t>(p&255);
+                    rgba[i*4+3]=255;
+                }
+                menu.uploadPhoto(rgba,width,height);
+            }
+        }
+        env->DeleteLocalRef(data);
+    }
+    env->DeleteLocalRef(storage);
+    env->DeleteLocalRef(context);
+    env->DeleteLocalRef(activityClass);
+}
+
 constexpr const char* LOG_TAG = "ImageEditorXR";
 void log(const char* message) { __android_log_print(ANDROID_LOG_INFO, LOG_TAG, "%s", message); }
 void check(XrResult result, const char* step) {
@@ -195,7 +250,7 @@ void run(JNIEnv* env, jobject activity) {
     glGenFramebuffers(1, &r.fbo);
     vrui::Renderer menu;
     if (!menu.initialize()) throw "VR menu shader initialization";
-    vrui::Page page = vrui::Page::Home;
+    vrui::Page page = resumeImagePage.exchange(false) ? vrui::Page::Open : vrui::Page::Home;
     bool wasPressed = false;
     bool running = false;
     log("OpenXR compositor initialized");
@@ -281,7 +336,10 @@ void run(JNIEnv* env, jobject activity) {
             const bool triggerDown = pressed.isActive && pressed.currentState >= 0.5f;
             if (triggerDown && !wasPressed && hovered >= 0) {
                 if (hovered == 3) page = vrui::Page::Home;
-                else if (page == vrui::Page::Home) {
+                else if (page == vrui::Page::Open && hovered == 4) {
+                    resumeImagePage.store(true);
+                    callPicker(env,activity);
+                } else if (page == vrui::Page::Home) {
                     page = hovered == 0 ? vrui::Page::Open :
                            hovered == 1 ? vrui::Page::Projects : vrui::Page::Gallery;
                 }
@@ -303,6 +361,7 @@ void run(JNIEnv* env, jobject activity) {
             glClear(GL_COLOR_BUFFER_BIT);
             glDisable(GL_DEPTH_TEST);
             glDisable(GL_BLEND);
+            if(imageNeedsReload.exchange(false)) refreshImage(env,activity,menu);
             menu.draw(page,hovered,pointerX,pointerY,pointer);
             glBindFramebuffer(GL_FRAMEBUFFER, 0);
             glFlush();
@@ -332,6 +391,7 @@ void run(JNIEnv* env, jobject activity) {
 extern "C" JNIEXPORT void JNICALL
 Java_com_cosmerearchives_androidimageeditor_VrActivity_runNative(JNIEnv* env, jobject activity) {
     stopRequested.store(false);
+    imageNeedsReload.store(true);
     try { run(env, activity); }
     catch (const char* message) {
         __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, "OpenXR startup/render error: %s", message);
@@ -340,4 +400,9 @@ Java_com_cosmerearchives_androidimageeditor_VrActivity_runNative(JNIEnv* env, jo
 extern "C" JNIEXPORT void JNICALL
 Java_com_cosmerearchives_androidimageeditor_VrActivity_requestNativeStop(JNIEnv*, jobject) {
     stopRequested.store(true);
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_cosmerearchives_androidimageeditor_VrActivity_notifyImageChanged(JNIEnv*, jobject) {
+    imageNeedsReload.store(true);
 }
