@@ -92,6 +92,7 @@ public final class ProjectStore {
         File photo = current(ctx, PHOTO);
         if(!photo.isFile()) throw new IOException("Import an image before saving a project");
         SharedPreferences p = prefs(ctx);
+        final boolean duplicating = saveAsNew && p.getString(SELECTED,null)!=null;
         String selected = saveAsNew ? null : p.getString(SELECTED,null);
         File directory = selected==null?null:new File(root(ctx),selected);
         if(directory==null || !directory.isDirectory()) {
@@ -108,6 +109,7 @@ public final class ProjectStore {
         File title = new File(directory,TITLE);
         if(!title.exists()) {
             String display=p.getString(DRAFT,"UNTITLED");
+            if(duplicating) display=sanitize(display+" COPY "+(projects(ctx).length));
             try(FileOutputStream out=new FileOutputStream(title)) {
                 out.write(display.getBytes(StandardCharsets.UTF_8));
                 out.getFD().sync();
