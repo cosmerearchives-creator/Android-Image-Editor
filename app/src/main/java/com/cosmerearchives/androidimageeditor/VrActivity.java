@@ -44,12 +44,15 @@ public final class VrActivity extends Activity {
         if(!aiRunning.compareAndSet(false,true))return;
         aiCancel.set(false);
         final long generation=depthGeneration.get();
+        QuickDepth.discardCandidate(getApplicationContext());
+        notifyDepthChanged();
         reportAiDepthStatus(1,0);
         aiWorker.execute(() -> {
             try{
                 byte[] preview=AiDepth.infer(getApplicationContext(),aiCancel,
                     progress -> reportAiDepthStatus(progress<55?1:2,progress));
                 if(aiCancel.get() || generation!=depthGeneration.get()){
+                    QuickDepth.discardCandidate(getApplicationContext());
                     reportAiDepthStatus(5,0);
                     return;
                 }
