@@ -649,9 +649,13 @@ void run(JNIEnv* env, jobject activity) {
             const bool pullDown=pressed.isActive && pressed.currentState>=0.5f;
             const bool canPaint=page==vrui::Page::Open && menu.brushMode &&
                 menu.hasDepthPixels() && !dragging;
-            const bool paintLeft=canPaint && pushDown && leftPointer;
-            // Only paint with the right trigger on the photo, never on menu buttons.
-            const bool paintRight=canPaint && pullDown && pointer;
+            float brushU=0.f,brushV=0.f;
+            const bool paintLeft=canPaint && pushDown && leftPointer &&
+                menu.hitPhoto(leftPointerX,leftPointerY,false,brushU,brushV);
+            // Trigger presses on Undo, Redo, Back or any other menu item
+            // must not start a brush stroke or block Undo/Redo.
+            const bool paintRight=canPaint && pullDown && pointer &&
+                menu.hitPhoto(pointerX,pointerY,false,brushU,brushV);
             menu.painting=paintLeft||paintRight;
             menu.paintingLeft=paintLeft;
             if(menu.painting && !wasPainting)menu.beginStroke();
