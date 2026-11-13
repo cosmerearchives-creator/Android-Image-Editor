@@ -30,6 +30,46 @@ public final class VrActivity extends Activity {
     private native void requestNativeStop();
     private native void notifyImageChanged();
     private native void notifyDepthChanged();
+    private native void notifyProjectListChanged();
+
+    /** Used by the VR Projects library. */
+    @SuppressWarnings("unused")
+    public String[] listLocalProjects(){
+        try {return ProjectStore.list(getApplicationContext());}
+        catch(RuntimeException e){Log.e(TAG,"Unable to list projects",e);return new String[0];}
+    }
+
+    /** All writes are serialized with brush-stroke snapshots on the same worker. */
+    @SuppressWarnings("unused")
+    public void requestSaveProject(boolean saveAsNew) {
+        try {depthSaver.execute(() -> {
+            try {
+                ProjectStore.save(getApplicationContext(),saveAsNew);
+                notifyProjectListChanged();
+                runOnUiThread(() -> Toast.makeText(this,"Project saved",Toast.LENGTH_SHORT).show());
+            } catch(Exception e){
+                Log.e(TAG,"Project save failed",e);
+                runOnUiThread(() -> Toast.makeText(this,"Could not save project",Toast.LENGTH_LONG).show());
+            }
+        });} catch(java.util.concurrent.RejectedExecutionException ignored){}
+    }
+
+    @SuppressWarnings("unused")
+    public void requestOpenProject(int index){
+        depthGeneration.incrementAndGet();
+        try {depthSaver.execute(() -> {
+            try {
+                ProjectStore.open(getApplicationContext(),index);
+                notifyImageChanged();
+                notifyDepthChanged();
+                notifyProjectListChanged();
+                runOnUiThread(() -> Toast.makeText(this,"Project loaded",Toast.LENGTH_SHORT).show());
+            } catch(Exception e){
+                Log.e(TAG,"Project open failed",e);
+                runOnUiThread(() -> Toast.makeText(this,"Could not open project",Toast.LENGTH_LONG).show());
+            }
+        });} catch(java.util.concurrent.RejectedExecutionException ignored){}
+    }
     private native void reportVrUpdateStatus(int state,int percent);
     private final ExecutorService updateWorker=Executors.newSingleThreadExecutor();
     private final AtomicBoolean updateRunning=new AtomicBoolean(false);
@@ -227,6 +267,14 @@ public final class VrActivity extends Activity {
         new Thread(() -> {
             try {
                 ImageStorage.importImage(getApplicationContext(), selected);
+                String filename="UNTITLED";
+                try(android.database.Cursor cursor=getContentResolver().query(selected,
+                        new String[]{android.provider.OpenableColumns.DISPLAY_NAME},
+                        null,null,null)){
+                    if(cursor!=null && cursor.moveToFirst()) filename=cursor.getString(0);
+                }catch(RuntimeException ignored){}
+                ProjectStore.imported(getApplicationContext(),filename);
+                notifyProjectListChanged();
                 notifyImageChanged();
                 runOnUiThread(() -> Toast.makeText(this, "Image ready in VR", Toast.LENGTH_SHORT).show());
             } catch (IOException | RuntimeException error) {
