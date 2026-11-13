@@ -20,6 +20,7 @@ import java.io.IOException;
 public final class VrActivity extends Activity {
     private static final String TAG = "ImageEditorXR";
     private static final int PICK_IMAGE = 7;
+    private static final int ADD_COLLAGE_IMAGE = 9;
     private static final int INSTALL_PERMISSION = 8;
     static { System.loadLibrary("image_editor_xr"); }
     private Thread xrThread;
@@ -347,6 +348,32 @@ public final class VrActivity extends Activity {
         });
     }
 
+    @SuppressWarnings("unused")
+    public void requestAddCollageImage() {
+        runOnUiThread(() -> {
+            Intent intent=new Intent(Intent.ACTION_OPEN_DOCUMENT)
+                .addCategory(Intent.CATEGORY_OPENABLE).setType("image/*");
+            startActivityForResult(intent,ADD_COLLAGE_IMAGE);
+        });
+    }
+
+    @SuppressWarnings("unused")
+    public int[] collageStatus(){return CollageStore.status(getApplicationContext());}
+
+    @SuppressWarnings("unused")
+    public void editCollage(int operation) {
+        new Thread(() -> {
+            try {
+                CollageStore.edit(getApplicationContext(),operation);
+                notifyImageChanged();
+            } catch(Exception e) {
+                Log.e(TAG,"Collage edit failed",e);
+                runOnUiThread(() -> Toast.makeText(this,"Collage: "+e.getMessage(),
+                    Toast.LENGTH_LONG).show());
+            }
+        },"collage-edit").start();
+    }
+
     @Override protected void onActivityResult(int request, int result, Intent data) {
         super.onActivityResult(request, result, data);
         if(request==INSTALL_PERMISSION){
@@ -354,7 +381,7 @@ public final class VrActivity extends Activity {
             else reportVrUpdateStatus(6,0);
             return;
         }
-        if (request != PICK_IMAGE || result != RESULT_OK || data == null || data.getData() == null)
+        if ((request != PICK_IMAGE && request != ADD_COLLAGE_IMAGE) || result != RESULT_OK || data == null || data.getData() == null)
             return;
         final Uri selected = data.getData();
         aiCancel.set(true);
@@ -363,7 +390,15 @@ public final class VrActivity extends Activity {
         Toast.makeText(this, "Importing image locally…", Toast.LENGTH_SHORT).show();
         new Thread(() -> {
             try {
+                if(request==ADD_COLLAGE_IMAGE) {
+                    CollageStore.add(getApplicationContext(),selected);
+                    notifyImageChanged();
+                    runOnUiThread(() -> Toast.makeText(this,
+                        "Collage layer added",Toast.LENGTH_SHORT).show());
+                    return;
+                }
                 ImageStorage.importImage(getApplicationContext(), selected);
+                CollageStore.reset(getApplicationContext());
                 String filename="UNTITLED";
                 try(android.database.Cursor cursor=getContentResolver().query(selected,
                         new String[]{android.provider.OpenableColumns.DISPLAY_NAME},
