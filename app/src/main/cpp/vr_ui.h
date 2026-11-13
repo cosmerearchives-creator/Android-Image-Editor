@@ -416,7 +416,8 @@ struct Renderer {
                     float w=704.f,h=300.f;
                     const float aspect=float(photoWidth)/float(photoHeight);
                     if(aspect>w/h)h=w/aspect;else w=h*aspect;
-                    const float radiusPx=brushRadius*w*zoom/256.f;
+                    const float radiusX=brushRadius*w*zoom/256.f;
+                    const float radiusY=brushRadius*h*zoom/256.f;
                     std::vector<float> ring;
                     const Color feedback=painting?(paintingLeft?Color{0.30f,0.60f,1.f}:
                                                     Color{1.f,0.35f,0.68f}):Color{0.9f,0.8f,1.f};
@@ -424,10 +425,10 @@ struct Renderer {
                     for(int i=0;i<segments;i++){
                         float a=float(i)*6.283185307f/segments;
                         float b=float(i+1)*6.283185307f/segments;
-                        float px=cursorX+std::cos(a)*radiusPx;
-                        float py=cursorY+std::sin(a)*radiusPx;
-                        float qx=cursorX+std::cos(b)*radiusPx;
-                        float qy=cursorY+std::sin(b)*radiusPx;
+                        float px=cursorX+std::cos(a)*radiusX;
+                        float py=cursorY+std::sin(a)*radiusY;
+                        float qx=cursorX+std::cos(b)*radiusX;
+                        float qy=cursorY+std::sin(b)*radiusY;
                         // Draw narrow rectangles along each segment.
                         const float dx=qx-px,dy=qy-py,length=std::hypot(dx,dy);
                         if(length<0.0001f)continue;
