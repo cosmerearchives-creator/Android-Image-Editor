@@ -13,6 +13,7 @@ def (major, minor, patch) = name.split('\\.').collect { it.toInteger() }
 android {
     namespace 'com.cosmerearchives.androidimageeditor'
     compileSdk 35
+    buildToolsVersion '35.0.0'
 
     defaultConfig {
         applicationId 'com.cosmerearchives.androidimageeditor'
