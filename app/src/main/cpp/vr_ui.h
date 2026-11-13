@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <cstring>
 #include <vector>
+#include <string>
 #include <GLES3/gl3.h>
 
 // Small self-contained OpenGL ES menu renderer, no web/assets/font dependencies.
@@ -363,6 +364,11 @@ struct Renderer {
             int n=static_cast<int>(std::strlen(title));
             label(v,title,512-n*15,page==Page::Open?615:475,5,white);
             if(page==Page::Open) {
+                if(brushMode && hasDepthPixels()) {
+                    label(v,"L PUSH R PULL",702,630,2,muted);
+                    const std::string brushText="SIZE "+std::to_string(int(brushRadius));
+                    label(v,brushText.c_str(),702,604,2,muted);
+                }
                 if(!hasPhoto()) label(v,"NO IMAGE IMPORTED",235,411,4,muted);
                 box(v,170,205,163,86,hovered==4?purpleHover:button);
                 label(v,"IMPORT",179,235,2,white);
