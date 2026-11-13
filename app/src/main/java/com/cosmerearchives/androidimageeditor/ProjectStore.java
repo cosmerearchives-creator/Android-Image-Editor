@@ -103,6 +103,7 @@ public final class ProjectStore {
         if(!directory.exists() && !directory.mkdirs())
             throw new IOException("Cannot create project directory");
         replace(photo,new File(directory,PHOTO));
+        CollageStore.saveToProject(ctx,directory);
         File depth = current(ctx, DEPTH);
         if(depth.isFile()) replace(depth,new File(directory,DEPTH));
         else new File(directory,DEPTH).delete();
@@ -126,6 +127,7 @@ public final class ProjectStore {
         if(!image.isFile()) throw new IOException("Missing project photograph");
         // Install the photo first; missing project depth never borrows current depth.
         replace(image,current(ctx,PHOTO));
+        CollageStore.openFromProject(ctx,directory);
         File depth=new File(directory,DEPTH);
         if(depth.isFile()) replace(depth,current(ctx,DEPTH));
         else current(ctx,DEPTH).delete();
