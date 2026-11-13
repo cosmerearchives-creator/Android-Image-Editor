@@ -87,9 +87,10 @@ inline int buttonAt(Page page,float x,float y) {
     } else if (page==Page::Open) {
         if(y>=92&&y<=190) return 3;
         if(y>=205&&y<=291) {
-            if(x<=383)return 4;
-            if(x<=617)return 8;
-            return 9;
+            if(x<=333)return 4;
+            if(x<=507)return 8;
+            if(x<=677)return 9;
+            return 10;
         }
         if(y>=36&&y<=88) {
             if(x>=645)return 5;
@@ -104,13 +105,63 @@ struct Renderer {
            photoVao=0,photoVbo=0,depthTexture=0;
     bool hasQuickDepth() const {return depthTexture!=0;}
     bool quickConverting=false;
+    bool brushMode=false;
+    bool painting=false;
+    bool paintingLeft=false;
+    float brushRadius=13.f; // pixels of 256x256 depth image
+    std::vector<uint8_t> depthCpu;
+    bool hasDepthPixels() const {return depthCpu.size()==256u*256u;}
+    bool hitPhoto(float sx,float sy,bool immersive,float& u,float& v) const {
+        if(!hasPhoto())return false;
+        float w=immersive?1024.f:704.f,h=immersive?768.f:300.f;
+        float aspect=float(photoWidth)/float(photoHeight);
+        if(aspect>w/h)h=w/aspect;else w=h*aspect;
+        float x=512.f-w*.5f,y=(immersive?384.f:450.f)-h*.5f;
+        if(sx<x||sx>x+w||sy<y||sy>y+h)return false;
+        u=centerU+((sx-x)/w-.5f)/zoom;
+        v=centerV+(.5f-(sy-y)/h)/zoom;
+        return u>=0.f&&u<=1.f&&v>=0.f&&v<=1.f;
+    }
+    bool brushAt(float sx,float sy,bool pullTowardViewer) {
+        if(!brushMode||!hasDepthPixels())return false;
+        float u=0.f,v=0.f;
+        if(!hitPhoto(sx,sy,false,u,v))return false;
+        const float cx=u*255.f,cy=(1.f-v)*255.f;
+        const int radius=static_cast<int>(std::ceil(brushRadius));
+        const int xa=std::max(0,static_cast<int>(cx)-radius),
+                  xb=std::min(255,static_cast<int>(cx)+radius),
+                  ya=std::max(0,static_cast<int>(cy)-radius),
+                  yb=std::min(255,static_cast<int>(cy)+radius);
+        bool edited=false;
+        for(int y=ya;y<=yb;++y)for(int x=xa;x<=xb;++x){
+            const float dist=std::hypot(float(x)-cx,float(y)-cy);
+            if(dist>brushRadius)continue;
+            const float falloff=std::pow(std::max(0.f,1.f-dist/brushRadius),1.2f);
+            const size_t i=size_t(y)*256u+size_t(x);
+            const int delta=std::max(1,static_cast<int>(std::lround(8.f*falloff)));
+            const int value=std::clamp(int(depthCpu[i])+(pullTowardViewer?delta:-delta),0,255);
+            if(value!=int(depthCpu[i])){depthCpu[i]=static_cast<uint8_t>(value);edited=true;}
+        }
+        if(edited){
+            glActiveTexture(GL_TEXTURE1);
+            glBindTexture(GL_TEXTURE_2D,depthTexture);
+            glPixelStorei(GL_UNPACK_ALIGNMENT,1);
+            glTexSubImage2D(GL_TEXTURE_2D,0,0,0,256,256,GL_RED,
+                            GL_UNSIGNED_BYTE,depthCpu.data());
+            glBindTexture(GL_TEXTURE_2D,0);
+            glActiveTexture(GL_TEXTURE0);
+        }
+        return edited;
+    }
     void clearQuickDepth() {
         if(depthTexture)glDeleteTextures(1,&depthTexture);
         depthTexture=0;
+        depthCpu.clear();
     }
     void uploadQuickDepth(const std::vector<uint8_t>& gray,int width,int height){
         clearQuickDepth();
         if(width!=256||height!=256||gray.size()!=size_t(width)*size_t(height))return;
+        depthCpu=gray;
         glGenTextures(1,&depthTexture);
         glActiveTexture(GL_TEXTURE1);
         glBindTexture(GL_TEXTURE_2D,depthTexture);
@@ -313,12 +364,14 @@ struct Renderer {
             label(v,title,512-n*15,page==Page::Open?615:475,5,white);
             if(page==Page::Open) {
                 if(!hasPhoto()) label(v,"NO IMAGE IMPORTED",235,411,4,muted);
-                box(v,170,205,213,86,hovered==4?purpleHover:button);
-                label(v,"IMPORT",201,233,3,white);
-                box(v,390,205,227,86,hovered==8?purpleHover:purple);
-                label(v,"IMMERSIVE",412,233,3,white);
-                box(v,625,205,229,86,hovered==9?purpleHover:button);
-                label(v,"QUICK",680,233,3,white);
+                box(v,170,205,163,86,hovered==4?purpleHover:button);
+                label(v,"IMPORT",179,235,2,white);
+                box(v,340,205,167,86,hovered==8?purpleHover:purple);
+                label(v,"IMMERSIVE",356,235,2,white);
+                box(v,514,205,163,86,hovered==9?purpleHover:button);
+                label(v,"QUICK",559,235,2,white);
+                box(v,684,205,170,86,hovered==10?purpleHover:(brushMode?purple:button));
+                label(v,brushMode?"BRUSH ON":"BRUSH OFF",700,235,2,white);
                 box(v,170,36,239,52,hovered==6?purpleHover:(stereoEnabled?purple:button));
                 label(v,stereoEnabled?"3D ON":"3D OFF",218,51,2,white);
                 box(v,420,36,219,52,hovered==7?purpleHover:button);
@@ -355,6 +408,46 @@ struct Renderer {
                 glBufferData(GL_ARRAY_BUFFER,cursor.size()*sizeof(float),cursor.data(),GL_STREAM_DRAW);
                 glDrawArrays(GL_TRIANGLES,0,static_cast<GLsizei>(cursor.size()/5));
                 glBindVertexArray(0);
+            }
+            // Brush outline is drawn after the photo, at actual depth-map brush size.
+            if(brushMode && hasDepthPixels() && pointer) {
+                float u=0.f,v=0.f;
+                if(hitPhoto(cursorX,cursorY,false,u,v)) {
+                    float w=704.f,h=300.f;
+                    const float aspect=float(photoWidth)/float(photoHeight);
+                    if(aspect>w/h)h=w/aspect;else w=h*aspect;
+                    const float radiusPx=brushRadius*w*zoom/256.f;
+                    std::vector<float> ring;
+                    const Color feedback=painting?(paintingLeft?Color{0.30f,0.60f,1.f}:
+                                                    Color{1.f,0.35f,0.68f}):Color{0.9f,0.8f,1.f};
+                    constexpr int segments=28;
+                    for(int i=0;i<segments;i++){
+                        float a=float(i)*6.283185307f/segments;
+                        float b=float(i+1)*6.283185307f/segments;
+                        float px=cursorX+std::cos(a)*radiusPx;
+                        float py=cursorY+std::sin(a)*radiusPx;
+                        float qx=cursorX+std::cos(b)*radiusPx;
+                        float qy=cursorY+std::sin(b)*radiusPx;
+                        // Draw narrow rectangles along each segment.
+                        const float dx=qx-px,dy=qy-py,length=std::hypot(dx,dy);
+                        if(length<0.0001f)continue;
+                        const float nx=-dy/length,ny=dx/length;
+                        const float t=1.3f;
+                        const float pts[6][2]={
+                          {px+nx*t,py+ny*t},{qx+nx*t,qy+ny*t},{px-nx*t,py-ny*t},
+                          {qx+nx*t,qy+ny*t},{qx-nx*t,qy-ny*t},{px-nx*t,py-ny*t}
+                        };
+                        for(const auto& p:pts){
+                            ring.push_back(p[0]);ring.push_back(p[1]);
+                            ring.push_back(feedback.r);ring.push_back(feedback.g);
+                            ring.push_back(feedback.b);
+                        }
+                    }
+                    glUseProgram(program);glBindVertexArray(vao);glBindBuffer(GL_ARRAY_BUFFER,vbo);
+                    glBufferData(GL_ARRAY_BUFFER,ring.size()*sizeof(float),ring.data(),GL_STREAM_DRAW);
+                    glDrawArrays(GL_TRIANGLES,0,static_cast<GLsizei>(ring.size()/5));
+                    glBindVertexArray(0);
+                }
             }
         }
     }
