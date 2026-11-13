@@ -663,7 +663,7 @@ void run(JNIEnv* env, jobject activity) {
             }
             // Some Quest runtimes temporarily deactivate left aim while grip is
             // tracked; retain a left cursor using the grip pose as a fallback.
-            if(!validLeftAim){
+            if(!leftPointer){
                 XrActionStateGetInfo fallbackGet{XR_TYPE_ACTION_STATE_GET_INFO};
                 fallbackGet.action=r.leftGripPoseAction;
                 fallbackGet.subactionPath=leftHand;
@@ -675,11 +675,19 @@ void run(JNIEnv* env, jobject activity) {
                                                   frameState.predictedDisplayTime,&fallback)) &&
                        (fallback.locationFlags & XR_SPACE_LOCATION_POSITION_VALID_BIT) &&
                        (fallback.locationFlags & XR_SPACE_LOCATION_ORIENTATION_VALID_BIT)){
-                        validLeftAim=true;
-                        leftPose=fallback.pose;
-                        leftPosition=fallback.pose.position;
-                        leftPointer=pointerOnPanel(fallback.pose,panelPosition,panelScale,
-                                                   panelAngle,leftPointerX,leftPointerY);
+                        float fallbackX=0.f,fallbackY=0.f;
+                        const bool fallbackHit=pointerOnPanel(fallback.pose,panelPosition,
+                            panelScale,panelAngle,fallbackX,fallbackY);
+                        if(fallbackHit || !validLeftAim){
+                            validLeftAim=true;
+                            leftPose=fallback.pose;
+                            leftPosition=fallback.pose.position;
+                            leftPointer=fallbackHit;
+                            if(fallbackHit){
+                                leftPointerX=fallbackX;
+                                leftPointerY=fallbackY;
+                            }
+                        }
                     }
                 }
             }
