@@ -89,6 +89,8 @@ struct XrResources {
     XrAction gripAction{XR_NULL_HANDLE};
     XrAction leftGripAction{XR_NULL_HANDLE};
     XrAction leftAimAction{XR_NULL_HANDLE};
+    XrAction compareAction{XR_NULL_HANDLE};
+    XrAction exitViewAction{XR_NULL_HANDLE};
     XrSpace leftAimSpace{XR_NULL_HANDLE};
     XrSpace aimSpace{XR_NULL_HANDLE};
     EGLDisplay display{EGL_NO_DISPLAY};
@@ -237,17 +239,33 @@ void run(JNIEnv* env, jobject activity) {
     leftGripInfo.countSubactionPaths=1;
     leftGripInfo.subactionPaths=&leftHand;
     check(xrCreateAction(r.actionSet,&leftGripInfo,&r.leftGripAction),"xrCreateLeftGripAction");
+    XrActionCreateInfo compareInfo{XR_TYPE_ACTION_CREATE_INFO};
+    compareInfo.actionType=XR_ACTION_TYPE_BOOLEAN_INPUT;
+    std::strcpy(compareInfo.actionName,"compare_2d_3d");
+    std::strcpy(compareInfo.localizedActionName,"Compare 2D and 3D");
+    compareInfo.countSubactionPaths=1;
+    compareInfo.subactionPaths=&rightHand;
+    check(xrCreateAction(r.actionSet,&compareInfo,&r.compareAction),"xrCreateCompareAction");
+    XrActionCreateInfo exitInfo{XR_TYPE_ACTION_CREATE_INFO};
+    exitInfo.actionType=XR_ACTION_TYPE_BOOLEAN_INPUT;
+    std::strcpy(exitInfo.actionName,"exit_immersive");
+    std::strcpy(exitInfo.localizedActionName,"Return to Editor");
+    exitInfo.countSubactionPaths=1;
+    exitInfo.subactionPaths=&rightHand;
+    check(xrCreateAction(r.actionSet,&exitInfo,&r.exitViewAction),"xrCreateExitViewAction");
     const XrActionSuggestedBinding suggested[] = {
         {r.triggerAction, path(r.instance, "/user/hand/right/input/trigger/value")},
         {r.aimAction, path(r.instance, "/user/hand/right/input/aim/pose")},
         {r.stickAction, path(r.instance, "/user/hand/right/input/thumbstick")},
         {r.gripAction, path(r.instance, "/user/hand/right/input/squeeze/value")},
         {r.leftAimAction, path(r.instance, "/user/hand/left/input/aim/pose")},
-        {r.leftGripAction, path(r.instance, "/user/hand/left/input/squeeze/value")}
+        {r.leftGripAction, path(r.instance, "/user/hand/left/input/squeeze/value")},
+        {r.compareAction, path(r.instance, "/user/hand/right/input/a/click")},
+        {r.exitViewAction, path(r.instance, "/user/hand/right/input/b/click")}
     };
     XrInteractionProfileSuggestedBinding profile{XR_TYPE_INTERACTION_PROFILE_SUGGESTED_BINDING};
     profile.interactionProfile = path(r.instance, "/interaction_profiles/oculus/touch_controller");
-    profile.countSuggestedBindings = 6;
+    profile.countSuggestedBindings = 8;
     profile.suggestedBindings = suggested;
     check(xrSuggestInteractionProfileBindings(r.instance, &profile), "xrSuggestInteractionProfileBindings");
     XrSessionActionSetsAttachInfo attach{XR_TYPE_SESSION_ACTION_SETS_ATTACH_INFO};
@@ -297,6 +315,9 @@ void run(JNIEnv* env, jobject activity) {
     if (!menu.initialize()) throw "VR menu shader initialization";
     vrui::Page page = resumeImagePage.exchange(false) ? vrui::Page::Open : vrui::Page::Home;
     bool wasPressed = false;
+    bool wasA=false,wasB=false;
+    XrVector3f editorPosition{0.f,0.f,-1.9f};
+    float editorScale=1.f,editorAngle=0.f,editorZoom=1.f,editorU=0.5f,editorV=0.5f;
     // One grip translates the canvas. Two grips translate, scale, and rotate around Z.
     enum class DragMode {None, Right, Left, Both};
     DragMode dragMode=DragMode::None;
@@ -358,6 +379,16 @@ void run(JNIEnv* env, jobject activity) {
             get.subactionPath = rightHand;
             XrActionStateFloat pressed{XR_TYPE_ACTION_STATE_FLOAT};
             xrGetActionStateFloat(r.session, &get, &pressed);
+            XrActionStateGetInfo compareGet{XR_TYPE_ACTION_STATE_GET_INFO};
+            compareGet.action=r.compareAction;
+            compareGet.subactionPath=rightHand;
+            XrActionStateBoolean compare{XR_TYPE_ACTION_STATE_BOOLEAN};
+            xrGetActionStateBoolean(r.session,&compareGet,&compare);
+            XrActionStateGetInfo exitGet{XR_TYPE_ACTION_STATE_GET_INFO};
+            exitGet.action=r.exitViewAction;
+            exitGet.subactionPath=rightHand;
+            XrActionStateBoolean exitView{XR_TYPE_ACTION_STATE_BOOLEAN};
+            xrGetActionStateBoolean(r.session,&exitGet,&exitView);
 
             XrActionStateGetInfo stickGet{XR_TYPE_ACTION_STATE_GET_INFO};
             stickGet.action=r.stickAction;
@@ -434,9 +465,11 @@ void run(JNIEnv* env, jobject activity) {
                     }
                 }
             }
-            const bool rightHeld=page==vrui::Page::Open && validAim &&
+            const bool rightHeld=(page==vrui::Page::Open ||
+                page==vrui::Page::Immersive) && validAim &&
                 grip.isActive && grip.currentState>0.6f;
-            const bool leftHeld=page==vrui::Page::Open && validLeftAim &&
+            const bool leftHeld=(page==vrui::Page::Open ||
+                page==vrui::Page::Immersive) && validLeftAim &&
                 leftGrip.isActive && leftGrip.currentState>0.6f;
             const DragMode nextMode=rightHeld && leftHeld ? DragMode::Both :
                 rightHeld ? DragMode::Right : leftHeld ? DragMode::Left : DragMode::None;
@@ -464,7 +497,8 @@ void run(JNIEnv* env, jobject activity) {
                 const float vx=aimPosition.x-leftPosition.x;
                 const float vy=aimPosition.y-leftPosition.y;
                 const float d=std::max(0.05f,std::hypot(vx,vy));
-                panelScale=std::clamp(startScale*d/startDistance,0.5f,4.f);
+                panelScale=std::clamp(startScale*d/startDistance,0.5f,
+                                      page==vrui::Page::Immersive?8.f:4.f);
                 // Keep rotation planar for predictable ray intersection and no tilt discomfort.
                 panelAngle=startAngle+std::remainder(std::atan2(vy,vx)-startHandAngle,
                                                       6.283185307179586f);
@@ -478,35 +512,69 @@ void run(JNIEnv* env, jobject activity) {
                 panelPosition.z=std::clamp(dragPanel.z+hand.z-dragOrigin.z,-4.f,-0.55f);
             }
             const bool dragging=dragMode!=DragMode::None;
-            if(page==vrui::Page::Open && stick.isActive && !dragging &&
-               std::abs(stick.currentState.y)>0.15f) {
-                menu.changeZoom(stick.currentState.y * dt * 1.5f,pointerX,pointerY,pointer);
+            if((page==vrui::Page::Open || page==vrui::Page::Immersive) &&
+               stick.isActive && !dragging && std::abs(stick.currentState.y)>0.15f) {
+                menu.changeZoom(stick.currentState.y * dt * 1.5f,pointerX,pointerY,
+                                pointer,page==vrui::Page::Immersive);
             }
-            const int hovered = pointer && !dragging ? vrui::buttonAt(page,pointerX,pointerY) : -1;
-            const bool triggerDown = pressed.isActive && pressed.currentState >= 0.5f;
-            if (triggerDown && !wasPressed && hovered >= 0) {
-                if (hovered == 3) page = vrui::Page::Home;
-                else if (page == vrui::Page::Open && hovered == 6 && menu.hasPhoto()) {
+            const int hovered=(pointer && !dragging && page!=vrui::Page::Immersive)
+                ? vrui::buttonAt(page,pointerX,pointerY) : -1;
+            const bool triggerDown=pressed.isActive && pressed.currentState>=0.5f;
+            const bool aDown=compare.isActive && compare.currentState;
+            const bool bDown=exitView.isActive && exitView.currentState;
+            // Dedicated photo-only mode has no visible menu: B (or trigger) returns
+            // to the editor, and A toggles the stereo comparison without leaving VR.
+            if(page==vrui::Page::Immersive) {
+                if((bDown&&!wasB)||(triggerDown&&!wasPressed)) {
+                    page=vrui::Page::Open;
+                    panelPosition=editorPosition;
+                    panelScale=editorScale;
+                    panelAngle=editorAngle;
+                    menu.zoom=editorZoom;
+                    menu.centerU=editorU;
+                    menu.centerV=editorV;
+                    dragMode=DragMode::None;
+                } else if(aDown&&!wasA) {
                     menu.stereoEnabled=!menu.stereoEnabled;
-                } else if (page == vrui::Page::Open && hovered == 7 && menu.hasPhoto()) {
-                    menu.depthLevel=(menu.depthLevel+1)%3;
                 }
-                else if (page == vrui::Page::Open && hovered == 5) {
+            } else if(triggerDown&&!wasPressed && hovered>=0) {
+                if(hovered==3) page=vrui::Page::Home;
+                else if(page==vrui::Page::Open && hovered==8 && menu.hasPhoto()) {
+                    // Preserve the editor layout while immersing; the photo starts
+                    // unzoomed on a large, gaze-explorable world-anchored canvas.
+                    editorPosition=panelPosition;
+                    editorScale=panelScale;
+                    editorAngle=panelAngle;
+                    editorZoom=menu.zoom;
+                    editorU=menu.centerU;
+                    editorV=menu.centerV;
+                    menu.resetPhotoView();
+                    panelPosition={0.f,0.f,-1.9f};
+                    panelScale=3.7f;
+                    panelAngle=0.f;
+                    dragMode=DragMode::None;
+                    page=vrui::Page::Immersive;
+                } else if(page==vrui::Page::Open && hovered==6 && menu.hasPhoto()) {
+                    menu.stereoEnabled=!menu.stereoEnabled;
+                } else if(page==vrui::Page::Open && hovered==7 && menu.hasPhoto()) {
+                    menu.depthLevel=(menu.depthLevel+1)%3;
+                } else if(page==vrui::Page::Open && hovered==5) {
                     menu.resetPhotoView();
                     panelPosition={0.f,0.f,-1.9f};
                     panelScale=1.f;
                     panelAngle=0.f;
                     dragMode=DragMode::None;
-                }
-                else if (page == vrui::Page::Open && hovered == 4) {
+                } else if(page==vrui::Page::Open && hovered==4) {
                     resumeImagePage.store(true);
                     callPicker(env,activity);
-                } else if (page == vrui::Page::Home) {
-                    page = hovered == 0 ? vrui::Page::Open :
-                           hovered == 1 ? vrui::Page::Projects : vrui::Page::Gallery;
+                } else if(page==vrui::Page::Home) {
+                    page=hovered==0?vrui::Page::Open:
+                         hovered==1?vrui::Page::Projects:vrui::Page::Gallery;
                 }
             }
-            wasPressed = triggerDown;
+            wasPressed=triggerDown;
+            wasA=aDown;
+            wasB=bDown;
 
             uint32_t index = 0;
             XrSwapchainImageAcquireInfo acquire{XR_TYPE_SWAPCHAIN_IMAGE_ACQUIRE_INFO};

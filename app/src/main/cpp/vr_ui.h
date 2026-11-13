@@ -15,7 +15,7 @@ struct Color {float r,g,b;};
 constexpr Color white{0.96f,0.95f,1.0f}, muted{0.67f,0.63f,0.76f},
     purple{0.34f,0.22f,0.52f}, purpleHover{0.52f,0.36f,0.76f},
     panel{0.095f,0.075f,0.14f}, button{0.17f,0.14f,0.25f};
-enum class Page {Home, Open, Projects, Gallery};
+enum class Page {Home, Open, Projects, Gallery, Immersive};
 inline void box(std::vector<float>& vertices,float x,float y,float w,float h,Color c) {
     float a[6][2]={{x,y},{x+w,y},{x,y+h},{x+w,y},{x+w,y+h},{x,y+h}};
     for(auto& p:a) {vertices.push_back(p[0]);vertices.push_back(p[1]);
@@ -86,7 +86,7 @@ inline int buttonAt(Page page,float x,float y) {
         if(y>=186&&y<=282)return 2;
     } else if (page==Page::Open) {
         if(y>=92&&y<=190) return 3;
-        if(y>=205&&y<=291) return 4;
+        if(y>=205&&y<=291) return x<510?4:8;
         if(y>=36&&y<=88) {
             if(x>=645)return 5;
             if(x<=409)return 6;
@@ -105,14 +105,14 @@ struct Renderer {
     }
     float zoom=1.f, centerU=0.5f, centerV=0.5f;
     void resetPhotoView(){zoom=1.f;centerU=0.5f;centerV=0.5f;}
-    void changeZoom(float delta,float cursorX,float cursorY,bool pointer){
+    void changeZoom(float delta,float cursorX,float cursorY,bool pointer,bool immersive=false){
         if(!hasPhoto() || std::abs(delta)<0.001f)return;
         const float next=std::clamp(zoom*std::exp(delta),1.f,12.f);
         if(std::abs(next-zoom)<0.00001f)return;
-        float w=704.f,h=300.f;
+        float w=immersive?1024.f:704.f,h=immersive?768.f:300.f;
         const float ratio=float(photoWidth)/float(photoHeight);
         if(ratio>w/h)h=w/ratio;else w=h*ratio;
-        const float x=512.f-w/2.f,y=450.f-h/2.f;
+        const float x=512.f-w/2.f,y=(immersive?384.f:450.f)-h/2.f;
         const float px=pointer?std::clamp((cursorX-x)/w,0.f,1.f):0.5f;
         const float py=pointer?std::clamp((cursorY-y)/h,0.f,1.f):0.5f;
         // Hold the content under the aim cursor fixed while zooming.
@@ -221,13 +221,13 @@ struct Renderer {
         photoWidth=width;photoHeight=height;
         resetPhotoView();
     }
-    void drawPhoto(float eyeSign){
+    void drawPhoto(float eyeSign,bool immersive=false){
         if(!photoTexture || !photoProgram)return;
         // Fit without cropping or stretching, preserving photo aspect ratio.
-        float w=704.f,h=300.f;
+        float w=immersive?1024.f:704.f,h=immersive?768.f:300.f;
         const float ratio=float(photoWidth)/float(photoHeight);
         if(ratio > w/h) h=w/ratio; else w=h*ratio;
-        const float x=512.f-w/2.f,y=450.f-h/2.f;
+        const float x=512.f-w/2.f,y=(immersive?384.f:450.f)-h/2.f;
         // Explicit normalized texture coordinates preserve source orientation.
         const float half=0.5f/zoom;
         const float u0=centerU-half,u1=centerU+half;
@@ -248,6 +248,11 @@ struct Renderer {
         glBindTexture(GL_TEXTURE_2D,0);
     }
     void draw(Page page,int hovered,float cursorX,float cursorY,bool pointer,float eyeSign=0.f){
+        if(page==Page::Immersive) {
+            // Full photo only, letterboxed according to aspect ratio, no editor UI.
+            if(hasPhoto()) drawPhoto(eyeSign,true);
+            return;
+        }
         std::vector<float> v;v.reserve(42000);
         box(v,42,48,940,674,panel);
         label(v,"ANDROID IMAGE EDITOR",172,645,5,white);
@@ -268,8 +273,10 @@ struct Renderer {
             label(v,title,512-n*15,page==Page::Open?615:475,5,white);
             if(page==Page::Open) {
                 if(!hasPhoto()) label(v,"NO IMAGE IMPORTED",235,411,4,muted);
-                box(v,170,205,684,86,hovered==4?purpleHover:button);
-                label(v,"IMPORT IMAGE",330,232,3,white);
+                box(v,170,205,330,86,hovered==4?purpleHover:button);
+                label(v,"IMPORT",250,233,3,white);
+                box(v,520,205,334,86,hovered==8?purpleHover:purple);
+                label(v,"IMMERSIVE",590,233,3,white);
                 box(v,170,36,239,52,hovered==6?purpleHover:(stereoEnabled?purple:button));
                 label(v,stereoEnabled?"3D ON":"3D OFF",218,51,2,white);
                 box(v,420,36,219,52,hovered==7?purpleHover:button);
