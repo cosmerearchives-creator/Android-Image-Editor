@@ -16,6 +16,43 @@ namespace {
 std::atomic<bool> stopRequested{false};
 std::atomic<bool> imageNeedsReload{true};
 std::atomic<bool> depthNeedsReload{true};
+void saveEditedDepth(JNIEnv* env,jobject activity,const std::vector<uint8_t>& gray) {
+    if(gray.size()!=256u*256u)return;
+    jclass cls=env->GetObjectClass(activity);
+    jmethodID method=env->GetMethodID(cls,"saveEditedDepth","([B)V");
+    if(method){
+        jbyteArray values=env->NewByteArray(static_cast<jsize>(gray.size()));
+        if(values){
+            env->SetByteArrayRegion(values,0,static_cast<jsize>(gray.size()),
+                                    reinterpret_cast<const jbyte*>(gray.data()));
+            env->CallVoidMethod(activity,method,values);
+            env->DeleteLocalRef(values);
+        }
+    }
+    if(env->ExceptionCheck()){env->ExceptionDescribe();env->ExceptionClear();}
+    env->DeleteLocalRef(cls);
+}
+// Project controller aim pose onto the current (translated and planar-rotated)
+// photo quad. This is also used for left-hand brushing.
+bool pointerOnPanel(const XrPosef& pose,const XrVector3f& center,
+                    float scale,float angle,float& sx,float& sy) {
+    const auto& q=pose.orientation;
+    const float dx=-2.f*(q.x*q.z+q.w*q.y);
+    const float dy=-2.f*(q.y*q.z-q.w*q.x);
+    const float dz=-1.f+2.f*(q.x*q.x+q.y*q.y);
+    if(dz>=-0.001f)return false;
+    const float t=(center.z-pose.position.z)/dz;
+    if(t<=0.f)return false;
+    const float px=pose.position.x+dx*t-center.x;
+    const float py=pose.position.y+dy*t-center.y;
+    const float co=std::cos(angle),si=std::sin(angle);
+    const float lx=(co*px+si*py)/scale;
+    const float ly=(-si*px+co*py)/scale;
+    sx=(lx/1.45f+0.5f)*1024.f;
+    sy=(ly/1.08f+0.5f)*768.f;
+    return sx>=0.f && sx<=1024.f && sy>=0.f && sy<=768.f;
+}
+
 void callQuickConvert(JNIEnv* env,jobject activity) {
     jclass cls=env->GetObjectClass(activity);
     jmethodID method=env->GetMethodID(cls,"requestQuickConvert","()V");
@@ -129,6 +166,8 @@ struct XrResources {
     XrAction triggerAction{XR_NULL_HANDLE};
     XrAction aimAction{XR_NULL_HANDLE};
     XrAction stickAction{XR_NULL_HANDLE};
+    XrAction brushSizeAction{XR_NULL_HANDLE};
+    XrAction pushAction{XR_NULL_HANDLE};
     XrAction gripAction{XR_NULL_HANDLE};
     XrAction leftGripAction{XR_NULL_HANDLE};
     XrAction leftAimAction{XR_NULL_HANDLE};
@@ -261,6 +300,20 @@ void run(JNIEnv* env, jobject activity) {
     stickInfo.countSubactionPaths=1;
     stickInfo.subactionPaths=&rightHand;
     check(xrCreateAction(r.actionSet,&stickInfo,&r.stickAction),"xrCreateStickAction");
+    XrActionCreateInfo sizeInfo{XR_TYPE_ACTION_CREATE_INFO};
+    sizeInfo.actionType=XR_ACTION_TYPE_VECTOR2F_INPUT;
+    std::strcpy(sizeInfo.actionName,"brush_size_stick");
+    std::strcpy(sizeInfo.localizedActionName,"Brush Size");
+    sizeInfo.countSubactionPaths=1;
+    sizeInfo.subactionPaths=&leftHand;
+    check(xrCreateAction(r.actionSet,&sizeInfo,&r.brushSizeAction),"xrCreateBrushSizeAction");
+    XrActionCreateInfo pushInfo{XR_TYPE_ACTION_CREATE_INFO};
+    pushInfo.actionType=XR_ACTION_TYPE_FLOAT_INPUT;
+    std::strcpy(pushInfo.actionName,"push_depth");
+    std::strcpy(pushInfo.localizedActionName,"Push Depth Back");
+    pushInfo.countSubactionPaths=1;
+    pushInfo.subactionPaths=&leftHand;
+    check(xrCreateAction(r.actionSet,&pushInfo,&r.pushAction),"xrCreatePushAction");
     XrActionCreateInfo gripInfo{XR_TYPE_ACTION_CREATE_INFO};
     gripInfo.actionType=XR_ACTION_TYPE_FLOAT_INPUT;
     std::strcpy(gripInfo.actionName,"move_grip");
@@ -304,11 +357,13 @@ void run(JNIEnv* env, jobject activity) {
         {r.leftAimAction, path(r.instance, "/user/hand/left/input/aim/pose")},
         {r.leftGripAction, path(r.instance, "/user/hand/left/input/squeeze/value")},
         {r.compareAction, path(r.instance, "/user/hand/right/input/a/click")},
-        {r.exitViewAction, path(r.instance, "/user/hand/right/input/b/click")}
+        {r.exitViewAction, path(r.instance, "/user/hand/right/input/b/click")},
+        {r.brushSizeAction, path(r.instance, "/user/hand/left/input/thumbstick")},
+        {r.pushAction, path(r.instance, "/user/hand/left/input/trigger/value")}
     };
     XrInteractionProfileSuggestedBinding profile{XR_TYPE_INTERACTION_PROFILE_SUGGESTED_BINDING};
     profile.interactionProfile = path(r.instance, "/interaction_profiles/oculus/touch_controller");
-    profile.countSuggestedBindings = 8;
+    profile.countSuggestedBindings = 10;
     profile.suggestedBindings = suggested;
     check(xrSuggestInteractionProfileBindings(r.instance, &profile), "xrSuggestInteractionProfileBindings");
     XrSessionActionSetsAttachInfo attach{XR_TYPE_SESSION_ACTION_SETS_ATTACH_INFO};
@@ -358,6 +413,9 @@ void run(JNIEnv* env, jobject activity) {
     if (!menu.initialize()) throw "VR menu shader initialization";
     vrui::Page page = resumeImagePage.exchange(false) ? vrui::Page::Open : vrui::Page::Home;
     bool wasPressed = false;
+    bool wasPainting=false,strokeEdited=false;
+    float leftPointerX=0.f,leftPointerY=0.f;
+    bool leftPointer=false;
     bool wasA=false,wasB=false;
     XrVector3f editorPosition{0.f,0.f,-1.9f};
     float editorScale=1.f,editorAngle=0.f,editorZoom=1.f,editorU=0.5f,editorV=0.5f;
@@ -422,6 +480,16 @@ void run(JNIEnv* env, jobject activity) {
             get.subactionPath = rightHand;
             XrActionStateFloat pressed{XR_TYPE_ACTION_STATE_FLOAT};
             xrGetActionStateFloat(r.session, &get, &pressed);
+            XrActionStateGetInfo pushGet{XR_TYPE_ACTION_STATE_GET_INFO};
+            pushGet.action=r.pushAction;
+            pushGet.subactionPath=leftHand;
+            XrActionStateFloat push{XR_TYPE_ACTION_STATE_FLOAT};
+            xrGetActionStateFloat(r.session,&pushGet,&push);
+            XrActionStateGetInfo sizeGet{XR_TYPE_ACTION_STATE_GET_INFO};
+            sizeGet.action=r.brushSizeAction;
+            sizeGet.subactionPath=leftHand;
+            XrActionStateVector2f brushSizeStick{XR_TYPE_ACTION_STATE_VECTOR2F};
+            xrGetActionStateVector2f(r.session,&sizeGet,&brushSizeStick);
             XrActionStateGetInfo compareGet{XR_TYPE_ACTION_STATE_GET_INFO};
             compareGet.action=r.compareAction;
             compareGet.subactionPath=rightHand;
@@ -458,6 +526,7 @@ void run(JNIEnv* env, jobject activity) {
             bool validAim=false;
             XrVector3f aimPosition{0.f,0.f,0.f};
             bool validLeftAim=false;
+            leftPointer=false;
             XrVector3f leftPosition{0.f,0.f,0.f};
             XrActionStateGetInfo leftAimGet{XR_TYPE_ACTION_STATE_GET_INFO};
             leftAimGet.action=r.leftAimAction;
@@ -472,6 +541,8 @@ void run(JNIEnv* env, jobject activity) {
                     (leftLocation.locationFlags & XR_SPACE_LOCATION_ORIENTATION_VALID_BIT)) {
                     validLeftAim=true;
                     leftPosition=leftLocation.pose.position;
+                    leftPointer=pointerOnPanel(leftLocation.pose,panelPosition,panelScale,
+                                               panelAngle,leftPointerX,leftPointerY);
                 }
             }
             XrActionStateGetInfo aimGet{XR_TYPE_ACTION_STATE_GET_INFO};
@@ -560,6 +631,31 @@ void run(JNIEnv* env, jobject activity) {
                 menu.changeZoom(stick.currentState.y * dt * 1.5f,pointerX,pointerY,
                                 pointer,page==vrui::Page::Immersive);
             }
+            if(page==vrui::Page::Open && menu.brushMode && menu.hasDepthPixels()
+                && brushSizeStick.isActive && std::abs(brushSizeStick.currentState.y)>0.15f) {
+                menu.brushRadius=std::clamp(menu.brushRadius+
+                    brushSizeStick.currentState.y*dt*23.f,3.f,60.f);
+            }
+            const bool pushDown=push.isActive && push.currentState>=0.5f;
+            const bool pullDown=pressed.isActive && pressed.currentState>=0.5f;
+            const bool canPaint=page==vrui::Page::Open && menu.brushMode &&
+                menu.hasDepthPixels() && !dragging;
+            const bool paintLeft=canPaint && pushDown && leftPointer;
+            // Only paint with the right trigger on the photo, never on menu buttons.
+            const bool paintRight=canPaint && pullDown && pointer;
+            menu.painting=paintLeft||paintRight;
+            menu.paintingLeft=paintLeft;
+            bool painted=false;
+            if(canPaint){
+                if(paintLeft)painted|=menu.brushAt(leftPointerX,leftPointerY,false);
+                if(paintRight)painted|=menu.brushAt(pointerX,pointerY,true);
+            }
+            strokeEdited|=painted;
+            if(wasPainting && !menu.painting && strokeEdited) {
+                saveEditedDepth(env,activity,menu.depthCpu);
+                strokeEdited=false;
+            }
+            wasPainting=menu.painting;
             const int hovered=(pointer && !dragging && page!=vrui::Page::Immersive)
                 ? vrui::buttonAt(page,pointerX,pointerY) : -1;
             const bool triggerDown=pressed.isActive && pressed.currentState>=0.5f;
@@ -600,7 +696,10 @@ void run(JNIEnv* env, jobject activity) {
                 } else if(page==vrui::Page::Open && hovered==9 &&
                           menu.hasPhoto() && !menu.quickConverting) {
                     menu.quickConverting=true;
+                    menu.brushMode=false;
                     callQuickConvert(env,activity);
+                } else if(page==vrui::Page::Open && hovered==10 && menu.hasDepthPixels()) {
+                    menu.brushMode=!menu.brushMode;
                 } else if(page==vrui::Page::Open && hovered==6 && menu.hasPhoto()) {
                     menu.stereoEnabled=!menu.stereoEnabled;
                 } else if(page==vrui::Page::Open && hovered==7 && menu.hasPhoto()) {
@@ -634,6 +733,7 @@ void run(JNIEnv* env, jobject activity) {
                                    images[index].image, 0);
             if(imageNeedsReload.exchange(false)) {
                 refreshImage(env,activity,menu);
+                menu.brushMode=false;
                 depthNeedsReload.store(true);
             }
             if(depthNeedsReload.exchange(false))refreshDepth(env,activity,menu);
@@ -674,6 +774,7 @@ void run(JNIEnv* env, jobject activity) {
         end.layers = layerCount ? layers : nullptr;
         check(xrEndFrame(r.session, &end), "xrEndFrame");
     }
+    if(strokeEdited && menu.hasDepthPixels())saveEditedDepth(env,activity,menu.depthCpu);
     if (running) xrRequestExitSession(r.session);
     log("OpenXR session stopped");
 }
