@@ -16,6 +16,73 @@ namespace {
 std::atomic<bool> stopRequested{false};
 std::atomic<bool> imageNeedsReload{true};
 std::atomic<bool> depthNeedsReload{true};
+std::atomic<bool> projectsNeedReload{true};
+void loadPanelLayout(JNIEnv* env,jobject activity,XrVector3f& pos,float& scale){
+    jclass cls=env->GetObjectClass(activity);
+    jmethodID method=env->GetMethodID(cls,"loadFloatingPanelPose","()[F");
+    if(method){
+        jfloatArray values=static_cast<jfloatArray>(env->CallObjectMethod(activity,method));
+        if(values){
+            if(env->GetArrayLength(values)==4){
+                float v[4]{};
+                env->GetFloatArrayRegion(values,0,4,v);
+                if(std::isfinite(v[0])&&std::isfinite(v[1])&&std::isfinite(v[2])&&
+                   std::isfinite(v[3])){
+                    pos={std::clamp(v[0],-5.f,5.f),std::clamp(v[1],-2.5f,2.5f),
+                         std::clamp(v[2],-4.f,-0.6f)};
+                    scale=std::clamp(v[3],0.5f,2.f);
+                }
+            }
+            env->DeleteLocalRef(values);
+        }
+    }
+    if(env->ExceptionCheck()){env->ExceptionDescribe();env->ExceptionClear();}
+    env->DeleteLocalRef(cls);
+}
+void savePanelLayout(JNIEnv* env,jobject activity,const XrVector3f& pos,float scale){
+    jclass cls=env->GetObjectClass(activity);
+    jmethodID method=env->GetMethodID(cls,"saveFloatingPanelPose","(FFFF)V");
+    if(method)env->CallVoidMethod(activity,method,pos.x,pos.y,pos.z,scale);
+    if(env->ExceptionCheck()){env->ExceptionDescribe();env->ExceptionClear();}
+    env->DeleteLocalRef(cls);
+}
+void callSaveProject(JNIEnv* env,jobject activity,bool asNew){
+    jclass cls=env->GetObjectClass(activity);
+    jmethodID method=env->GetMethodID(cls,"requestSaveProject","(Z)V");
+    if(method)env->CallVoidMethod(activity,method,static_cast<jboolean>(asNew));
+    if(env->ExceptionCheck()){env->ExceptionDescribe();env->ExceptionClear();}
+    env->DeleteLocalRef(cls);
+}
+void callOpenProject(JNIEnv* env,jobject activity,int index){
+    jclass cls=env->GetObjectClass(activity);
+    jmethodID method=env->GetMethodID(cls,"requestOpenProject","(I)V");
+    if(method)env->CallVoidMethod(activity,method,static_cast<jint>(index));
+    if(env->ExceptionCheck()){env->ExceptionDescribe();env->ExceptionClear();}
+    env->DeleteLocalRef(cls);
+}
+void refreshProjectList(JNIEnv* env,jobject activity,vrui::Renderer& menu){
+    jclass cls=env->GetObjectClass(activity);
+    jmethodID method=env->GetMethodID(cls,"listLocalProjects","()[Ljava/lang/String;");
+    if(method){
+        jobjectArray list=static_cast<jobjectArray>(env->CallObjectMethod(activity,method));
+        if(list){
+            std::vector<std::string> titles;
+            const jsize count=std::min(100,env->GetArrayLength(list));
+            for(jsize i=0;i<count;i++){
+                jstring item=static_cast<jstring>(env->GetObjectArrayElement(list,i));
+                if(!item)continue;
+                const char* chars=env->GetStringUTFChars(item,nullptr);
+                if(chars){titles.emplace_back(chars);env->ReleaseStringUTFChars(item,chars);}
+                env->DeleteLocalRef(item);
+            }
+            menu.setProjects(std::move(titles));
+            env->DeleteLocalRef(list);
+        }
+    }
+    if(env->ExceptionCheck()){env->ExceptionDescribe();env->ExceptionClear();}
+    env->DeleteLocalRef(cls);
+}
+
 std::atomic<int> vrUpdateState{0};
 std::atomic<int> vrUpdatePercent{0};
 void requestUpdateFromVr(JNIEnv* env,jobject activity) {
@@ -181,9 +248,11 @@ struct XrResources {
     XrAction gripAction{XR_NULL_HANDLE};
     XrAction leftGripAction{XR_NULL_HANDLE};
     XrAction leftAimAction{XR_NULL_HANDLE};
+    XrAction leftGripPoseAction{XR_NULL_HANDLE};
     XrAction compareAction{XR_NULL_HANDLE};
     XrAction exitViewAction{XR_NULL_HANDLE};
     XrSpace leftAimSpace{XR_NULL_HANDLE};
+    XrSpace leftGripPoseSpace{XR_NULL_HANDLE};
     XrSpace aimSpace{XR_NULL_HANDLE};
     EGLDisplay display{EGL_NO_DISPLAY};
     EGLContext context{EGL_NO_CONTEXT};
@@ -193,6 +262,7 @@ struct XrResources {
         if (fbo) glDeleteFramebuffers(1, &fbo);
         if (aimSpace != XR_NULL_HANDLE) xrDestroySpace(aimSpace);
         if (leftAimSpace != XR_NULL_HANDLE) xrDestroySpace(leftAimSpace);
+        if (leftGripPoseSpace != XR_NULL_HANDLE) xrDestroySpace(leftGripPoseSpace);
         if (swapchain != XR_NULL_HANDLE) xrDestroySwapchain(swapchain);
         if (space != XR_NULL_HANDLE) xrDestroySpace(space);
         if (actionSet != XR_NULL_HANDLE) xrDestroyActionSet(actionSet);
@@ -338,6 +408,13 @@ void run(JNIEnv* env, jobject activity) {
     leftAimInfo.countSubactionPaths=1;
     leftAimInfo.subactionPaths=&leftHand;
     check(xrCreateAction(r.actionSet,&leftAimInfo,&r.leftAimAction),"xrCreateLeftAimAction");
+    XrActionCreateInfo leftPoseInfo{XR_TYPE_ACTION_CREATE_INFO};
+    leftPoseInfo.actionType=XR_ACTION_TYPE_POSE_INPUT;
+    std::strcpy(leftPoseInfo.actionName,"left_grip_pose");
+    std::strcpy(leftPoseInfo.localizedActionName,"Left Controller Fallback Pose");
+    leftPoseInfo.countSubactionPaths=1;
+    leftPoseInfo.subactionPaths=&leftHand;
+    check(xrCreateAction(r.actionSet,&leftPoseInfo,&r.leftGripPoseAction),"xrCreateLeftGripPoseAction");
     XrActionCreateInfo leftGripInfo{XR_TYPE_ACTION_CREATE_INFO};
     leftGripInfo.actionType=XR_ACTION_TYPE_FLOAT_INPUT;
     std::strcpy(leftGripInfo.actionName,"left_move_grip");
@@ -365,6 +442,7 @@ void run(JNIEnv* env, jobject activity) {
         {r.stickAction, path(r.instance, "/user/hand/right/input/thumbstick")},
         {r.gripAction, path(r.instance, "/user/hand/right/input/squeeze/value")},
         {r.leftAimAction, path(r.instance, "/user/hand/left/input/aim/pose")},
+        {r.leftGripPoseAction, path(r.instance, "/user/hand/left/input/grip/pose")},
         {r.leftGripAction, path(r.instance, "/user/hand/left/input/squeeze/value")},
         {r.compareAction, path(r.instance, "/user/hand/right/input/a/click")},
         {r.exitViewAction, path(r.instance, "/user/hand/right/input/thumbstick/click")},
@@ -373,7 +451,7 @@ void run(JNIEnv* env, jobject activity) {
     };
     XrInteractionProfileSuggestedBinding profile{XR_TYPE_INTERACTION_PROFILE_SUGGESTED_BINDING};
     profile.interactionProfile = path(r.instance, "/interaction_profiles/oculus/touch_controller");
-    profile.countSuggestedBindings = 10;
+    profile.countSuggestedBindings = 11;
     profile.suggestedBindings = suggested;
     check(xrSuggestInteractionProfileBindings(r.instance, &profile), "xrSuggestInteractionProfileBindings");
     XrSessionActionSetsAttachInfo attach{XR_TYPE_SESSION_ACTION_SETS_ATTACH_INFO};
@@ -390,6 +468,12 @@ void run(JNIEnv* env, jobject activity) {
     leftSpaceInfo.subactionPath=leftHand;
     leftSpaceInfo.poseInActionSpace.orientation.w=1.f;
     check(xrCreateActionSpace(r.session,&leftSpaceInfo,&r.leftAimSpace),"xrCreateLeftActionSpace");
+    XrActionSpaceCreateInfo leftFallbackInfo{XR_TYPE_ACTION_SPACE_CREATE_INFO};
+    leftFallbackInfo.action=r.leftGripPoseAction;
+    leftFallbackInfo.subactionPath=leftHand;
+    leftFallbackInfo.poseInActionSpace.orientation.w=1.f;
+    check(xrCreateActionSpace(r.session,&leftFallbackInfo,&r.leftGripPoseSpace),
+          "xrCreateLeftGripPoseSpace");
 
     uint32_t formatsCount = 0;
     check(xrEnumerateSwapchainFormats(r.session, 0, &formatsCount, nullptr), "swapchain formats count");
@@ -428,13 +512,19 @@ void run(JNIEnv* env, jobject activity) {
     float leftPointerX=0.f,leftPointerY=0.f;
     bool leftPointer=false;
     bool wasA=false,wasB=false;
+    float lastLeftStrokeX=0.f,lastLeftStrokeY=0.f,lastRightStrokeX=0.f,lastRightStrokeY=0.f;
+    bool leftStrokeActive=false,rightStrokeActive=false;
     int activeSlider=-1;
     XrVector3f toolPosition{3.4f,0.f,-1.7f};
     XrVector3f toolDragHand{},toolDragStart{};
-    bool toolDragging=false,toolDragRight=false;
+    bool toolDragging=false,toolDragRight=false,toolScaling=false;
+    float toolScale=1.f,toolInitialScale=1.f,toolInitialDistance=1.f;
+    XrVector3f toolInitialMiddle{},toolScaleStart{};
+    bool panelLayoutDirty=false;
     float toolPointerX=0.f,toolPointerY=0.f;
     float leftToolX=0.f,leftToolY=0.f;
     bool toolPointer=false,leftToolPointer=false;
+    loadPanelLayout(env,activity,toolPosition,toolScale);
     XrVector3f editorPosition{0.f,0.f,-1.9f};
     float editorScale=1.f,editorAngle=0.f,editorZoom=1.f,editorU=0.5f,editorV=0.5f;
     // One grip translates the canvas. Two grips translate, scale, and rotate around Z.
@@ -571,6 +661,36 @@ void run(JNIEnv* env, jobject activity) {
                                                panelAngle,leftPointerX,leftPointerY);
                 }
             }
+            // Some Quest runtimes temporarily deactivate left aim while grip is
+            // tracked; retain a left cursor using the grip pose as a fallback.
+            if(!leftPointer){
+                XrActionStateGetInfo fallbackGet{XR_TYPE_ACTION_STATE_GET_INFO};
+                fallbackGet.action=r.leftGripPoseAction;
+                fallbackGet.subactionPath=leftHand;
+                XrActionStatePose fallbackState{XR_TYPE_ACTION_STATE_POSE};
+                if(XR_SUCCEEDED(xrGetActionStatePose(r.session,&fallbackGet,&fallbackState))
+                    && fallbackState.isActive){
+                    XrSpaceLocation fallback{XR_TYPE_SPACE_LOCATION};
+                    if(XR_SUCCEEDED(xrLocateSpace(r.leftGripPoseSpace,r.space,
+                                                  frameState.predictedDisplayTime,&fallback)) &&
+                       (fallback.locationFlags & XR_SPACE_LOCATION_POSITION_VALID_BIT) &&
+                       (fallback.locationFlags & XR_SPACE_LOCATION_ORIENTATION_VALID_BIT)){
+                        float fallbackX=0.f,fallbackY=0.f;
+                        const bool fallbackHit=pointerOnPanel(fallback.pose,panelPosition,
+                            panelScale,panelAngle,fallbackX,fallbackY);
+                        if(fallbackHit || !validLeftAim){
+                            validLeftAim=true;
+                            leftPose=fallback.pose;
+                            leftPosition=fallback.pose.position;
+                            leftPointer=fallbackHit;
+                            if(fallbackHit){
+                                leftPointerX=fallbackX;
+                                leftPointerY=fallbackY;
+                            }
+                        }
+                    }
+                }
+            }
             XrActionStateGetInfo aimGet{XR_TYPE_ACTION_STATE_GET_INFO};
             aimGet.action = r.aimAction;
             aimGet.subactionPath = rightHand;
@@ -608,35 +728,69 @@ void run(JNIEnv* env, jobject activity) {
             }
             const bool immersivePanel=page==vrui::Page::Immersive;
             toolPointer=immersivePanel && validAim &&
-                pointerOnPanel(rightPose,toolPosition,1.f,0.f,
+                pointerOnPanel(rightPose,toolPosition,toolScale,0.f,
                                toolPointerX,toolPointerY,1.40f,1.05f);
             leftToolPointer=immersivePanel && validLeftAim &&
-                pointerOnPanel(leftPose,toolPosition,1.f,0.f,
+                pointerOnPanel(leftPose,toolPosition,toolScale,0.f,
                                leftToolX,leftToolY,1.40f,1.05f);
             const bool rawRightGrip=validAim && grip.isActive && grip.currentState>0.6f;
             const bool rawLeftGrip=validLeftAim && leftGrip.isActive &&
                 leftGrip.currentState>0.6f;
-            if(!toolDragging && immersivePanel) {
-                const bool rightHandle=toolPointer && menu.toolbarAt(toolPointerX,toolPointerY,true)==28;
-                const bool leftHandle=leftToolPointer && menu.toolbarAt(leftToolX,leftToolY,true)==28;
-                if(rawRightGrip && rightHandle){
-                    toolDragging=true; toolDragRight=true;
-                    toolDragHand=aimPosition;toolDragStart=toolPosition;
-                    dragMode=DragMode::None;
-                } else if(rawLeftGrip && leftHandle) {
-                    toolDragging=true;toolDragRight=false;
-                    toolDragHand=leftPosition;toolDragStart=toolPosition;
-                    dragMode=DragMode::None;
-                }
+            const bool rightHandle=toolPointer &&
+                menu.toolbarAt(toolPointerX,toolPointerY,true)==28;
+            const bool leftHandle=leftToolPointer &&
+                menu.toolbarAt(leftToolX,leftToolY,true)==28;
+            if(!toolDragging && immersivePanel &&
+               ((rawRightGrip&&rightHandle)||(rawLeftGrip&&leftHandle))){
+                toolDragging=true;
+                toolDragRight=rawRightGrip&&rightHandle;
+                toolDragHand=toolDragRight?aimPosition:leftPosition;
+                toolDragStart=toolPosition;
+                panelLayoutDirty=true;
+                dragMode=DragMode::None;
             }
-            if(toolDragging) {
-                const bool held=toolDragRight?rawRightGrip:rawLeftGrip;
-                if(!held || !immersivePanel) toolDragging=false;
-                else {
+            if(toolDragging){
+                if(!immersivePanel || (!rawRightGrip&&!rawLeftGrip)){
+                    toolDragging=false;
+                    toolScaling=false;
+                    if(panelLayoutDirty){
+                        savePanelLayout(env,activity,toolPosition,toolScale);
+                        panelLayoutDirty=false;
+                    }
+                } else if(rawRightGrip && rawLeftGrip && validAim && validLeftAim) {
+                    if(!toolScaling){
+                        toolScaling=true;
+                        toolInitialMiddle={(aimPosition.x+leftPosition.x)*.5f,
+                                           (aimPosition.y+leftPosition.y)*.5f,
+                                           (aimPosition.z+leftPosition.z)*.5f};
+                        toolInitialDistance=std::max(.04f,
+                            std::hypot(aimPosition.x-leftPosition.x,
+                                       aimPosition.y-leftPosition.y));
+                        toolInitialScale=toolScale;
+                        toolScaleStart=toolPosition;
+                    }
+                    const XrVector3f middle{(aimPosition.x+leftPosition.x)*.5f,
+                                             (aimPosition.y+leftPosition.y)*.5f,
+                                             (aimPosition.z+leftPosition.z)*.5f};
+                    const float distance=std::max(.04f,
+                        std::hypot(aimPosition.x-leftPosition.x,
+                                   aimPosition.y-leftPosition.y));
+                    toolScale=std::clamp(toolInitialScale*distance/toolInitialDistance,.5f,2.f);
+                    toolPosition.x=std::clamp(toolScaleStart.x+middle.x-toolInitialMiddle.x,-5.f,5.f);
+                    toolPosition.y=std::clamp(toolScaleStart.y+middle.y-toolInitialMiddle.y,-2.5f,2.5f);
+                    toolPosition.z=std::clamp(toolScaleStart.z+middle.z-toolInitialMiddle.z,-4.f,-.6f);
+                } else {
+                    const bool rightNow=rawRightGrip;
+                    if(toolScaling || toolDragRight!=rightNow){
+                        toolScaling=false;
+                        toolDragRight=rightNow;
+                        toolDragHand=rightNow?aimPosition:leftPosition;
+                        toolDragStart=toolPosition;
+                    }
                     const auto& hand=toolDragRight?aimPosition:leftPosition;
                     toolPosition.x=std::clamp(toolDragStart.x+hand.x-toolDragHand.x,-5.f,5.f);
                     toolPosition.y=std::clamp(toolDragStart.y+hand.y-toolDragHand.y,-2.5f,2.5f);
-                    toolPosition.z=std::clamp(toolDragStart.z+hand.z-toolDragHand.z,-4.f,-0.6f);
+                    toolPosition.z=std::clamp(toolDragStart.z+hand.z-toolDragHand.z,-4.f,-.6f);
                 }
             }
             const bool rightHeld=validAim && !toolDragging &&
@@ -721,7 +875,7 @@ void run(JNIEnv* env, jobject activity) {
             if((page==vrui::Page::Open || page==vrui::Page::Immersive) &&
                 menu.brushMode && menu.hasDepthPixels()
                 && brushSizeStick.isActive && std::abs(brushSizeStick.currentState.y)>0.15f) {
-                menu.brushRadius=std::clamp(menu.brushRadius+
+                menu.leftRadius=std::clamp(menu.leftRadius+
                     brushSizeStick.currentState.y*dt*23.f,3.f,60.f);
             }
             const bool pushDown=push.isActive && push.currentState>=0.5f;
@@ -745,9 +899,30 @@ void run(JNIEnv* env, jobject activity) {
             menu.paintingRight=paintRight;
             if(menu.painting && !wasPainting)menu.beginStroke();
             bool painted=false;
-            if(canPaint){
-                if(paintLeft)painted|=menu.brushAt(leftPointerX,leftPointerY,false,immersive);
-                if(paintRight)painted|=menu.brushAt(pointerX,pointerY,true,immersive);
+            if(canPaint) {
+                // Interpolate between tracked hand positions, preventing dotted or
+                // jagged gaps during fast controller motion.
+                auto stroke=[&](bool active,bool& previous,float& lastX,float& lastY,
+                                float x,float y,bool pull){
+                    if(!active){previous=false;return false;}
+                    if(!previous){lastX=x;lastY=y;previous=true;}
+                    const float dx=x-lastX,dy=y-lastY;
+                    const float distance=std::hypot(dx,dy);
+                    const int count=std::clamp(int(std::ceil(distance/7.f)),1,18);
+                    bool changed=false;
+                    for(int n=1;n<=count;n++){
+                        const float t=float(n)/float(count);
+                        changed|=menu.brushAt(lastX+dx*t,lastY+dy*t,pull,immersive);
+                    }
+                    lastX=x;lastY=y;
+                    return changed;
+                };
+                painted|=stroke(paintLeft,leftStrokeActive,lastLeftStrokeX,lastLeftStrokeY,
+                                leftPointerX,leftPointerY,false);
+                painted|=stroke(paintRight,rightStrokeActive,lastRightStrokeX,lastRightStrokeY,
+                                pointerX,pointerY,true);
+            }else{
+                leftStrokeActive=false;rightStrokeActive=false;
             }
             strokeEdited|=painted;
             if(wasPainting && !menu.painting) {
@@ -787,7 +962,9 @@ void run(JNIEnv* env, jobject activity) {
             const bool sliderAim=immersive?toolPointer:pointer;
             const float sliderX=immersive?toolPointerX:pointerX;
             if(!dragging && !toolDragging && sliderAim && triggerDown && !wasPressed &&
-               (overlayHover==26 || overlayHover==27 || overlayHover==29))
+               (overlayHover==26 || overlayHover==27 || overlayHover==29 ||
+                overlayHover==30 || overlayHover==31 || overlayHover==32 ||
+                overlayHover==33))
                 activeSlider=overlayHover;
             if(!triggerDown)activeSlider=-1;
             if(activeSlider>=0 && sliderAim && !dragging && !toolDragging)
@@ -796,7 +973,11 @@ void run(JNIEnv* env, jobject activity) {
                 switch(hit) {
                     case 20: menu.stereoEnabled=!menu.stereoEnabled;break;
                     case 21: menu.brushMode=!menu.brushMode;break;
-                    case 22: menu.brushSoft=!menu.brushSoft;break;
+                    case 22:
+                        menu.brushSoft=!menu.brushSoft;
+                        menu.leftHardness=menu.brushSoft?0.f:1.f;
+                        menu.rightHardness=menu.brushSoft?0.f:1.f;
+                        break;
                     case 23: menu.edgeAware=!menu.edgeAware;break;
                     case 24: if(menu.undoDepth())saveEditedDepth(env,activity,menu.depthCpu);break;
                     case 25: if(menu.redoDepth())saveEditedDepth(env,activity,menu.depthCpu);break;
@@ -805,6 +986,23 @@ void run(JNIEnv* env, jobject activity) {
             } else if(triggerDown&&!wasPressed && !dragging && activeSlider<0 &&
                        page!=vrui::Page::Immersive && hovered>=0 && overlayHover<0) {
                 if(hovered==3) page=vrui::Page::Home;
+                else if(page==vrui::Page::Open && (hovered==14 || hovered==15) && menu.hasPhoto()) {
+                    if(menu.strokeActive && menu.hasDepthPixels()){
+                        if(menu.finishStroke())saveEditedDepth(env,activity,menu.depthCpu);
+                    }
+                    callSaveProject(env,activity,hovered==15);
+                } else if(page==vrui::Page::Projects && hovered>=40 && hovered<=43) {
+                    const int projectIndex=menu.projectPage*4+hovered-40;
+                    if(projectIndex<int(menu.projectNames.size())){
+                        callOpenProject(env,activity,projectIndex);
+                        page=vrui::Page::Open;
+                    }
+                } else if(page==vrui::Page::Projects && hovered==46) {
+                    menu.projectPage=std::max(0,menu.projectPage-1);
+                } else if(page==vrui::Page::Projects && hovered==47) {
+                    const int pages=std::max(1,int((menu.projectNames.size()+3)/4));
+                    menu.projectPage=std::min(pages-1,menu.projectPage+1);
+                }
                 else if(page==vrui::Page::Home && hovered==11) {
                     requestUpdateFromVr(env,activity);
                 } else if(page==vrui::Page::Open && hovered==12) {
@@ -869,6 +1067,7 @@ void run(JNIEnv* env, jobject activity) {
                                    images[index].image, 0);
             menu.updateState=vrUpdateState.load();
             menu.updatePercent=vrUpdatePercent.load();
+            if(projectsNeedReload.exchange(false))refreshProjectList(env,activity,menu);
             if(imageNeedsReload.exchange(false)) {
                 refreshImage(env,activity,menu);
                 menu.brushMode=false;
@@ -930,7 +1129,7 @@ void run(JNIEnv* env, jobject activity) {
                     quad.eyeVisibility=eye==0?XR_EYE_VISIBILITY_LEFT:XR_EYE_VISIBILITY_RIGHT;
                     quad.pose.orientation.w=1.f;
                     quad.pose.position=toolPosition;
-                    quad.size={1.40f,1.05f};
+                    quad.size={1.40f*toolScale,1.05f*toolScale};
                     quad.subImage.swapchain=r.swapchain;
                     quad.subImage.imageRect.offset={eye*1024,768};
                     quad.subImage.imageRect.extent={1024,768};
@@ -983,4 +1182,9 @@ Java_com_cosmerearchives_androidimageeditor_VrActivity_reportVrUpdateStatus(
         JNIEnv*,jobject,jint state,jint percent) {
     vrUpdateState.store(static_cast<int>(state));
     vrUpdatePercent.store(std::max(0,std::min(100,static_cast<int>(percent))));
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_cosmerearchives_androidimageeditor_VrActivity_notifyProjectListChanged(JNIEnv*,jobject){
+    projectsNeedReload.store(true);
 }

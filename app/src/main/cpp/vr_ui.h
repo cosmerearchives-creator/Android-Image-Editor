@@ -88,6 +88,8 @@ inline int buttonAt(Page page,float x,float y) {
         if(y>=58&&y<=154)return 11;
     } else if (page==Page::Open) {
         if(y>=665&&y<=715) {
+            if(x<=385)return 14;
+            if(x<=610)return 15;
             if(x>=645&&x<=746)return 12;
             if(x>=754)return 13;
         }
@@ -103,6 +105,11 @@ inline int buttonAt(Page page,float x,float y) {
             if(x<=409)return 6;
             if(x>=420&&x<=639)return 7;
         }
+    } else if (page==Page::Projects) {
+        if(y>=92&&y<=190)return 3;
+        if(y>=580&&y<=635)return x<512?46:47;
+        const int ys[]={495,405,315,225};
+        for(int i=0;i<4;i++)if(y>=ys[i]&&y<=ys[i]+64)return 40+i;
     } else if(y>=92&&y<=190) return 3;
     return -1;
 }
@@ -119,27 +126,34 @@ struct Renderer {
     bool edgeAware=true;
     float brushStrength=1.0f;
     float leftStrength=1.0f,rightStrength=1.0f;
+    float leftRadius=13.f,rightRadius=13.f;
+    float leftHardness=0.f,rightHardness=0.f;
+    std::vector<std::string> projectNames;
+    int projectPage=0;
+    void setProjects(std::vector<std::string> titles){
+        projectNames=std::move(titles);
+        projectPage=std::clamp(projectPage,0,std::max(0,int((projectNames.size()+3)/4)-1));
+    }
     float disparityStrength=0.8f;
     std::vector<float> photoLuminance;
+    std::vector<uint8_t> photoRgb;
     // Immersive controls are rendered on a separate physical compositor quad.
     // Coordinates use that quad's 1024x768 logical UI space.
     int toolbarAt(float x,float y,bool immersive) const {
         if(immersive){
             if(x<16||x>1008||y<16||y>752)return -1;
-            if(y>=660)return 28; // Grab the floating panel using either grip.
+            if(y>=660)return 28;
             if(y>=515&&y<=615){
                 if(x<260)return 20;
                 if(x<500)return 21;
                 if(x<740)return 22;
                 return 23;
             }
-            if(y>=405&&y<=490){
-                if(x<510)return 24;
-                return 25;
-            }
-            if(y>=285&&y<=390)return 26; // Stereo strength
-            if(y>=170&&y<=274)return 29; // Left brush strength
-            if(y>=55&&y<=160)return 27;  // Right brush strength
+            if(y>=405&&y<=490)return x<510?24:25;
+            if(y>=320&&y<=395)return 26;
+            if(y>=235&&y<=310)return x<510?29:27;
+            if(y>=150&&y<=225)return x<510?30:31;
+            if(y>=65&&y<=140)return x<510?32:33;
             return -1;
         }
         if(y>=335&&y<=405){
@@ -148,16 +162,23 @@ struct Renderer {
         }
         return -1;
     }
-    void slideAt(int target,float x,bool immersive) {
-        if(target==26){
-            const float lo=immersive?45.f:180.f,hi=immersive?973.f:495.f;
-            disparityStrength=std::clamp((x-lo)/(hi-lo)*2.f,0.f,2.f);
-        } else if(target==29){
-            leftStrength=std::clamp(0.1f+(x-45.f)/(973.f-45.f)*2.9f,0.1f,3.f);
-        } else if(target==27){
-            const float lo=immersive?45.f:510.f,hi=immersive?973.f:845.f;
-            rightStrength=std::clamp(0.1f+(x-lo)/(hi-lo)*2.9f,0.1f,3.f);
-            brushStrength=rightStrength;
+    void slideAt(int target,float x,bool immersive){
+        if(!immersive){
+            if(target==26)disparityStrength=std::clamp((x-180.f)/315.f*2.f,0.f,2.f);
+            if(target==27)rightStrength=std::clamp(0.1f+(x-510.f)/335.f*2.9f,0.1f,3.f);
+            return;
+        }
+        const float lo=(target==26)?45.f:(target==27||target==31||target==33)?540.f:45.f;
+        const float hi=(target==26)?975.f:(target==27||target==31||target==33)?975.f:480.f;
+        const float t=std::clamp((x-lo)/(hi-lo),0.f,1.f);
+        switch(target){
+            case 26:disparityStrength=t*2.f;break;
+            case 29:leftStrength=0.1f+t*2.9f;break;
+            case 27:rightStrength=0.1f+t*2.9f;break;
+            case 30:leftRadius=3.f+t*57.f;break;
+            case 31:rightRadius=3.f+t*57.f;break;
+            case 32:leftHardness=t;break;
+            case 33:rightHardness=t;break;
         }
     }
     // Stroke-wise history; cap memory (~1 MiB each stack at 16 snapshots).
@@ -230,7 +251,9 @@ struct Renderer {
         float u=0.f,v=0.f;
         if(!hitPhoto(sx,sy,immersive,u,v))return false;
         const float cx=u*255.f,cy=(1.f-v)*255.f;
-        const int radius=static_cast<int>(std::ceil(brushRadius));
+        const float radiusValue=pullTowardViewer?rightRadius:leftRadius;
+        const float hardness=pullTowardViewer?rightHardness:leftHardness;
+        const int radius=static_cast<int>(std::ceil(radiusValue));
         const int xa=std::max(0,static_cast<int>(cx)-radius),
                   xb=std::min(255,static_cast<int>(cx)+radius),
                   ya=std::max(0,static_cast<int>(cy)-radius),
@@ -238,15 +261,23 @@ struct Renderer {
         bool edited=false;
         for(int y=ya;y<=yb;++y)for(int x=xa;x<=xb;++x){
             const float dist=std::hypot(float(x)-cx,float(y)-cy);
-            if(dist>brushRadius)continue;
-            const float falloff=brushSoft
-                ?std::pow(std::max(0.f,1.f-dist/brushRadius),1.2f):1.f;
+            if(dist>radiusValue)continue;
+            const float relative=dist/radiusValue;
+            const float falloff=relative<=hardness?1.f:
+                std::pow(std::clamp((1.f-relative)/std::max(0.01f,1.f-hardness),0.f,1.f),1.3f);
             const size_t i=size_t(y)*256u+size_t(x);
-            // Optional protection against painting across visible photo edges.
-            const float edgePenalty=(edgeAware && photoLuminance.size()==256u*256u)
-                ?std::exp(-std::abs(photoLuminance[i]-photoLuminance[
-                    size_t(std::clamp(int(cy),0,255))*256u+
-                    size_t(std::clamp(int(cx),0,255))])*10.f):1.f;
+            // Compare *color* rather than luminance alone so same-brightness,
+            // different-hue object boundaries are protected too.
+            float edgePenalty=1.f;
+            if(edgeAware && photoRgb.size()==256u*256u*3u){
+                const size_t anchor=(size_t(std::clamp(int(cy),0,255))*256u+
+                                     size_t(std::clamp(int(cx),0,255)))*3u;
+                const size_t sample=i*3u;
+                const float red=float(int(photoRgb[sample])-int(photoRgb[anchor]))/255.f;
+                const float green=float(int(photoRgb[sample+1])-int(photoRgb[anchor+1]))/255.f;
+                const float blue=float(int(photoRgb[sample+2])-int(photoRgb[anchor+2]))/255.f;
+                edgePenalty=std::exp(-(red*red+green*green+blue*blue)*16.f);
+            }
             const int delta=std::max(0,static_cast<int>(std::lround(
                 8.f*(pullTowardViewer?rightStrength:leftStrength)*falloff*edgePenalty)));
             if(!delta)continue;
@@ -418,12 +449,17 @@ struct Renderer {
         photoWidth=width;photoHeight=height;
         // Cached at depth-map resolution; used only for brush edge guidance.
         photoLuminance.resize(256u*256u);
+        photoRgb.resize(256u*256u*3u);
         for(int y=0;y<256;++y)for(int x=0;x<256;++x) {
             const int sx=std::min(width-1,x*width/256);
             const int sy=std::min(height-1,y*height/256);
             const size_t offset=(size_t(sy)*width+sx)*4;
-            photoLuminance[size_t(y)*256+x]=
-                (0.2126f*rgba[offset]+0.7152f*rgba[offset+1]+0.0722f*rgba[offset+2])/255.f;
+            const size_t index=size_t(y)*256u+size_t(x);
+            photoLuminance[index]=(0.2126f*rgba[offset]+
+                0.7152f*rgba[offset+1]+0.0722f*rgba[offset+2])/255.f;
+            photoRgb[index*3]=rgba[offset];
+            photoRgb[index*3+1]=rgba[offset+1];
+            photoRgb[index*3+2]=rgba[offset+2];
         }
         resetPhotoView();
     }
@@ -499,16 +535,21 @@ struct Renderer {
             const char* title=page==Page::Open?"OPEN IMAGE":
                 page==Page::Projects?"MY PROJECTS":"VIEW GALLERY";
             int n=static_cast<int>(std::strlen(title));
-            label(v,title,512-n*15,page==Page::Open?615:475,5,white);
+            label(v,title,512-n*15,(page==Page::Open||page==Page::Projects)?630:475,5,white);
             if(page==Page::Open) {
+                box(v,170,665,215,50,hovered==14?purpleHover:button);
+                label(v,"SAVE PROJECT",184,678,2,white);
+                box(v,395,665,215,50,hovered==15?purpleHover:button);
+                label(v,"SAVE AS NEW",409,678,2,white);
                 box(v,645,665,101,50,hovered==12&&canUndo()?purpleHover:button);
                 label(v,"UNDO",658,678,2,canUndo()?white:muted);
                 box(v,754,665,100,50,hovered==13&&canRedo()?purpleHover:button);
                 label(v,"REDO",765,678,2,canRedo()?white:muted);
                 if(brushMode && hasDepthPixels()) {
                     label(v,"L PUSH R PULL",702,630,2,muted);
-                    const std::string brushText="SIZE "+std::to_string(int(brushRadius));
-                    label(v,brushText.c_str(),702,604,2,muted);
+                    const std::string brushText="LEFT "+std::to_string(int(leftRadius))+
+                        " RIGHT "+std::to_string(int(rightRadius));
+                    label(v,brushText.c_str(),690,604,2,muted);
                 }
                 if(!hasPhoto()) label(v,"NO IMAGE IMPORTED",235,411,4,muted);
                 box(v,170,205,163,86,hovered==4?purpleHover:button);
@@ -530,6 +571,25 @@ struct Renderer {
                     label(v,hasQuickDepth()?"QUICK DEPTH MAP":quickConverting?"CONVERTING DEPTH":"HEURISTIC DEPTH",180,310,2,muted);
                     label(v,"BOTH GRIPS RESIZE ROTATE",204,304,2,muted);
                 }
+            } else if(page==Page::Projects) {
+                const int ys[]={495,405,315,225};
+                for(int i=0;i<4;i++){
+                    int index=projectPage*4+i;
+                    if(index>=int(projectNames.size()))break;
+                    box(v,170,float(ys[i]),684,64,hovered==40+i?purpleHover:button);
+                    std::string shown=projectNames[index];
+                    for(char& ch:shown) if(ch>='a'&&ch<='z')ch=char(ch-32);
+                    if(shown.size()>22)shown.resize(22);
+                    label(v,shown.c_str(),196,ys[i]+18,3,white);
+                }
+                if(projectNames.empty())label(v,"NO SAVED PROJECTS",240,400,3,muted);
+                box(v,170,580,329,50,hovered==46?purpleHover:button);
+                label(v,"PREVIOUS",243,592,2,white);
+                box(v,515,580,339,50,hovered==47?purpleHover:button);
+                label(v,"NEXT PAGE",573,592,2,white);
+                const std::string pageText="PAGE "+std::to_string(projectPage+1)+
+                    " / "+std::to_string(std::max(1,int((projectNames.size()+3)/4)));
+                label(v,pageText.c_str(),360,558,2,muted);
             } else {
                 label(v,"COMING SOON",320,385,4,muted);
                 label(v,"VR NAVIGATION TEST",272,318,3,muted);
@@ -591,18 +651,36 @@ struct Renderer {
             label(v,names[i],int(bx[i]+18),int(by[i]+33),3,
                   (i==4&&!canUndo())||(i==5&&!canRedo())?muted:white);
         }
-        const int sy[]={323,208,93};
-        const char* captions[]={"DEPTH STRENGTH","LEFT PUSH POWER","RIGHT PULL POWER"};
-        const float frac[]={disparityStrength/2.f,
-                            (leftStrength-0.1f)/2.9f,
-                            (rightStrength-0.1f)/2.9f};
+        // All controls are explicit: depth plus two separate size, power and
+        // hardness controls. Every brush parameter is labeled on the panel.
+        const float full=disparityStrength/2.f;
+        label(v,"STEREO DEPTH",45,379,3,white);
+        box(v,45,348,930,12,{0.26f,0.20f,0.32f});
+        box(v,45,348,930*full,12,purpleHover);
+        box(v,45+930*full-6,339,12,30,white);
+        const float leftValues[]={ (leftStrength-.1f)/2.9f,
+                                   (leftRadius-3.f)/57.f,leftHardness };
+        const float rightValues[]={ (rightStrength-.1f)/2.9f,
+                                    (rightRadius-3.f)/57.f,rightHardness };
+        const char* namesL[]={"LEFT PUSH POWER","LEFT BRUSH SIZE","LEFT HARDNESS"};
+        const char* namesR[]={"RIGHT PULL POWER","RIGHT BRUSH SIZE","RIGHT HARDNESS"};
+        const int ys[]={265,180,95};
         for(int i=0;i<3;i++){
-            label(v,captions[i],45,sy[i]+35,3,white);
-            const float y=float(sy[i]);
-            box(v,45,y,928,15,{0.26f,0.20f,0.32f});
-            box(v,45,y,928*frac[i],15,purpleHover);
-            box(v,45+928*frac[i]-9,y-12,18,39,white);
+            const float y=float(ys[i]);
+            label(v,namesL[i],45,int(y+30),2,white);
+            label(v,namesR[i],540,int(y+30),2,white);
+            const float vals[]={leftValues[i],rightValues[i]};
+            const float xs[]={45.f,540.f};
+            for(int j=0;j<2;j++){
+                float x=xs[j];
+                box(v,x,y,435,12,{0.26f,0.20f,0.32f});
+                box(v,x,y,435*vals[j],12,purpleHover);
+                box(v,x+435*vals[j]-6,y-9,12,30,white);
+            }
         }
+        const std::string sizes="L "+std::to_string(int(leftRadius))+
+            " PX     R "+std::to_string(int(rightRadius))+" PX";
+        label(v,sizes.c_str(),350,151,2,muted);
         if(pointer){
             box(v,pointerX-16,pointerY-3,32,6,white);
             box(v,pointerX-3,pointerY-16,6,32,white);
@@ -615,16 +693,17 @@ struct Renderer {
         std::vector<float> v;
         // Both cursors are rendered independently even when both hands point
         // to the photo. Plus is right/pull; minus is left/push.
-        if(brushMode && hasDepthPixels()) {
+        if(brushMode) {
             float u=0.f,w=0.f;
             if(hitPhoto(x,y,immersive,u,w)) {
                 float pw=immersive?1024.f:704.f,ph=immersive?768.f:300.f;
                 const float ratio=float(photoWidth)/float(photoHeight);
                 if(ratio>pw/ph)ph=pw/ratio;else pw=ph*ratio;
-                const float rx=std::max(2.f,brushRadius*pw*zoom/256.f);
-                const float ry=std::max(2.f,brushRadius*ph*zoom/256.f);
+                const float radiusValue=left?leftRadius:rightRadius;
+                const float rx=std::max(2.f,radiusValue*pw*zoom/256.f);
+                const float ry=std::max(2.f,radiusValue*ph*zoom/256.f);
                 const Color tint=left?Color{0.31f,0.65f,1.f}:Color{1.f,0.36f,0.67f};
-                const Color ink=active?tint:white;
+                const Color ink=active?tint:tint;
                 constexpr int segs=48;
                 for(int i=0;i<segs;i++){
                     const float a=float(i)*6.283185307f/segs;
@@ -649,12 +728,12 @@ struct Renderer {
                 return;
             }
         }
-        // Normal pointer remains right-hand-only when not painting.
-        if(!left) {
-            box(v,x-9,y-1,18,2,white);
-            box(v,x-1,y-9,2,18,white);
-            submitUi(v);
-        }
+        // Keep a distinct left-hand marker even when the depth map has
+        // not been generated. A valid left aim must never disappear.
+        const Color tint=left?Color{0.31f,0.65f,1.f}:white;
+        box(v,x-9,y-2,18,4,tint);
+        if(!left)box(v,x-2,y-9,4,18,tint);
+        submitUi(v);
     }
     ~Renderer(){clearQuickDepth();
         if(photoTexture)glDeleteTextures(1,&photoTexture);
