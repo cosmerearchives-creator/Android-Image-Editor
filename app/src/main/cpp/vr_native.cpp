@@ -138,6 +138,39 @@ bool pointerOnPanel(const XrPosef& pose,const XrVector3f& center,
     return sx>=0.f && sx<=1024.f && sy>=0.f && sy<=768.f;
 }
 
+
+void collageCommand(JNIEnv* env,jobject activity,int action){
+    jclass cls=env->GetObjectClass(activity);
+    jmethodID method=env->GetMethodID(cls,"editCollage","(I)V");
+    if(method)env->CallVoidMethod(activity,method,static_cast<jint>(action));
+    if(env->ExceptionCheck()){env->ExceptionDescribe();env->ExceptionClear();}
+    env->DeleteLocalRef(cls);
+}
+void refreshCollageStatus(JNIEnv* env,jobject activity,vrui::Renderer& menu){
+    jclass cls=env->GetObjectClass(activity);
+    jmethodID method=env->GetMethodID(cls,"collageStatus","()[I");
+    if(method){
+        jintArray result=static_cast<jintArray>(env->CallObjectMethod(activity,method));
+        if(result){
+            if(env->GetArrayLength(result)>=2){
+                jint data[2]{};
+                env->GetIntArrayRegion(result,0,2,data);
+                menu.collageCount=data[0];
+                menu.collageActive=data[1];
+            }
+            env->DeleteLocalRef(result);
+        }
+    }
+    if(env->ExceptionCheck()){env->ExceptionDescribe();env->ExceptionClear();}
+    env->DeleteLocalRef(cls);
+}
+void collagePicker(JNIEnv* env,jobject activity){
+    jclass cls=env->GetObjectClass(activity);
+    jmethodID method=env->GetMethodID(cls,"requestAddCollageImage","()V");
+    if(method)env->CallVoidMethod(activity,method);
+    if(env->ExceptionCheck()){env->ExceptionDescribe();env->ExceptionClear();}
+    env->DeleteLocalRef(cls);
+}
 void callQuickConvert(JNIEnv* env,jobject activity) {
     jclass cls=env->GetObjectClass(activity);
     jmethodID method=env->GetMethodID(cls,"requestQuickConvert","()V");
@@ -999,6 +1032,16 @@ void run(JNIEnv* env, jobject activity) {
             } else if(triggerDown&&!wasPressed && !dragging && activeSlider<0 &&
                        page!=vrui::Page::Immersive && hovered>=0 && overlayHover<0) {
                 if(hovered==3) page=vrui::Page::Home;
+                else if(page==vrui::Page::Open && hovered==70)page=vrui::Page::Collage;
+                else if(page==vrui::Page::Collage && hovered==82)page=vrui::Page::Open;
+                else if(page==vrui::Page::Collage && hovered==81)collagePicker(env,activity);
+                else if(page==vrui::Page::Collage && hovered>=71 && hovered<=80){
+                    collageCommand(env,activity,hovered-71);
+                    if(hovered==71)menu.collageActive=menu.collageCount?
+                        (menu.collageActive+menu.collageCount-1)%menu.collageCount:0;
+                    if(hovered==72)menu.collageActive=menu.collageCount?
+                        (menu.collageActive+1)%menu.collageCount:0;
+                }
                 else if(page==vrui::Page::Open && hovered==60 && menu.hasPhoto()) {
                     menu.selectionMode=!menu.selectionMode;
                     if(menu.selectionMode)menu.brushMode=false;
@@ -1100,6 +1143,7 @@ void run(JNIEnv* env, jobject activity) {
             if(projectsNeedReload.exchange(false))refreshProjectList(env,activity,menu);
             if(imageNeedsReload.exchange(false)) {
                 refreshImage(env,activity,menu);
+                refreshCollageStatus(env,activity,menu);
                 menu.brushMode=false;
                 depthNeedsReload.store(true);
             }
