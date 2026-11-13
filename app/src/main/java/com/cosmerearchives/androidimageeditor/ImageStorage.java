@@ -69,6 +69,8 @@ public final class ImageStorage {
                 staging.delete();
                 throw new IOException("Could not replace stored image");
             }
+            // A depth map belongs to exactly one imported image.
+            QuickDepth.discard(context);
         } finally {
             if (output != image) output.recycle();
             image.recycle();
