@@ -17,12 +17,76 @@ public final class QuickDepth {
     private static final int W = 256;
     private static final int H = 256;
     private static final String DEPTH_FILE = "vr_depth_quick.png";
+    private static final String CANDIDATE = "vr_depth_ai_candidate.png";
     private QuickDepth() {}
 
     private static File path(Context ctx) { return new File(ctx.getFilesDir(), DEPTH_FILE); }
 
-    public static void discard(Context ctx) {
+    public static synchronized void discardCandidate(Context ctx){
+        new File(ctx.getFilesDir(),CANDIDATE).delete();
+    }
+    public static synchronized boolean hasCandidate(Context ctx){
+        return new File(ctx.getFilesDir(),CANDIDATE).isFile();
+    }
+    public static synchronized void saveCandidate(Context ctx,byte[] gray) throws IOException {
+        saveImage(new File(ctx.getFilesDir(),CANDIDATE),gray);
+    }
+    public static synchronized boolean applyCandidate(Context ctx) throws IOException {
+        File candidate=new File(ctx.getFilesDir(),CANDIDATE);
+        if(!candidate.isFile())return false;
+        File staging=new File(ctx.getFilesDir(),DEPTH_FILE+".ai.new");
+        try(java.io.FileInputStream source=new java.io.FileInputStream(candidate);
+            FileOutputStream dest=new FileOutputStream(staging)){
+            byte[] bytes=new byte[65536];int length;
+            while((length=source.read(bytes))!=-1)dest.write(bytes,0,length);
+            dest.getFD().sync();
+        }
+        if(!staging.renameTo(path(ctx))){
+            staging.delete();
+            throw new IOException("Unable to apply AI depth");
+        }
+        discardCandidate(ctx);
+        return true;
+    }
+    private static void saveImage(File destination,byte[] gray) throws IOException {
+        if(gray==null || gray.length!=W*H)
+            throw new IOException("Invalid depth map dimensions");
+        int[] encoded=new int[W*H];
+        for(int i=0;i<encoded.length;i++){
+            int value=gray[i]&255;encoded[i]=Color.argb(255,value,value,value);
+        }
+        Bitmap bitmap=Bitmap.createBitmap(encoded,W,H,Bitmap.Config.ARGB_8888);
+        File stage=new File(destination.getParentFile(),destination.getName()+".partial");
+        try {
+            try(FileOutputStream stream=new FileOutputStream(stage)) {
+                if(!bitmap.compress(Bitmap.CompressFormat.PNG,100,stream))
+                    throw new IOException("Depth preview PNG encoding failed");
+                stream.getFD().sync();
+            }
+            if(!stage.renameTo(destination))
+                throw new IOException("Depth preview could not be saved");
+        }finally{bitmap.recycle();stage.delete();}
+    }
+    public static synchronized int[] loadPreviewPixels(Context ctx) {
+        File candidate=new File(ctx.getFilesDir(),CANDIDATE);
+        if(candidate.isFile()){
+            Bitmap bitmap=BitmapFactory.decodeFile(candidate.getAbsolutePath());
+            if(bitmap!=null){
+                try{
+                    if(bitmap.getWidth()==W && bitmap.getHeight()==H){
+                        int[] result=new int[W*H+2];
+                        result[0]=W;result[1]=H;
+                        bitmap.getPixels(result,2,W,0,0,W,H);
+                        return result;
+                    }
+                }finally{bitmap.recycle();}
+            }
+        }
+        return loadPixels(ctx);
+    }
+    public static synchronized void discard(Context ctx) {
         path(ctx).delete();
+        discardCandidate(ctx);
     }
 
     public static boolean available(Context ctx) {

@@ -16,7 +16,7 @@ struct Color {float r,g,b;};
 constexpr Color white{0.96f,0.95f,1.0f}, muted{0.67f,0.63f,0.76f},
     purple{0.34f,0.22f,0.52f}, purpleHover{0.52f,0.36f,0.76f},
     panel{0.095f,0.075f,0.14f}, button{0.17f,0.14f,0.25f};
-enum class Page {Home, Open, Projects, Gallery, Immersive};
+enum class Page {Home, Open, Projects, Gallery, Immersive, AiDepth};
 inline void box(std::vector<float>& vertices,float x,float y,float w,float h,Color c) {
     float a[6][2]={{x,y},{x+w,y},{x,y+h},{x+w,y},{x+w,y+h},{x,y+h}};
     for(auto& p:a) {vertices.push_back(p[0]);vertices.push_back(p[1]);
@@ -105,6 +105,13 @@ inline int buttonAt(Page page,float x,float y) {
             if(x<=409)return 6;
             if(x>=420&&x<=639)return 7;
         }
+    } else if (page==Page::AiDepth) {
+        if(y>=92&&y<=190)return 3;
+        if(y>=205&&y<=291){
+            if(x<=389)return 50;
+            if(x<=617)return 51;
+            return 52;
+        }
     } else if (page==Page::Projects) {
         if(y>=92&&y<=190)return 3;
         if(y>=580&&y<=635)return x<512?46:47;
@@ -118,6 +125,10 @@ struct Renderer {
            photoVao=0,photoVbo=0,depthTexture=0;
     bool hasQuickDepth() const {return depthTexture!=0;}
     bool quickConverting=false;
+    int aiState=0; // 0 idle, 1 model download, 2 local inference,
+                    // 3 preview ready, 4 error, 5 canceled.
+    int aiPercent=0;
+    bool aiPreview=false;
     bool brushMode=false;
     bool painting=false;
     bool paintingLeft=false;
@@ -533,7 +544,8 @@ struct Renderer {
             }
         } else {
             const char* title=page==Page::Open?"OPEN IMAGE":
-                page==Page::Projects?"MY PROJECTS":"VIEW GALLERY";
+                page==Page::Projects?"MY PROJECTS":
+                page==Page::AiDepth?"AI DEPTH":"VIEW GALLERY";
             int n=static_cast<int>(std::strlen(title));
             label(v,title,512-n*15,(page==Page::Open||page==Page::Projects)?630:475,5,white);
             if(page==Page::Open) {
@@ -563,14 +575,32 @@ struct Renderer {
                 box(v,170,36,239,52,hovered==6?purpleHover:(stereoEnabled?purple:button));
                 label(v,stereoEnabled?"3D ON":"3D OFF",218,51,2,white);
                 box(v,420,36,219,52,hovered==7?purpleHover:button);
-                label(v,depthLevel==0?"DEPTH LOW":depthLevel==1?"DEPTH MID":"DEPTH HIGH",
-                      438,51,2,white);
+                label(v,"AI DEPTH",458,51,2,white);
                 box(v,645,36,209,52,hovered==5?purpleHover:button);
                 label(v,"RESET VIEW",665,51,2,white);
                 if(hasPhoto()) {
                     label(v,hasQuickDepth()?"QUICK DEPTH MAP":quickConverting?"CONVERTING DEPTH":"HEURISTIC DEPTH",180,310,2,muted);
                     label(v,"BOTH GRIPS RESIZE ROTATE",204,304,2,muted);
                 }
+            } else if(page==Page::AiDepth) {
+                const char* status=aiState==1?"DOWNLOADING AI MODEL":
+                    aiState==2?"AI CONVERSION RUNNING":
+                    aiState==3?"AI PREVIEW READY":
+                    aiState==4?"AI CONVERSION FAILED":
+                    aiState==5?"CONVERSION CANCELLED":"READY FOR AI CONVERSION";
+                label(v,status,184,591,3,white);
+                const std::string progress="PROGRESS "+std::to_string(aiPercent)+"%";
+                label(v,progress.c_str(),184,551,2,muted);
+                box(v,184,527,657,10,{0.25f,0.20f,0.32f});
+                box(v,184,527,657.f*float(aiPercent)/100.f,10,purpleHover);
+                label(v,aiPreview?"PREVIEW ONLY - ORIGINAL DEPTH IS SAFE":
+                       "NO AI PREVIEW APPLIED",184,305,2,muted);
+                box(v,170,205,219,86,hovered==50?purpleHover:button);
+                label(v,aiState==1||aiState==2?"WORKING":"START AI",183,234,2,white);
+                box(v,400,205,217,86,hovered==51?purpleHover:button);
+                label(v,"APPLY",460,234,2,aiPreview?white:muted);
+                box(v,629,205,225,86,hovered==52?purpleHover:button);
+                label(v,aiState==1||aiState==2?"CANCEL":"DISCARD",646,234,2,white);
             } else if(page==Page::Projects) {
                 const int ys[]={495,405,315,225};
                 for(int i=0;i<4;i++){
@@ -601,7 +631,7 @@ struct Renderer {
         glBufferData(GL_ARRAY_BUFFER,v.size()*sizeof(float),v.data(),GL_STREAM_DRAW);
         glDrawArrays(GL_TRIANGLES,0,static_cast<GLsizei>(v.size()/5));
         glBindVertexArray(0);
-        if(page==Page::Open && hasPhoto()) drawPhoto(eyeSign);
+        if((page==Page::Open||page==Page::AiDepth) && hasPhoto()) drawPhoto(eyeSign);
     }
     void submitUi(const std::vector<float>& triangles) {
         if(triangles.empty())return;
@@ -685,6 +715,21 @@ struct Renderer {
             box(v,pointerX-16,pointerY-3,32,6,white);
             box(v,pointerX-3,pointerY-16,6,32,white);
         }
+        submitUi(v);
+    }
+    void drawAiOverlay(){
+        std::vector<float> v;
+        box(v,170,524,684,84,{0.075f,0.055f,0.13f});
+        const char* status=aiState==1?"DOWNLOADING AI MODEL":
+            aiState==2?"PROCESSING ON DEVICE":
+            aiState==3?"AI PREVIEW READY":
+            aiState==4?"AI CONVERSION FAILED":
+            aiState==5?"CONVERSION CANCELLED":"READY FOR AI CONVERSION";
+        label(v,status,192,569,3,white);
+        const std::string progress=std::to_string(aiPercent)+"%";
+        label(v,progress.c_str(),755,571,2,muted);
+        box(v,192,540,636,8,{0.25f,0.20f,0.32f});
+        box(v,192,540,636.f*float(aiPercent)/100.f,8,purpleHover);
         submitUi(v);
     }
     void drawHandCursor(float x,float y,bool valid,bool left,bool active,

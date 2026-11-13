@@ -16,6 +16,14 @@ namespace {
 std::atomic<bool> stopRequested{false};
 std::atomic<bool> imageNeedsReload{true};
 std::atomic<bool> depthNeedsReload{true};
+std::atomic<int> aiDepthState{0},aiDepthPercent{0};
+void aiControl(JNIEnv* env,jobject activity,const char* methodName){
+    jclass cls=env->GetObjectClass(activity);
+    jmethodID method=env->GetMethodID(cls,methodName,"()V");
+    if(method)env->CallVoidMethod(activity,method);
+    if(env->ExceptionCheck()){env->ExceptionDescribe();env->ExceptionClear();}
+    env->DeleteLocalRef(cls);
+}
 std::atomic<bool> projectsNeedReload{true};
 void loadPanelLayout(JNIEnv* env,jobject activity,XrVector3f& pos,float& scale){
     jclass cls=env->GetObjectClass(activity);
@@ -140,13 +148,14 @@ void callQuickConvert(JNIEnv* env,jobject activity) {
 void refreshDepth(JNIEnv* env,jobject activity,vrui::Renderer& menu) {
     menu.clearQuickDepth();
     menu.quickConverting=false;
+    menu.aiPreview=aiDepthState.load()==3;
     jclass activityClass=env->GetObjectClass(activity);
     jmethodID contextMethod=env->GetMethodID(activityClass,"getApplicationContext",
                                               "()Landroid/content/Context;");
     jobject ctx=env->CallObjectMethod(activity,contextMethod);
     jclass cls=env->FindClass("com/cosmerearchives/androidimageeditor/QuickDepth");
     if(cls&&ctx) {
-        jmethodID method=env->GetStaticMethodID(cls,"loadPixels","(Landroid/content/Context;)[I");
+        jmethodID method=env->GetStaticMethodID(cls,"loadPreviewPixels","(Landroid/content/Context;)[I");
         if(method) {
             jintArray pixels=static_cast<jintArray>(env->CallStaticObjectMethod(cls,method,ctx));
             if(pixels) {
@@ -882,7 +891,8 @@ void run(JNIEnv* env, jobject activity) {
             const bool pullDown=pressed.isActive && pressed.currentState>=0.5f;
             const bool immersive=page==vrui::Page::Immersive;
             const bool canPaint=(page==vrui::Page::Open || immersive) &&
-                menu.brushMode && menu.hasDepthPixels() && !dragging;
+                menu.brushMode && menu.hasDepthPixels() && !dragging &&
+                aiDepthState.load()!=3;
             float brushU=0.f,brushV=0.f;
             const bool paintLeft=canPaint && pushDown && leftPointer &&
                 (immersive || menu.toolbarAt(leftPointerX,leftPointerY,false)<0) &&
@@ -1035,9 +1045,15 @@ void run(JNIEnv* env, jobject activity) {
                 } else if(page==vrui::Page::Open && hovered==6 && menu.hasPhoto()) {
                     menu.stereoEnabled=!menu.stereoEnabled;
                 } else if(page==vrui::Page::Open && hovered==7 && menu.hasPhoto()) {
-                    menu.depthLevel=(menu.depthLevel+1)%3;
-                    menu.disparityStrength=menu.depthLevel==0?0.45f:
-                                           menu.depthLevel==1?0.8f:1.2f;
+                    page=vrui::Page::AiDepth;
+                    menu.brushMode=false;
+                } else if(page==vrui::Page::AiDepth && hovered==50 && menu.hasPhoto()) {
+                    if(aiDepthState.load()!=1 && aiDepthState.load()!=2)
+                        aiControl(env,activity,"requestAiDepthConvert");
+                } else if(page==vrui::Page::AiDepth && hovered==51 && aiDepthState.load()==3) {
+                    aiControl(env,activity,"applyAiDepthPreview");
+                } else if(page==vrui::Page::AiDepth && hovered==52) {
+                    aiControl(env,activity,"cancelAiDepthConvert");
                 } else if(page==vrui::Page::Open && hovered==5) {
                     menu.resetPhotoView();
                     panelPosition={0.f,0.f,-1.9f};
@@ -1067,6 +1083,9 @@ void run(JNIEnv* env, jobject activity) {
                                    images[index].image, 0);
             menu.updateState=vrUpdateState.load();
             menu.updatePercent=vrUpdatePercent.load();
+            menu.aiState=aiDepthState.load();
+            menu.aiPercent=aiDepthPercent.load();
+            menu.aiPreview=menu.aiState==3;
             if(projectsNeedReload.exchange(false))refreshProjectList(env,activity,menu);
             if(imageNeedsReload.exchange(false)) {
                 refreshImage(env,activity,menu);
@@ -1086,6 +1105,7 @@ void run(JNIEnv* env, jobject activity) {
                 const float eyeSign=eye==0?-1.f:1.f;
                 // Both controllers have independent visible pointers.
                 menu.draw(page,hovered,pointerX,pointerY,false,eyeSign);
+                if(page==vrui::Page::AiDepth)menu.drawAiOverlay();
                 if(!immersive)menu.drawTools(page,overlayHover);
                 menu.drawHandCursor(leftPointerX,leftPointerY,leftPointer,
                                     true,paintLeft,immersive);
@@ -1187,4 +1207,11 @@ Java_com_cosmerearchives_androidimageeditor_VrActivity_reportVrUpdateStatus(
 extern "C" JNIEXPORT void JNICALL
 Java_com_cosmerearchives_androidimageeditor_VrActivity_notifyProjectListChanged(JNIEnv*,jobject){
     projectsNeedReload.store(true);
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_cosmerearchives_androidimageeditor_VrActivity_reportAiDepthStatus(
+        JNIEnv*,jobject,jint state,jint progress){
+    aiDepthState.store(static_cast<int>(state));
+    aiDepthPercent.store(std::clamp(static_cast<int>(progress),0,100));
 }
