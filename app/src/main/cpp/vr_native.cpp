@@ -44,7 +44,8 @@ void saveEditedDepth(JNIEnv* env,jobject activity,const std::vector<uint8_t>& gr
 // Project controller aim pose onto the current (translated and planar-rotated)
 // photo quad. This is also used for left-hand brushing.
 bool pointerOnPanel(const XrPosef& pose,const XrVector3f& center,
-                    float scale,float angle,float& sx,float& sy) {
+                    float scale,float angle,float& sx,float& sy,
+                    float width=1.45f,float height=1.08f) {
     const auto& q=pose.orientation;
     const float dx=-2.f*(q.x*q.z+q.w*q.y);
     const float dy=-2.f*(q.y*q.z-q.w*q.x);
@@ -57,8 +58,8 @@ bool pointerOnPanel(const XrPosef& pose,const XrVector3f& center,
     const float co=std::cos(angle),si=std::sin(angle);
     const float lx=(co*px+si*py)/scale;
     const float ly=(-si*px+co*py)/scale;
-    sx=(lx/1.45f+0.5f)*1024.f;
-    sy=(ly/1.08f+0.5f)*768.f;
+    sx=(lx/width+0.5f)*1024.f;
+    sy=(ly/height+0.5f)*768.f;
     return sx>=0.f && sx<=1024.f && sy>=0.f && sy<=768.f;
 }
 
@@ -406,7 +407,8 @@ void run(JNIEnv* env, jobject activity) {
     swapInfo.sampleCount = 1;
     // One double-width swapchain: each eye reads its own 1024x768 rectangle.
     swapInfo.width = 2048;
-    swapInfo.height = 768;
+    // Upper 768px is reserved for the separate floating tools compositor quad.
+    swapInfo.height = 1536;
     swapInfo.faceCount = 1;
     swapInfo.arraySize = 1;
     swapInfo.mipCount = 1;
@@ -427,6 +429,12 @@ void run(JNIEnv* env, jobject activity) {
     bool leftPointer=false;
     bool wasA=false,wasB=false;
     int activeSlider=-1;
+    XrVector3f toolPosition{3.4f,0.f,-1.7f};
+    XrVector3f toolDragHand{},toolDragStart{};
+    bool toolDragging=false,toolDragRight=false;
+    float toolPointerX=0.f,toolPointerY=0.f;
+    float leftToolX=0.f,leftToolY=0.f;
+    bool toolPointer=false,leftToolPointer=false;
     XrVector3f editorPosition{0.f,0.f,-1.9f};
     float editorScale=1.f,editorAngle=0.f,editorZoom=1.f,editorU=0.5f,editorV=0.5f;
     // One grip translates the canvas. Two grips translate, scale, and rotate around Z.
@@ -472,13 +480,17 @@ void run(JNIEnv* env, jobject activity) {
         check(xrWaitFrame(r.session, &waitInfo, &frameState), "xrWaitFrame");
         XrFrameBeginInfo beginFrame{XR_TYPE_FRAME_BEGIN_INFO};
         check(xrBeginFrame(r.session, &beginFrame), "xrBeginFrame");
-        XrCompositionLayerQuad quads[2]{
+        XrCompositionLayerQuad quads[4]{
+            {XR_TYPE_COMPOSITION_LAYER_QUAD},
+            {XR_TYPE_COMPOSITION_LAYER_QUAD},
             {XR_TYPE_COMPOSITION_LAYER_QUAD},
             {XR_TYPE_COMPOSITION_LAYER_QUAD}
         };
         const XrCompositionLayerBaseHeader* layers[] = {
             reinterpret_cast<const XrCompositionLayerBaseHeader*>(&quads[0]),
-            reinterpret_cast<const XrCompositionLayerBaseHeader*>(&quads[1])
+            reinterpret_cast<const XrCompositionLayerBaseHeader*>(&quads[1]),
+            reinterpret_cast<const XrCompositionLayerBaseHeader*>(&quads[2]),
+            reinterpret_cast<const XrCompositionLayerBaseHeader*>(&quads[3])
         };
         uint32_t layerCount = 0;
         if (frameState.shouldRender) {
@@ -539,6 +551,7 @@ void run(JNIEnv* env, jobject activity) {
             XrVector3f aimPosition{0.f,0.f,0.f};
             bool validLeftAim=false;
             leftPointer=false;
+            XrPosef leftPose{},rightPose{};
             XrVector3f leftPosition{0.f,0.f,0.f};
             XrActionStateGetInfo leftAimGet{XR_TYPE_ACTION_STATE_GET_INFO};
             leftAimGet.action=r.leftAimAction;
@@ -552,6 +565,7 @@ void run(JNIEnv* env, jobject activity) {
                     (leftLocation.locationFlags & XR_SPACE_LOCATION_POSITION_VALID_BIT) &&
                     (leftLocation.locationFlags & XR_SPACE_LOCATION_ORIENTATION_VALID_BIT)) {
                     validLeftAim=true;
+                    leftPose=leftLocation.pose;
                     leftPosition=leftLocation.pose.position;
                     leftPointer=pointerOnPanel(leftLocation.pose,panelPosition,panelScale,
                                                panelAngle,leftPointerX,leftPointerY);
@@ -568,6 +582,7 @@ void run(JNIEnv* env, jobject activity) {
                     (location.locationFlags & XR_SPACE_LOCATION_POSITION_VALID_BIT) &&
                     (location.locationFlags & XR_SPACE_LOCATION_ORIENTATION_VALID_BIT)) {
                     validAim=true;
+                    rightPose=location.pose;
                     aimPosition=location.pose.position;
                     const auto& q = location.pose.orientation;
                     // Rotate (0,0,-1) by the controller's normalized quaternion.
@@ -591,9 +606,42 @@ void run(JNIEnv* env, jobject activity) {
                     }
                 }
             }
-            const bool rightHeld=validAim &&
+            const bool immersivePanel=page==vrui::Page::Immersive;
+            toolPointer=immersivePanel && validAim &&
+                pointerOnPanel(rightPose,toolPosition,1.f,0.f,
+                               toolPointerX,toolPointerY,1.40f,1.05f);
+            leftToolPointer=immersivePanel && validLeftAim &&
+                pointerOnPanel(leftPose,toolPosition,1.f,0.f,
+                               leftToolX,leftToolY,1.40f,1.05f);
+            const bool rawRightGrip=validAim && grip.isActive && grip.currentState>0.6f;
+            const bool rawLeftGrip=validLeftAim && leftGrip.isActive &&
+                leftGrip.currentState>0.6f;
+            if(!toolDragging && immersivePanel) {
+                const bool rightHandle=toolPointer && menu.toolbarAt(toolPointerX,toolPointerY,true)==28;
+                const bool leftHandle=leftToolPointer && menu.toolbarAt(leftToolX,leftToolY,true)==28;
+                if(rawRightGrip && rightHandle){
+                    toolDragging=true; toolDragRight=true;
+                    toolDragHand=aimPosition;toolDragStart=toolPosition;
+                    dragMode=DragMode::None;
+                } else if(rawLeftGrip && leftHandle) {
+                    toolDragging=true;toolDragRight=false;
+                    toolDragHand=leftPosition;toolDragStart=toolPosition;
+                    dragMode=DragMode::None;
+                }
+            }
+            if(toolDragging) {
+                const bool held=toolDragRight?rawRightGrip:rawLeftGrip;
+                if(!held || !immersivePanel) toolDragging=false;
+                else {
+                    const auto& hand=toolDragRight?aimPosition:leftPosition;
+                    toolPosition.x=std::clamp(toolDragStart.x+hand.x-toolDragHand.x,-5.f,5.f);
+                    toolPosition.y=std::clamp(toolDragStart.y+hand.y-toolDragHand.y,-2.5f,2.5f);
+                    toolPosition.z=std::clamp(toolDragStart.z+hand.z-toolDragHand.z,-4.f,-0.6f);
+                }
+            }
+            const bool rightHeld=validAim && !toolDragging &&
                 grip.isActive && grip.currentState>0.6f;
-            const bool leftHeld=validLeftAim &&
+            const bool leftHeld=validLeftAim && !toolDragging &&
                 leftGrip.isActive && leftGrip.currentState>0.6f;
             const DragMode nextMode=rightHeld && leftHeld ? DragMode::Both :
                 rightHeld ? DragMode::Right : leftHeld ? DragMode::Left : DragMode::None;
@@ -683,12 +731,14 @@ void run(JNIEnv* env, jobject activity) {
                 menu.brushMode && menu.hasDepthPixels() && !dragging;
             float brushU=0.f,brushV=0.f;
             const bool paintLeft=canPaint && pushDown && leftPointer &&
-                !menu.onTools(leftPointerX,leftPointerY,immersive) &&
+                (immersive || menu.toolbarAt(leftPointerX,leftPointerY,false)<0) &&
+                !(immersive && leftToolPointer) &&
                 menu.hitPhoto(leftPointerX,leftPointerY,immersive,brushU,brushV);
             // Trigger presses on Undo, Redo, Back or any other menu item
             // must not start a brush stroke or block Undo/Redo.
             const bool paintRight=canPaint && pullDown && pointer &&
-                !menu.onTools(pointerX,pointerY,immersive) &&
+                (immersive || menu.toolbarAt(pointerX,pointerY,false)<0) &&
+                !(immersive && toolPointer) &&
                 menu.hitPhoto(pointerX,pointerY,immersive,brushU,brushV);
             menu.painting=paintLeft||paintRight;
             menu.paintingLeft=paintLeft;
@@ -708,8 +758,9 @@ void run(JNIEnv* env, jobject activity) {
                 strokeEdited=false;
             }
             wasPainting=menu.painting;
-            const int overlayHover=(pointer&&!dragging)
-                ?menu.toolbarAt(pointerX,pointerY,immersive):-1;
+            const int overlayHover=immersive
+                ?(toolPointer&&!toolDragging?menu.toolbarAt(toolPointerX,toolPointerY,true):-1)
+                :(pointer&&!dragging?menu.toolbarAt(pointerX,pointerY,false):-1);
             const int hovered=(pointer && !dragging && !immersive)
                 ? vrui::buttonAt(page,pointerX,pointerY) : -1;
             const int hit=overlayHover>=0?overlayHover:hovered;
@@ -733,15 +784,18 @@ void run(JNIEnv* env, jobject activity) {
                 }
             }
             // Drag strength sliders while holding the right trigger.
-            if(!dragging && pointer && triggerDown && !wasPressed &&
-               (overlayHover==26 || overlayHover==27)) activeSlider=overlayHover;
+            const bool sliderAim=immersive?toolPointer:pointer;
+            const float sliderX=immersive?toolPointerX:pointerX;
+            if(!dragging && !toolDragging && sliderAim && triggerDown && !wasPressed &&
+               (overlayHover==26 || overlayHover==27 || overlayHover==29))
+                activeSlider=overlayHover;
             if(!triggerDown)activeSlider=-1;
-            if(activeSlider>=0 && pointer && !dragging)
-                menu.slideAt(activeSlider,pointerX,immersive);
+            if(activeSlider>=0 && sliderAim && !dragging && !toolDragging)
+                menu.slideAt(activeSlider,sliderX,immersive);
             if(triggerDown&&!wasPressed && !dragging && activeSlider<0 && hit>=20) {
                 switch(hit) {
                     case 20: menu.stereoEnabled=!menu.stereoEnabled;break;
-                    case 21: if(menu.hasDepthPixels())menu.brushMode=!menu.brushMode;break;
+                    case 21: menu.brushMode=!menu.brushMode;break;
                     case 22: menu.brushSoft=!menu.brushSoft;break;
                     case 23: menu.edgeAware=!menu.edgeAware;break;
                     case 24: if(menu.undoDepth())saveEditedDepth(env,activity,menu.depthCpu);break;
@@ -778,7 +832,7 @@ void run(JNIEnv* env, jobject activity) {
                     menu.quickConverting=true;
                     menu.brushMode=false;
                     callQuickConvert(env,activity);
-                } else if(page==vrui::Page::Open && hovered==10 && menu.hasDepthPixels()) {
+                } else if(page==vrui::Page::Open && hovered==10) {
                     menu.brushMode=!menu.brushMode;
                 } else if(page==vrui::Page::Open && hovered==6 && menu.hasPhoto()) {
                     menu.stereoEnabled=!menu.stereoEnabled;
@@ -833,11 +887,24 @@ void run(JNIEnv* env, jobject activity) {
                 const float eyeSign=eye==0?-1.f:1.f;
                 // Both controllers have independent visible pointers.
                 menu.draw(page,hovered,pointerX,pointerY,false,eyeSign);
-                menu.drawTools(page,overlayHover);
+                if(!immersive)menu.drawTools(page,overlayHover);
                 menu.drawHandCursor(leftPointerX,leftPointerY,leftPointer,
                                     true,paintLeft,immersive);
                 menu.drawHandCursor(pointerX,pointerY,pointer,
                                     false,paintRight,immersive);
+            }
+            if(immersive){
+                // Dedicated world-space tool panel renders outside the photo's
+                // swapchain sub-image, not layered onto the immersive photograph.
+                for(int eye=0;eye<2;eye++){
+                    glViewport(eye*1024,768,1024,768);
+                    glEnable(GL_SCISSOR_TEST);
+                    glScissor(eye*1024,768,1024,768);
+                    glClearColor(0.045f,0.038f,0.08f,1.f);
+                    glClear(GL_COLOR_BUFFER_BIT);
+                    glDisable(GL_SCISSOR_TEST);
+                    menu.drawFloatingTools(overlayHover,toolPointerX,toolPointerY,toolPointer);
+                }
             }
             glBindFramebuffer(GL_FRAMEBUFFER,0);
             glFlush();
@@ -856,6 +923,20 @@ void run(JNIEnv* env, jobject activity) {
                 quad.subImage.imageRect.extent={1024,768};
             }
             layerCount=2;
+            if(immersive) {
+                for(int eye=0;eye<2;eye++){
+                    auto& quad=quads[eye+2];
+                    quad.space=r.space;
+                    quad.eyeVisibility=eye==0?XR_EYE_VISIBILITY_LEFT:XR_EYE_VISIBILITY_RIGHT;
+                    quad.pose.orientation.w=1.f;
+                    quad.pose.position=toolPosition;
+                    quad.size={1.40f,1.05f};
+                    quad.subImage.swapchain=r.swapchain;
+                    quad.subImage.imageRect.offset={eye*1024,768};
+                    quad.subImage.imageRect.extent={1024,768};
+                }
+                layerCount=4;
+            }
         }
         XrFrameEndInfo end{XR_TYPE_FRAME_END_INFO};
         end.displayTime = frameState.predictedDisplayTime;

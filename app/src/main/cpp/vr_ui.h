@@ -118,28 +118,31 @@ struct Renderer {
     bool brushSoft=true;
     bool edgeAware=true;
     float brushStrength=1.0f;
+    float leftStrength=1.0f,rightStrength=1.0f;
     float disparityStrength=0.8f;
     std::vector<float> photoLuminance;
-    static bool onTools(float x,float y,bool immersive){
-        // Toolbar hit areas are excluded from depth painting.
-        if(immersive) return (y>=682 && y<=765)||(y>=0 && y<=98);
-        return (y>=665 && y<=765)||(y<=300)||(y>=615);
-    }
+    // Immersive controls are rendered on a separate physical compositor quad.
+    // Coordinates use that quad's 1024x768 logical UI space.
     int toolbarAt(float x,float y,bool immersive) const {
-        if(immersive) {
-            if(y>=689&&y<=755){
-                if(x>=20&&x<=142)return 20; // 2D/3D
-                if(x>=155&&x<=330)return 21; // brush on/off
-                if(x>=345&&x<=498)return 22; // hard/soft
-                if(x>=510&&x<=650)return 23; // edge
-                if(x>=670&&x<=790)return 24; // undo
-                if(x>=802&&x<=925)return 25; // redo
+        if(immersive){
+            if(x<16||x>1008||y<16||y>752)return -1;
+            if(y>=660)return 28; // Grab the floating panel using either grip.
+            if(y>=515&&y<=615){
+                if(x<260)return 20;
+                if(x<500)return 21;
+                if(x<740)return 22;
+                return 23;
             }
-            if(y>=18&&y<=91){
-                if(x>=30&&x<=485)return 26; // depth slider
-                if(x>=520&&x<=990)return 27; // brush strength slider
+            if(y>=405&&y<=490){
+                if(x<510)return 24;
+                return 25;
             }
-        } else if(y>=335&&y<=405){
+            if(y>=285&&y<=390)return 26; // Stereo strength
+            if(y>=170&&y<=274)return 29; // Left brush strength
+            if(y>=55&&y<=160)return 27;  // Right brush strength
+            return -1;
+        }
+        if(y>=335&&y<=405){
             if(x>=180&&x<=495)return 26;
             if(x>=510&&x<=845)return 27;
         }
@@ -147,11 +150,14 @@ struct Renderer {
     }
     void slideAt(int target,float x,bool immersive) {
         if(target==26){
-            const float lo=immersive?30.f:180.f,hi=immersive?485.f:495.f;
+            const float lo=immersive?45.f:180.f,hi=immersive?973.f:495.f;
             disparityStrength=std::clamp((x-lo)/(hi-lo)*2.f,0.f,2.f);
-        } else if(target==27) {
-            const float lo=immersive?520.f:510.f,hi=immersive?990.f:845.f;
-            brushStrength=std::clamp(0.1f+(x-lo)/(hi-lo)*2.9f,0.1f,3.f);
+        } else if(target==29){
+            leftStrength=std::clamp(0.1f+(x-45.f)/(973.f-45.f)*2.9f,0.1f,3.f);
+        } else if(target==27){
+            const float lo=immersive?45.f:510.f,hi=immersive?973.f:845.f;
+            rightStrength=std::clamp(0.1f+(x-lo)/(hi-lo)*2.9f,0.1f,3.f);
+            brushStrength=rightStrength;
         }
     }
     // Stroke-wise history; cap memory (~1 MiB each stack at 16 snapshots).
@@ -242,7 +248,7 @@ struct Renderer {
                     size_t(std::clamp(int(cy),0,255))*256u+
                     size_t(std::clamp(int(cx),0,255))])*10.f):1.f;
             const int delta=std::max(0,static_cast<int>(std::lround(
-                8.f*brushStrength*falloff*edgePenalty)));
+                8.f*(pullTowardViewer?rightStrength:leftStrength)*falloff*edgePenalty)));
             if(!delta)continue;
             const int value=std::clamp(int(depthCpu[i])+(pullTowardViewer?delta:-delta),0,255);
             if(value!=int(depthCpu[i])){depthCpu[i]=static_cast<uint8_t>(value);edited=true;}
@@ -548,39 +554,59 @@ struct Renderer {
         glBindVertexArray(0);
     }
     void drawTools(Page page,int hover) {
-        if(page!=Page::Open && page!=Page::Immersive)return;
-        const bool immersive=page==Page::Immersive;
+        if(page!=Page::Open)return;
         std::vector<float> v;
-        if(immersive){
-            box(v,9,683,1010,80,{0.075f,0.055f,0.13f});
-            const int ids[]={20,21,22,23,24,25};
-            const float xs[]={20,155,345,510,670,802};
-            const float ws[]={122,175,153,140,120,123};
-            const char* captions[]={
-                stereoEnabled?"3D ON":"3D OFF",brushMode?"BRUSH ON":"BRUSH OFF",
-                brushSoft?"SOFT":"HARD",edgeAware?"EDGE ON":"EDGE OFF","UNDO","REDO"
-            };
-            for(int i=0;i<6;++i){
-                const bool active=(i==0&&stereoEnabled)||(i==1&&brushMode)||
-                                  (i==2&&brushSoft)||(i==3&&edgeAware);
-                box(v,xs[i],689,ws[i],66,hover==ids[i]?purpleHover:
-                     active?purple:button);
-                label(v,captions[i],int(xs[i]+7),710,2,white);
-            }
-            box(v,10,4,1004,94,{0.075f,0.055f,0.13f});
-        }
-        const float dl=immersive?30.f:180.f, dr=immersive?485.f:495.f;
-        const float bl=immersive?520.f:510.f, br=immersive?990.f:845.f;
-        if(!immersive) box(v,170,330,684,84,{0.095f,0.075f,0.14f});
-        const float y=immersive?41.f:348.f;
-        label(v,"DEPTH",int(dl+4),int(y+27),2,white);
-        label(v,"BRUSH POWER",int(bl+4),int(y+27),2,white);
+        box(v,170,330,684,84,{0.095f,0.075f,0.14f});
+        const float dl=180.f,dr=495.f,bl=510.f,br=845.f,y=348.f;
+        label(v,"DEPTH",184,375,2,white);
+        label(v,"RIGHT POWER",514,375,2,white);
         box(v,dl,y,dr-dl,7,{0.25f,0.20f,0.32f});
         box(v,dl,y,(dr-dl)*disparityStrength/2.f,7,purpleHover);
         box(v,dl+(dr-dl)*disparityStrength/2.f-5,y-6,10,19,white);
         box(v,bl,y,br-bl,7,{0.25f,0.20f,0.32f});
-        box(v,bl,y,(br-bl)*(brushStrength-0.1f)/2.9f,7,purpleHover);
-        box(v,bl+(br-bl)*(brushStrength-0.1f)/2.9f-5,y-6,10,19,white);
+        box(v,bl,y,(br-bl)*(rightStrength-0.1f)/2.9f,7,purpleHover);
+        box(v,bl+(br-bl)*(rightStrength-0.1f)/2.9f-5,y-6,10,19,white);
+        submitUi(v);
+    }
+    void drawFloatingTools(int hover,float pointerX,float pointerY,bool pointer) {
+        std::vector<float> v;
+        box(v,0,0,1024,768,{0.075f,0.055f,0.13f});
+        box(v,16,657,992,101,hover==28?purpleHover:purple);
+        label(v,"MOVE PANEL - HOLD GRIP",92,693,4,white);
+        const char* names[]={
+            stereoEnabled?"3D ON":"3D OFF",brushMode?"BRUSH ON":"BRUSH OFF",
+            brushSoft?"SOFT":"HARD",edgeAware?"EDGE ON":"EDGE OFF",
+            "UNDO","REDO"
+        };
+        const int ids[]={20,21,22,23,24,25};
+        const float bx[]={18,265,512,759,18,512};
+        const float by[]={515,515,515,515,405,405};
+        const float bw[]={229,229,229,249,476,494};
+        const float bh[]={100,100,100,100,85,85};
+        for(int i=0;i<6;i++) {
+            const bool chosen=(i==0&&stereoEnabled)||(i==1&&brushMode)||
+                              (i==2&&brushSoft)||(i==3&&edgeAware);
+            box(v,bx[i],by[i],bw[i],bh[i],hover==ids[i]?purpleHover:
+                chosen?purple:button);
+            label(v,names[i],int(bx[i]+18),int(by[i]+33),3,
+                  (i==4&&!canUndo())||(i==5&&!canRedo())?muted:white);
+        }
+        const int sy[]={323,208,93};
+        const char* captions[]={"DEPTH STRENGTH","LEFT PUSH POWER","RIGHT PULL POWER"};
+        const float frac[]={disparityStrength/2.f,
+                            (leftStrength-0.1f)/2.9f,
+                            (rightStrength-0.1f)/2.9f};
+        for(int i=0;i<3;i++){
+            label(v,captions[i],45,sy[i]+35,3,white);
+            const float y=float(sy[i]);
+            box(v,45,y,928,15,{0.26f,0.20f,0.32f});
+            box(v,45,y,928*frac[i],15,purpleHover);
+            box(v,45+928*frac[i]-9,y-12,18,39,white);
+        }
+        if(pointer){
+            box(v,pointerX-16,pointerY-3,32,6,white);
+            box(v,pointerX-3,pointerY-16,6,32,white);
+        }
         submitUi(v);
     }
     void drawHandCursor(float x,float y,bool valid,bool left,bool active,
