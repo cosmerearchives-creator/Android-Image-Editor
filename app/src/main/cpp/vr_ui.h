@@ -717,6 +717,21 @@ struct Renderer {
         }
         submitUi(v);
     }
+    void drawAiOverlay(){
+        std::vector<float> v;
+        box(v,170,524,684,84,{0.075f,0.055f,0.13f});
+        const char* status=aiState==1?"DOWNLOADING AI MODEL":
+            aiState==2?"PROCESSING ON DEVICE":
+            aiState==3?"AI PREVIEW READY":
+            aiState==4?"AI CONVERSION FAILED":
+            aiState==5?"CONVERSION CANCELLED":"READY FOR AI CONVERSION";
+        label(v,status,192,569,3,white);
+        const std::string progress=std::to_string(aiPercent)+"%";
+        label(v,progress.c_str(),755,571,2,muted);
+        box(v,192,540,636,8,{0.25f,0.20f,0.32f});
+        box(v,192,540,636.f*float(aiPercent)/100.f,8,purpleHover);
+        submitUi(v);
+    }
     void drawHandCursor(float x,float y,bool valid,bool left,bool active,
                         bool immersive) {
         if(!valid)return;
