@@ -84,11 +84,16 @@ inline int buttonAt(Page page,float x,float y) {
         if(y>=444&&y<=540)return 0;
         if(y>=315&&y<=411)return 1;
         if(y>=186&&y<=282)return 2;
+    } else if (page==Page::Open) {
+        if(y>=92&&y<=190) return 3;
+        if(y>=205&&y<=291) return 4;
     } else if(y>=92&&y<=190) return 3;
     return -1;
 }
 struct Renderer {
-    GLuint program=0,vao=0,vbo=0; GLint location=-1;
+    GLuint program=0,vao=0,vbo=0,photoProgram=0,photoTexture=0;
+    int photoWidth=0,photoHeight=0;
+    bool hasPhoto() const {return photoTexture!=0;}
     static GLuint shader(GLenum type,const char* source) {
         GLuint s=glCreateShader(type);glShaderSource(s,1,&source,nullptr);
         glCompileShader(s);GLint good=0;glGetShaderiv(s,GL_COMPILE_STATUS,&good);
@@ -118,13 +123,88 @@ struct Renderer {
         glEnableVertexAttribArray(0);glVertexAttribPointer(0,2,GL_FLOAT,GL_FALSE,5*sizeof(float),nullptr);
         glEnableVertexAttribArray(1);glVertexAttribPointer(1,3,GL_FLOAT,GL_FALSE,5*sizeof(float),
             reinterpret_cast<const void*>(2*sizeof(float)));
-        glBindVertexArray(0);return true;
+        glBindVertexArray(0);
+        const char* photoVs=R"(#version 300 es
+            layout(location=0) in vec2 pos;
+            layout(location=2) in vec2 texCoord;
+            out vec2 uv;
+            void main(){
+                gl_Position=vec4(pos.x/512.0-1.0,pos.y/384.0-1.0,0.0,1.0);
+                uv=texCoord;
+            }
+        )";
+        const char* photoFs=R"(#version 300 es
+            precision mediump float;
+            in vec2 uv;
+            uniform sampler2D photograph;
+            out vec4 frag;
+            void main(){frag=texture(photograph,uv);}
+        )";
+        GLuint pv=shader(GL_VERTEX_SHADER,photoVs),pf=shader(GL_FRAGMENT_SHADER,photoFs);
+        if(!pv||!pf)return false;
+        photoProgram=glCreateProgram();glAttachShader(photoProgram,pv);glAttachShader(photoProgram,pf);
+        glLinkProgram(photoProgram);glDeleteShader(pv);glDeleteShader(pf);
+        GLint ok=0;glGetProgramiv(photoProgram,GL_LINK_STATUS,&ok);
+        return ok!=0;
+    }
+    void uploadPhoto(const std::vector<uint8_t>& rgba,int width,int height){
+        if(photoTexture){glDeleteTextures(1,&photoTexture);photoTexture=0;}
+        photoWidth=0;photoHeight=0;
+        if(width<=0||height<=0||rgba.size()!=size_t(width)*size_t(height)*4)return;
+        glGenTextures(1,&photoTexture);
+        glBindTexture(GL_TEXTURE_2D,photoTexture);
+        glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_S,GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_T,GL_CLAMP_TO_EDGE);
+        glPixelStorei(GL_UNPACK_ALIGNMENT,1);
+        glTexImage2D(GL_TEXTURE_2D,0,GL_RGBA8,width,height,0,GL_RGBA,GL_UNSIGNED_BYTE,rgba.data());
+        glBindTexture(GL_TEXTURE_2D,0);
+        photoWidth=width;photoHeight=height;
+    }
+    void drawPhoto(){
+        if(!photoTexture || !photoProgram)return;
+        // Fit without cropping or stretching, preserving photo aspect ratio.
+        float w=704.f,h=300.f;
+        const float ratio=float(photoWidth)/float(photoHeight);
+        if(ratio > w/h) h=w/ratio; else w=h*ratio;
+        const float x=512.f-w/2.f,y=450.f-h/2.f;
+        // Vertex UVs are generated from absolute pixel coords in photoVs;
+        // supply canonical UVs with a separate dedicated attribute shader instead.
+        const float vertices[]={
+            x,y,0.f,1.f, x+w,y,1.f,1.f, x,y+h,0.f,0.f,
+            x+w,y,1.f,1.f, x+w,y+h,1.f,0.f, x,y+h,0.f,0.f
+        };
+        glUseProgram(photoProgram);
+        glBindTexture(GL_TEXTURE_2D,photoTexture);
+        // A temporary attribute layout avoids changing the batched menu VBO.
+        GLuint buffer=0;glGenBuffers(1,&buffer);
+        glBindVertexArray(0);
+        glBindBuffer(GL_ARRAY_BUFFER,buffer);
+        glBufferData(GL_ARRAY_BUFFER,sizeof(vertices),vertices,GL_STREAM_DRAW);
+        glEnableVertexAttribArray(0);
+        glVertexAttribPointer(0,2,GL_FLOAT,GL_FALSE,4*sizeof(float),nullptr);
+        glEnableVertexAttribArray(2);
+        glVertexAttribPointer(2,2,GL_FLOAT,GL_FALSE,4*sizeof(float),
+            reinterpret_cast<const void*>(2*sizeof(float)));
+        glDrawArrays(GL_TRIANGLES,0,6);
+        glDisableVertexAttribArray(0);
+        glDisableVertexAttribArray(2);
+        glDeleteBuffers(1,&buffer);
+        glBindTexture(GL_TEXTURE_2D,0);
     }
     void draw(Page page,int hovered,float cursorX,float cursorY,bool pointer){
         std::vector<float> v;v.reserve(42000);
         box(v,42,48,940,674,panel);
         label(v,"ANDROID IMAGE EDITOR",172,645,5,white);
         label(v,"QUEST 2 VR STUDIO",312,594,3,muted);
+        if(page==Page::Open){
+            // Show the imported photograph behind UI labels and buttons.
+            // Texture upload happens separately on the OpenXR graphics thread.
+            if(hasPhoto()) {
+                box(v,144,288,736,320,{0.025f,0.023f,0.044f});
+            }
+        }
         if(page==Page::Home){
             const char* names[]={"OPEN IMAGE","MY PROJECTS","VIEW GALLERY"};
             const int ys[]={444,315,186};
@@ -139,8 +219,14 @@ struct Renderer {
                 page==Page::Projects?"MY PROJECTS":"VIEW GALLERY";
             int n=static_cast<int>(std::strlen(title));
             label(v,title,512-n*15,475,5,white);
-            label(v,"COMING SOON",320,385,4,muted);
-            label(v,"VR NAVIGATION TEST",272,318,3,muted);
+            if(page==Page::Open) {
+                if(!hasPhoto()) label(v,"NO IMAGE IMPORTED",235,411,4,muted);
+                box(v,170,205,684,86,hovered==4?purpleHover:button);
+                label(v,"IMPORT IMAGE",330,232,3,white);
+            } else {
+                label(v,"COMING SOON",320,385,4,muted);
+                label(v,"VR NAVIGATION TEST",272,318,3,muted);
+            }
             box(v,170,92,684,98,hovered==3?purpleHover:purple);
             label(v,"BACK",440,121,4,white);
         }
@@ -148,12 +234,15 @@ struct Renderer {
             box(v,cursorX-13,cursorY-2,26,4,white);
             box(v,cursorX-2,cursorY-13,4,26,white);
         }
+        if(page==Page::Open && hasPhoto())drawPhoto();
         glUseProgram(program);glBindVertexArray(vao);glBindBuffer(GL_ARRAY_BUFFER,vbo);
         glBufferData(GL_ARRAY_BUFFER,v.size()*sizeof(float),v.data(),GL_STREAM_DRAW);
         glDrawArrays(GL_TRIANGLES,0,static_cast<GLsizei>(v.size()/5));
         glBindVertexArray(0);
     }
-    ~Renderer(){if(vbo)glDeleteBuffers(1,&vbo);if(vao)glDeleteVertexArrays(1,&vao);
+    ~Renderer(){if(photoTexture)glDeleteTextures(1,&photoTexture);
+        if(photoProgram)glDeleteProgram(photoProgram);
+        if(vbo)glDeleteBuffers(1,&vbo);if(vao)glDeleteVertexArrays(1,&vao);
         if(program)glDeleteProgram(program);}
 };
 } // namespace vrui
