@@ -169,8 +169,7 @@ struct Renderer {
         const float ratio=float(photoWidth)/float(photoHeight);
         if(ratio > w/h) h=w/ratio; else w=h*ratio;
         const float x=512.f-w/2.f,y=450.f-h/2.f;
-        // Vertex UVs are generated from absolute pixel coords in photoVs;
-        // supply canonical UVs with a separate dedicated attribute shader instead.
+        // Explicit normalized texture coordinates preserve source orientation.
         const float vertices[]={
             x,y,0.f,1.f, x+w,y,1.f,1.f, x,y+h,0.f,0.f,
             x+w,y,1.f,1.f, x+w,y+h,1.f,0.f, x,y+h,0.f,0.f
@@ -198,13 +197,6 @@ struct Renderer {
         box(v,42,48,940,674,panel);
         label(v,"ANDROID IMAGE EDITOR",172,645,5,white);
         label(v,"QUEST 2 VR STUDIO",312,594,3,muted);
-        if(page==Page::Open){
-            // Show the imported photograph behind UI labels and buttons.
-            // Texture upload happens separately on the OpenXR graphics thread.
-            if(hasPhoto()) {
-                box(v,144,288,736,320,{0.025f,0.023f,0.044f});
-            }
-        }
         if(page==Page::Home){
             const char* names[]={"OPEN IMAGE","MY PROJECTS","VIEW GALLERY"};
             const int ys[]={444,315,186};
@@ -218,7 +210,7 @@ struct Renderer {
             const char* title=page==Page::Open?"OPEN IMAGE":
                 page==Page::Projects?"MY PROJECTS":"VIEW GALLERY";
             int n=static_cast<int>(std::strlen(title));
-            label(v,title,512-n*15,475,5,white);
+            label(v,title,512-n*15,page==Page::Open?615:475,5,white);
             if(page==Page::Open) {
                 if(!hasPhoto()) label(v,"NO IMAGE IMPORTED",235,411,4,muted);
                 box(v,170,205,684,86,hovered==4?purpleHover:button);
@@ -234,11 +226,22 @@ struct Renderer {
             box(v,cursorX-13,cursorY-2,26,4,white);
             box(v,cursorX-2,cursorY-13,4,26,white);
         }
-        if(page==Page::Open && hasPhoto())drawPhoto();
         glUseProgram(program);glBindVertexArray(vao);glBindBuffer(GL_ARRAY_BUFFER,vbo);
         glBufferData(GL_ARRAY_BUFFER,v.size()*sizeof(float),v.data(),GL_STREAM_DRAW);
         glDrawArrays(GL_TRIANGLES,0,static_cast<GLsizei>(v.size()/5));
         glBindVertexArray(0);
+        if(page==Page::Open && hasPhoto()) {
+            drawPhoto();
+            if(pointer) {
+                std::vector<float> cursor;
+                box(cursor,cursorX-13,cursorY-2,26,4,white);
+                box(cursor,cursorX-2,cursorY-13,4,26,white);
+                glUseProgram(program);glBindVertexArray(vao);glBindBuffer(GL_ARRAY_BUFFER,vbo);
+                glBufferData(GL_ARRAY_BUFFER,cursor.size()*sizeof(float),cursor.data(),GL_STREAM_DRAW);
+                glDrawArrays(GL_TRIANGLES,0,static_cast<GLsizei>(cursor.size()/5));
+                glBindVertexArray(0);
+            }
+        }
     }
     ~Renderer(){if(photoTexture)glDeleteTextures(1,&photoTexture);
         if(photoProgram)glDeleteProgram(photoProgram);
