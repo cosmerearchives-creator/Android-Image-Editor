@@ -17,6 +17,35 @@ std::atomic<bool> stopRequested{false};
 std::atomic<bool> imageNeedsReload{true};
 std::atomic<bool> depthNeedsReload{true};
 std::atomic<bool> projectsNeedReload{true};
+void loadPanelLayout(JNIEnv* env,jobject activity,XrVector3f& pos,float& scale){
+    jclass cls=env->GetObjectClass(activity);
+    jmethodID method=env->GetMethodID(cls,"loadFloatingPanelPose","()[F");
+    if(method){
+        jfloatArray values=static_cast<jfloatArray>(env->CallObjectMethod(activity,method));
+        if(values){
+            if(env->GetArrayLength(values)==4){
+                float v[4]{};
+                env->GetFloatArrayRegion(values,0,4,v);
+                if(std::isfinite(v[0])&&std::isfinite(v[1])&&std::isfinite(v[2])&&
+                   std::isfinite(v[3])){
+                    pos={std::clamp(v[0],-5.f,5.f),std::clamp(v[1],-2.5f,2.5f),
+                         std::clamp(v[2],-4.f,-0.6f)};
+                    scale=std::clamp(v[3],0.5f,2.f);
+                }
+            }
+            env->DeleteLocalRef(values);
+        }
+    }
+    if(env->ExceptionCheck()){env->ExceptionDescribe();env->ExceptionClear();}
+    env->DeleteLocalRef(cls);
+}
+void savePanelLayout(JNIEnv* env,jobject activity,const XrVector3f& pos,float scale){
+    jclass cls=env->GetObjectClass(activity);
+    jmethodID method=env->GetMethodID(cls,"saveFloatingPanelPose","(FFFF)V");
+    if(method)env->CallVoidMethod(activity,method,pos.x,pos.y,pos.z,scale);
+    if(env->ExceptionCheck()){env->ExceptionDescribe();env->ExceptionClear();}
+    env->DeleteLocalRef(cls);
+}
 void callSaveProject(JNIEnv* env,jobject activity,bool asNew){
     jclass cls=env->GetObjectClass(activity);
     jmethodID method=env->GetMethodID(cls,"requestSaveProject","(Z)V");
@@ -488,10 +517,14 @@ void run(JNIEnv* env, jobject activity) {
     int activeSlider=-1;
     XrVector3f toolPosition{3.4f,0.f,-1.7f};
     XrVector3f toolDragHand{},toolDragStart{};
-    bool toolDragging=false,toolDragRight=false;
+    bool toolDragging=false,toolDragRight=false,toolScaling=false;
+    float toolScale=1.f,toolInitialScale=1.f,toolInitialDistance=1.f;
+    XrVector3f toolInitialMiddle{},toolScaleStart{};
+    bool panelLayoutDirty=false;
     float toolPointerX=0.f,toolPointerY=0.f;
     float leftToolX=0.f,leftToolY=0.f;
     bool toolPointer=false,leftToolPointer=false;
+    loadPanelLayout(env,activity,toolPosition,toolScale);
     XrVector3f editorPosition{0.f,0.f,-1.9f};
     float editorScale=1.f,editorAngle=0.f,editorZoom=1.f,editorU=0.5f,editorV=0.5f;
     // One grip translates the canvas. Two grips translate, scale, and rotate around Z.
@@ -687,35 +720,69 @@ void run(JNIEnv* env, jobject activity) {
             }
             const bool immersivePanel=page==vrui::Page::Immersive;
             toolPointer=immersivePanel && validAim &&
-                pointerOnPanel(rightPose,toolPosition,1.f,0.f,
+                pointerOnPanel(rightPose,toolPosition,toolScale,0.f,
                                toolPointerX,toolPointerY,1.40f,1.05f);
             leftToolPointer=immersivePanel && validLeftAim &&
-                pointerOnPanel(leftPose,toolPosition,1.f,0.f,
+                pointerOnPanel(leftPose,toolPosition,toolScale,0.f,
                                leftToolX,leftToolY,1.40f,1.05f);
             const bool rawRightGrip=validAim && grip.isActive && grip.currentState>0.6f;
             const bool rawLeftGrip=validLeftAim && leftGrip.isActive &&
                 leftGrip.currentState>0.6f;
-            if(!toolDragging && immersivePanel) {
-                const bool rightHandle=toolPointer && menu.toolbarAt(toolPointerX,toolPointerY,true)==28;
-                const bool leftHandle=leftToolPointer && menu.toolbarAt(leftToolX,leftToolY,true)==28;
-                if(rawRightGrip && rightHandle){
-                    toolDragging=true; toolDragRight=true;
-                    toolDragHand=aimPosition;toolDragStart=toolPosition;
-                    dragMode=DragMode::None;
-                } else if(rawLeftGrip && leftHandle) {
-                    toolDragging=true;toolDragRight=false;
-                    toolDragHand=leftPosition;toolDragStart=toolPosition;
-                    dragMode=DragMode::None;
-                }
+            const bool rightHandle=toolPointer &&
+                menu.toolbarAt(toolPointerX,toolPointerY,true)==28;
+            const bool leftHandle=leftToolPointer &&
+                menu.toolbarAt(leftToolX,leftToolY,true)==28;
+            if(!toolDragging && immersivePanel &&
+               ((rawRightGrip&&rightHandle)||(rawLeftGrip&&leftHandle))){
+                toolDragging=true;
+                toolDragRight=rawRightGrip&&rightHandle;
+                toolDragHand=toolDragRight?aimPosition:leftPosition;
+                toolDragStart=toolPosition;
+                panelLayoutDirty=true;
+                dragMode=DragMode::None;
             }
-            if(toolDragging) {
-                const bool held=toolDragRight?rawRightGrip:rawLeftGrip;
-                if(!held || !immersivePanel) toolDragging=false;
-                else {
+            if(toolDragging){
+                if(!immersivePanel || (!rawRightGrip&&!rawLeftGrip)){
+                    toolDragging=false;
+                    toolScaling=false;
+                    if(panelLayoutDirty){
+                        savePanelLayout(env,activity,toolPosition,toolScale);
+                        panelLayoutDirty=false;
+                    }
+                } else if(rawRightGrip && rawLeftGrip && validAim && validLeftAim) {
+                    if(!toolScaling){
+                        toolScaling=true;
+                        toolInitialMiddle={(aimPosition.x+leftPosition.x)*.5f,
+                                           (aimPosition.y+leftPosition.y)*.5f,
+                                           (aimPosition.z+leftPosition.z)*.5f};
+                        toolInitialDistance=std::max(.04f,
+                            std::hypot(aimPosition.x-leftPosition.x,
+                                       aimPosition.y-leftPosition.y));
+                        toolInitialScale=toolScale;
+                        toolScaleStart=toolPosition;
+                    }
+                    const XrVector3f middle{(aimPosition.x+leftPosition.x)*.5f,
+                                             (aimPosition.y+leftPosition.y)*.5f,
+                                             (aimPosition.z+leftPosition.z)*.5f};
+                    const float distance=std::max(.04f,
+                        std::hypot(aimPosition.x-leftPosition.x,
+                                   aimPosition.y-leftPosition.y));
+                    toolScale=std::clamp(toolInitialScale*distance/toolInitialDistance,.5f,2.f);
+                    toolPosition.x=std::clamp(toolScaleStart.x+middle.x-toolInitialMiddle.x,-5.f,5.f);
+                    toolPosition.y=std::clamp(toolScaleStart.y+middle.y-toolInitialMiddle.y,-2.5f,2.5f);
+                    toolPosition.z=std::clamp(toolScaleStart.z+middle.z-toolInitialMiddle.z,-4.f,-.6f);
+                } else {
+                    const bool rightNow=rawRightGrip;
+                    if(toolScaling || toolDragRight!=rightNow){
+                        toolScaling=false;
+                        toolDragRight=rightNow;
+                        toolDragHand=rightNow?aimPosition:leftPosition;
+                        toolDragStart=toolPosition;
+                    }
                     const auto& hand=toolDragRight?aimPosition:leftPosition;
                     toolPosition.x=std::clamp(toolDragStart.x+hand.x-toolDragHand.x,-5.f,5.f);
                     toolPosition.y=std::clamp(toolDragStart.y+hand.y-toolDragHand.y,-2.5f,2.5f);
-                    toolPosition.z=std::clamp(toolDragStart.z+hand.z-toolDragHand.z,-4.f,-0.6f);
+                    toolPosition.z=std::clamp(toolDragStart.z+hand.z-toolDragHand.z,-4.f,-.6f);
                 }
             }
             const bool rightHeld=validAim && !toolDragging &&
@@ -1054,7 +1121,7 @@ void run(JNIEnv* env, jobject activity) {
                     quad.eyeVisibility=eye==0?XR_EYE_VISIBILITY_LEFT:XR_EYE_VISIBILITY_RIGHT;
                     quad.pose.orientation.w=1.f;
                     quad.pose.position=toolPosition;
-                    quad.size={1.40f,1.05f};
+                    quad.size={1.40f*toolScale,1.05f*toolScale};
                     quad.subImage.swapchain=r.swapchain;
                     quad.subImage.imageRect.offset={eye*1024,768};
                     quad.subImage.imageRect.extent={1024,768};
