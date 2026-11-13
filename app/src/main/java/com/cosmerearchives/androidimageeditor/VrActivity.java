@@ -21,6 +21,35 @@ public final class VrActivity extends Activity {
     private native void requestNativeStop();
     private native void notifyImageChanged();
     private native void notifyDepthChanged();
+    // Serialize brush snapshots so an earlier stroke cannot overwrite a newer one.
+    private final java.util.concurrent.ExecutorService depthSaver =
+        java.util.concurrent.Executors.newSingleThreadExecutor();
+
+    private final java.util.concurrent.atomic.AtomicLong depthGeneration =
+        new java.util.concurrent.atomic.AtomicLong();
+
+    /** The XR thread sends a copy at stroke end; saving never blocks rendering. */
+    @SuppressWarnings("unused")
+    public void saveEditedDepth(byte[] gray) {
+        if(gray==null || gray.length!=256*256)return;
+        final byte[] snapshot=gray.clone();
+        final long expectedGeneration=depthGeneration.get();
+        try {
+            depthSaver.execute(() -> {
+                if(expectedGeneration!=depthGeneration.get())return;
+                try {
+                    QuickDepth.saveEdited(getApplicationContext(),snapshot);
+                } catch (IOException | RuntimeException e) {
+                    Log.e(TAG,"Saving corrected depth failed",e);
+                    runOnUiThread(() -> Toast.makeText(this,
+                        "Could not save depth corrections",Toast.LENGTH_LONG).show());
+                }
+            });
+        } catch(java.util.concurrent.RejectedExecutionException ex) {
+            Log.w(TAG,"Depth saver already shut down",ex);
+        }
+    }
+
     private final java.util.concurrent.atomic.AtomicBoolean converting =
         new java.util.concurrent.atomic.AtomicBoolean(false);
 
@@ -28,6 +57,7 @@ public final class VrActivity extends Activity {
     @SuppressWarnings("unused")
     public void requestQuickConvert() {
         if(!converting.compareAndSet(false,true))return;
+        depthGeneration.incrementAndGet();
         new Thread(() -> {
             try {
                 QuickDepth.convert(getApplicationContext());
@@ -60,7 +90,8 @@ public final class VrActivity extends Activity {
             }
             runOnUiThread(() -> {
                 xrThread = null;
-                if (resumed && restartAfterPause) startVrIfNeeded();
+                if (isDestroyed()) depthSaver.shutdown();
+                else if (resumed && restartAfterPause) startVrIfNeeded();
             });
         }, "image-editor-openxr");
         xrThread.start();
@@ -82,6 +113,7 @@ public final class VrActivity extends Activity {
     @Override protected void onDestroy() {
         resumed = false;
         requestNativeStop();
+        if(xrThread==null)depthSaver.shutdown();
         super.onDestroy();
     }
 
@@ -105,6 +137,7 @@ public final class VrActivity extends Activity {
         if (request != PICK_IMAGE || result != RESULT_OK || data == null || data.getData() == null)
             return;
         final Uri selected = data.getData();
+        depthGeneration.incrementAndGet();
         Toast.makeText(this, "Importing image locally…", Toast.LENGTH_SHORT).show();
         new Thread(() -> {
             try {

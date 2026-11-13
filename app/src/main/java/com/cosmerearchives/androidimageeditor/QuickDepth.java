@@ -42,6 +42,31 @@ public final class QuickDepth {
         } finally { bitmap.recycle(); }
     }
 
+    /** Persist an edited 256x256 depth map atomically. Existing photo stays untouched. */
+    public static synchronized void saveEdited(Context ctx, byte[] gray) throws IOException {
+        if(gray==null || gray.length!=W*H)
+            throw new IOException("Invalid depth-map dimensions");
+        int[] argb=new int[W*H];
+        for(int i=0;i<argb.length;i++){
+            int value=gray[i] & 0xff;
+            argb[i]=Color.argb(255,value,value,value);
+        }
+        Bitmap bitmap=Bitmap.createBitmap(argb,W,H,Bitmap.Config.ARGB_8888);
+        File staging=new File(ctx.getFilesDir(),DEPTH_FILE+".edited.partial");
+        try {
+            try(FileOutputStream stream=new FileOutputStream(staging)){
+                if(!bitmap.compress(Bitmap.CompressFormat.PNG,100,stream))
+                    throw new IOException("Unable to encode corrected depth map");
+                stream.getFD().sync();
+            }
+            if(!staging.renameTo(path(ctx)))
+                throw new IOException("Unable to commit corrected depth map");
+        } finally {
+            bitmap.recycle();
+            staging.delete();
+        }
+    }
+
     public static void convert(Context ctx) throws IOException {
         Bitmap source = BitmapFactory.decodeFile(
             new File(ctx.getFilesDir(), "vr_import.png").getAbsolutePath());
