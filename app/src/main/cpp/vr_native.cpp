@@ -279,7 +279,8 @@ void run(JNIEnv* env, jobject activity) {
     swapInfo.usageFlags = XR_SWAPCHAIN_USAGE_COLOR_ATTACHMENT_BIT;
     swapInfo.format = preferred;
     swapInfo.sampleCount = 1;
-    swapInfo.width = 1024;
+    // One double-width swapchain: each eye reads its own 1024x768 rectangle.
+    swapInfo.width = 2048;
     swapInfo.height = 768;
     swapInfo.faceCount = 1;
     swapInfo.arraySize = 1;
@@ -337,9 +338,13 @@ void run(JNIEnv* env, jobject activity) {
         check(xrWaitFrame(r.session, &waitInfo, &frameState), "xrWaitFrame");
         XrFrameBeginInfo beginFrame{XR_TYPE_FRAME_BEGIN_INFO};
         check(xrBeginFrame(r.session, &beginFrame), "xrBeginFrame");
-        XrCompositionLayerQuad quad{XR_TYPE_COMPOSITION_LAYER_QUAD};
+        XrCompositionLayerQuad quads[2]{
+            {XR_TYPE_COMPOSITION_LAYER_QUAD},
+            {XR_TYPE_COMPOSITION_LAYER_QUAD}
+        };
         const XrCompositionLayerBaseHeader* layers[] = {
-            reinterpret_cast<const XrCompositionLayerBaseHeader*>(&quad)
+            reinterpret_cast<const XrCompositionLayerBaseHeader*>(&quads[0]),
+            reinterpret_cast<const XrCompositionLayerBaseHeader*>(&quads[1])
         };
         uint32_t layerCount = 0;
         if (frameState.shouldRender) {
@@ -481,6 +486,11 @@ void run(JNIEnv* env, jobject activity) {
             const bool triggerDown = pressed.isActive && pressed.currentState >= 0.5f;
             if (triggerDown && !wasPressed && hovered >= 0) {
                 if (hovered == 3) page = vrui::Page::Home;
+                else if (page == vrui::Page::Open && hovered == 6 && menu.hasPhoto()) {
+                    menu.stereoEnabled=!menu.stereoEnabled;
+                } else if (page == vrui::Page::Open && hovered == 7 && menu.hasPhoto()) {
+                    menu.depthLevel=(menu.depthLevel+1)%3;
+                }
                 else if (page == vrui::Page::Open && hovered == 5) {
                     menu.resetPhotoView();
                     panelPosition={0.f,0.f,-1.9f};
@@ -507,28 +517,36 @@ void run(JNIEnv* env, jobject activity) {
             glBindFramebuffer(GL_FRAMEBUFFER, r.fbo);
             glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D,
                                    images[index].image, 0);
-            glViewport(0, 0, 1024, 768);
-            glDisable(GL_SCISSOR_TEST);
-            glClearColor(0.045f, 0.038f, 0.08f, 1.f);
-            glClear(GL_COLOR_BUFFER_BIT);
+            if(imageNeedsReload.exchange(false)) refreshImage(env,activity,menu);
             glDisable(GL_DEPTH_TEST);
             glDisable(GL_BLEND);
-            if(imageNeedsReload.exchange(false)) refreshImage(env,activity,menu);
-            menu.draw(page,hovered,pointerX,pointerY,pointer);
-            glBindFramebuffer(GL_FRAMEBUFFER, 0);
+            for(int eye=0;eye<2;++eye) {
+                glViewport(eye*1024,0,1024,768);
+                glEnable(GL_SCISSOR_TEST);
+                glScissor(eye*1024,0,1024,768);
+                glClearColor(0.045f,0.038f,0.08f,1.f);
+                glClear(GL_COLOR_BUFFER_BIT);
+                glDisable(GL_SCISSOR_TEST);
+                const float eyeSign=eye==0?-1.f:1.f;
+                menu.draw(page,hovered,pointerX,pointerY,pointer,eyeSign);
+            }
+            glBindFramebuffer(GL_FRAMEBUFFER,0);
             glFlush();
             XrSwapchainImageReleaseInfo release{XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO};
-            check(xrReleaseSwapchainImage(r.swapchain, &release), "release image");
-            quad.space = r.space;
-            quad.eyeVisibility = XR_EYE_VISIBILITY_BOTH;
-            quad.pose.orientation.w = 1.f;
-            quad.pose.position=panelPosition;
-            quad.pose.orientation.z=std::sin(panelAngle*0.5f);
-            quad.pose.orientation.w=std::cos(panelAngle*0.5f);
-            quad.size = {1.45f*panelScale, 1.08f*panelScale};
-            quad.subImage.swapchain = r.swapchain;
-            quad.subImage.imageRect.extent = {1024, 768};
-            layerCount = 1;
+            check(xrReleaseSwapchainImage(r.swapchain,&release),"release image");
+            for(int eye=0;eye<2;++eye) {
+                auto& quad=quads[eye];
+                quad.space=r.space;
+                quad.eyeVisibility=eye==0?XR_EYE_VISIBILITY_LEFT:XR_EYE_VISIBILITY_RIGHT;
+                quad.pose.orientation.z=std::sin(panelAngle*0.5f);
+                quad.pose.orientation.w=std::cos(panelAngle*0.5f);
+                quad.pose.position=panelPosition;
+                quad.size={1.45f*panelScale,1.08f*panelScale};
+                quad.subImage.swapchain=r.swapchain;
+                quad.subImage.imageRect.offset={eye*1024,0};
+                quad.subImage.imageRect.extent={1024,768};
+            }
+            layerCount=2;
         }
         XrFrameEndInfo end{XR_TYPE_FRAME_END_INFO};
         end.displayTime = frameState.predictedDisplayTime;

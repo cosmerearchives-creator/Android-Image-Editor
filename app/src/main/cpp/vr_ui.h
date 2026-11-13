@@ -87,13 +87,22 @@ inline int buttonAt(Page page,float x,float y) {
     } else if (page==Page::Open) {
         if(y>=92&&y<=190) return 3;
         if(y>=205&&y<=291) return 4;
-        if(y>=36&&y<=88) return 5;
+        if(y>=36&&y<=88) {
+            if(x>=645)return 5;
+            if(x<=409)return 6;
+            if(x>=420&&x<=639)return 7;
+        }
     } else if(y>=92&&y<=190) return 3;
     return -1;
 }
 struct Renderer {
     GLuint program=0,vao=0,vbo=0,photoProgram=0,photoTexture=0,photoVao=0,photoVbo=0;
     int photoWidth=0,photoHeight=0;
+    bool stereoEnabled=false;
+    int depthLevel=1;
+    float depthStrength() const {
+        return stereoEnabled ? (depthLevel==0?0.45f:(depthLevel==1?0.8f:1.2f)) : 0.f;
+    }
     float zoom=1.f, centerU=0.5f, centerV=0.5f;
     void resetPhotoView(){zoom=1.f;centerU=0.5f;centerV=0.5f;}
     void changeZoom(float delta,float cursorX,float cursorY,bool pointer){
@@ -158,8 +167,25 @@ struct Renderer {
             precision mediump float;
             in vec2 uv;
             uniform sampler2D photograph;
+            uniform float eyeSign;
+            uniform float depthStrength;
             out vec4 frag;
-            void main(){frag=texture(photograph,uv);}
+            // Experimental depth cue based on image brightness and center weighting.
+            float guessedDepth(vec2 p) {
+                vec3 col=texture(photograph,clamp(p,vec2(0.001),vec2(0.999))).rgb;
+                float luminance=dot(col,vec3(0.2126,0.7152,0.0722));
+                float center=1.0-smoothstep(0.0,0.72,length(p-vec2(0.5)));
+                return clamp(0.25+0.4*center+0.35*luminance,0.0,1.0);
+            }
+            void main() {
+                vec2 sampleUv=uv;
+                for(int i=0;i<2;i++){
+                    float depth=guessedDepth(sampleUv);
+                    sampleUv.x=uv.x + eyeSign*depthStrength*(depth-0.5)*0.035;
+                    sampleUv=clamp(sampleUv,vec2(0.001),vec2(0.999));
+                }
+                frag=texture(photograph,sampleUv);
+            }
         )";
         GLuint pv=shader(GL_VERTEX_SHADER,photoVs),pf=shader(GL_FRAGMENT_SHADER,photoFs);
         if(!pv||!pf)return false;
@@ -195,7 +221,7 @@ struct Renderer {
         photoWidth=width;photoHeight=height;
         resetPhotoView();
     }
-    void drawPhoto(){
+    void drawPhoto(float eyeSign){
         if(!photoTexture || !photoProgram)return;
         // Fit without cropping or stretching, preserving photo aspect ratio.
         float w=704.f,h=300.f;
@@ -211,6 +237,8 @@ struct Renderer {
             x+w,y,u1,v1, x+w,y+h,u1,v0, x,y+h,u0,v0
         };
         glUseProgram(photoProgram);
+        glUniform1f(glGetUniformLocation(photoProgram,"eyeSign"),eyeSign);
+        glUniform1f(glGetUniformLocation(photoProgram,"depthStrength"),depthStrength());
         glBindTexture(GL_TEXTURE_2D,photoTexture);
         glBindVertexArray(photoVao);
         glBindBuffer(GL_ARRAY_BUFFER,photoVbo);
@@ -219,7 +247,7 @@ struct Renderer {
         glBindVertexArray(0);
         glBindTexture(GL_TEXTURE_2D,0);
     }
-    void draw(Page page,int hovered,float cursorX,float cursorY,bool pointer){
+    void draw(Page page,int hovered,float cursorX,float cursorY,bool pointer,float eyeSign=0.f){
         std::vector<float> v;v.reserve(42000);
         box(v,42,48,940,674,panel);
         label(v,"ANDROID IMAGE EDITOR",172,645,5,white);
@@ -242,10 +270,15 @@ struct Renderer {
                 if(!hasPhoto()) label(v,"NO IMAGE IMPORTED",235,411,4,muted);
                 box(v,170,205,684,86,hovered==4?purpleHover:button);
                 label(v,"IMPORT IMAGE",330,232,3,white);
+                box(v,170,36,239,52,hovered==6?purpleHover:(stereoEnabled?purple:button));
+                label(v,stereoEnabled?"3D ON":"3D OFF",218,51,2,white);
+                box(v,420,36,219,52,hovered==7?purpleHover:button);
+                label(v,depthLevel==0?"DEPTH LOW":depthLevel==1?"DEPTH MID":"DEPTH HIGH",
+                      438,51,2,white);
                 box(v,645,36,209,52,hovered==5?purpleHover:button);
                 label(v,"RESET VIEW",665,51,2,white);
                 if(hasPhoto()) {
-                    label(v,"STICK UP DOWN TO ZOOM",190,56,2,muted);
+                    label(v,stereoEnabled?"STEREO TEST":"FLAT IMAGE",210,310,2,muted);
                     label(v,"BOTH GRIPS RESIZE ROTATE",204,304,2,muted);
                 }
             } else {
@@ -264,7 +297,7 @@ struct Renderer {
         glDrawArrays(GL_TRIANGLES,0,static_cast<GLsizei>(v.size()/5));
         glBindVertexArray(0);
         if(page==Page::Open && hasPhoto()) {
-            drawPhoto();
+            drawPhoto(eyeSign);
             if(pointer) {
                 std::vector<float> cursor;
                 box(cursor,cursorX-13,cursorY-2,26,4,white);
