@@ -33,13 +33,16 @@ gh release create "$tag" "$apk" --repo "$repo" --target "$GITHUB_SHA" \
   --draft --title "$tag" --notes "Android Image Editor $tag"
 gh release download "$tag" --repo "$repo" --pattern "$apk" --output "$RUNNER_TEMP/$apk"
 cmp "$apk" "$RUNNER_TEMP/$apk"
-# A pre-existing tag is never allowed to point the release at a different build.
-tag_commit="$(gh api "repos/$repo/commits/$tag" --jq .sha 2>/dev/null || true)"
-if [[ -n "$tag_commit" && "$tag_commit" != "$GITHUB_SHA" ]]; then
-  echo "::error::The existing tag points to a different commit."
+# Use the exact tag ref. The commits endpoint can resolve version-like names loosely.
+if ! tag_ref="$(gh api "repos/$repo/git/ref/tags/$tag" --jq .object.sha 2>/dev/null)"; then
+  gh api --method POST "repos/$repo/git/refs" -f "ref=refs/tags/$tag" -f "sha=$GITHUB_SHA" --silent
+  tag_ref="$(gh api "repos/$repo/git/ref/tags/$tag" --jq .object.sha)"
+fi
+if [[ "$tag_ref" != "$GITHUB_SHA" ]]; then
+  echo "::error::The existing tag does not point directly to this build commit."
   exit 1
 fi
-gh release edit "$tag" --repo "$repo" --draft=false --latest
+gh release edit "$tag" --repo "$repo" --verify-tag --draft=false --latest
 test "$(gh api "repos/$repo/commits/$tag" --jq .sha)" = "$GITHUB_SHA"
 test "$(gh api "repos/$repo/releases/latest" --jq .tag_name)" = "$tag"
 rm -f "$apk" "$apk.idsig" "$RUNNER_TEMP/$apk"
