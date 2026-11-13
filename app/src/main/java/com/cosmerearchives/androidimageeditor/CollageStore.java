@@ -179,7 +179,6 @@ public final class CollageStore {
                 RectF bounds=new RectF(cx-w/2,cy-h/2,cx+w/2,cy+h/2);
                 photoCanvas.drawBitmap(src,null,bounds,paint);
                 // A layer's alpha defines the area where its independent depth applies.
-                Bitmap alpha=Bitmap.createScaledBitmap(src,256,256,true);
                 Bitmap coverage=Bitmap.createBitmap(256,256,Bitmap.Config.ARGB_8888);
                 Canvas mask=new Canvas(coverage);
                 RectF db=new RectF(bounds.left/4,bounds.top/4,bounds.right/4,bounds.bottom/4);
@@ -194,7 +193,7 @@ public final class CollageStore {
                 }
                 coverage.setPixels(pixels,0,256,0,0,256,256);
                 depthCanvas.drawBitmap(coverage,0,0,dp);
-                alpha.recycle();coverage.recycle();
+                coverage.recycle();
             }finally{src.recycle();}
         }
         try{saveBitmap(photo(ctx),combined);saveBitmap(depth(ctx),depthMap);}
