@@ -366,7 +366,7 @@ void run(JNIEnv* env, jobject activity) {
         {r.leftAimAction, path(r.instance, "/user/hand/left/input/aim/pose")},
         {r.leftGripAction, path(r.instance, "/user/hand/left/input/squeeze/value")},
         {r.compareAction, path(r.instance, "/user/hand/right/input/a/click")},
-        {r.exitViewAction, path(r.instance, "/user/hand/right/input/b/click")},
+        {r.exitViewAction, path(r.instance, "/user/hand/right/input/thumbstick/click")},
         {r.brushSizeAction, path(r.instance, "/user/hand/left/input/thumbstick")},
         {r.pushAction, path(r.instance, "/user/hand/left/input/trigger/value")}
     };
@@ -426,6 +426,7 @@ void run(JNIEnv* env, jobject activity) {
     float leftPointerX=0.f,leftPointerY=0.f;
     bool leftPointer=false;
     bool wasA=false,wasB=false;
+    int activeSlider=-1;
     XrVector3f editorPosition{0.f,0.f,-1.9f};
     float editorScale=1.f,editorAngle=0.f,editorZoom=1.f,editorU=0.5f,editorV=0.5f;
     // One grip translates the canvas. Two grips translate, scale, and rotate around Z.
@@ -437,6 +438,8 @@ void run(JNIEnv* env, jobject activity) {
     float panelScale=1.f, panelAngle=0.f;
     float startScale=1.f,startAngle=0.f,startDistance=1.f,startHandAngle=0.f;
     XrVector3f startMidpoint{0.f,0.f,0.f};
+    XrVector3f anchorWorld{0.f,0.f,-1.9f};
+    XrVector3f anchorLocal{0.f,0.f,0.f};
     auto lastFrame=std::chrono::steady_clock::now();
     bool running = false;
     log("OpenXR compositor initialized");
@@ -588,11 +591,9 @@ void run(JNIEnv* env, jobject activity) {
                     }
                 }
             }
-            const bool rightHeld=(page==vrui::Page::Open ||
-                page==vrui::Page::Immersive) && validAim &&
+            const bool rightHeld=validAim &&
                 grip.isActive && grip.currentState>0.6f;
-            const bool leftHeld=(page==vrui::Page::Open ||
-                page==vrui::Page::Immersive) && validLeftAim &&
+            const bool leftHeld=validLeftAim &&
                 leftGrip.isActive && leftGrip.currentState>0.6f;
             const DragMode nextMode=rightHeld && leftHeld ? DragMode::Both :
                 rightHeld ? DragMode::Right : leftHeld ? DragMode::Left : DragMode::None;
@@ -609,6 +610,20 @@ void run(JNIEnv* env, jobject activity) {
                     startHandAngle=std::atan2(vy,vx);
                     startScale=panelScale;
                     startAngle=panelAngle;
+                    // Preserve the point between the current controller targets
+                    // under the hand motion rather than scaling from the panel center.
+                    float anchorX=512.f,anchorY=384.f;
+                    if(pointer && leftPointer){
+                        anchorX=(pointerX+leftPointerX)*0.5f;
+                        anchorY=(pointerY+leftPointerY)*0.5f;
+                    } else if(pointer) {anchorX=pointerX;anchorY=pointerY;}
+                    else if(leftPointer){anchorX=leftPointerX;anchorY=leftPointerY;}
+                    anchorLocal={(anchorX/1024.f-0.5f)*1.45f,
+                                 (anchorY/768.f-0.5f)*1.08f,0.f};
+                    const float co=std::cos(startAngle),si=std::sin(startAngle);
+                    anchorWorld={panelPosition.x+startScale*(co*anchorLocal.x-si*anchorLocal.y),
+                                 panelPosition.y+startScale*(si*anchorLocal.x+co*anchorLocal.y),
+                                 panelPosition.z};
                 } else if(dragMode!=DragMode::None) {
                     dragOrigin=dragMode==DragMode::Right?aimPosition:leftPosition;
                 }
@@ -625,9 +640,12 @@ void run(JNIEnv* env, jobject activity) {
                 // Keep rotation planar for predictable ray intersection and no tilt discomfort.
                 panelAngle=startAngle+std::remainder(std::atan2(vy,vx)-startHandAngle,
                                                       6.283185307179586f);
-                panelPosition.x=std::clamp(dragPanel.x+midpoint.x-startMidpoint.x,-2.f,2.f);
-                panelPosition.y=std::clamp(dragPanel.y+midpoint.y-startMidpoint.y,-1.5f,1.5f);
-                panelPosition.z=std::clamp(dragPanel.z+midpoint.z-startMidpoint.z,-4.f,-0.55f);
+                const float co=std::cos(panelAngle),si=std::sin(panelAngle);
+                panelPosition.x=std::clamp(anchorWorld.x+midpoint.x-startMidpoint.x-
+                    panelScale*(co*anchorLocal.x-si*anchorLocal.y),-3.5f,3.5f);
+                panelPosition.y=std::clamp(anchorWorld.y+midpoint.y-startMidpoint.y-
+                    panelScale*(si*anchorLocal.x+co*anchorLocal.y),-2.5f,2.5f);
+                panelPosition.z=std::clamp(anchorWorld.z+midpoint.z-startMidpoint.z,-4.f,-0.55f);
             } else if(dragMode!=DragMode::None) {
                 const auto& hand=dragMode==DragMode::Right?aimPosition:leftPosition;
                 panelPosition.x=std::clamp(dragPanel.x+hand.x-dragOrigin.x,-2.f,2.f);
@@ -639,30 +657,47 @@ void run(JNIEnv* env, jobject activity) {
                stick.isActive && !dragging && std::abs(stick.currentState.y)>0.15f) {
                 menu.changeZoom(stick.currentState.y * dt * 1.5f,pointerX,pointerY,
                                 pointer,page==vrui::Page::Immersive);
+            } else if(page!=vrui::Page::Open && page!=vrui::Page::Immersive
+                     && stick.isActive && !dragging && std::abs(stick.currentState.y)>0.15f){
+                const float oldScale=panelScale;
+                panelScale=std::clamp(panelScale*std::exp(stick.currentState.y*dt),
+                                      0.6f,4.f);
+                if(pointer){
+                    const float ax=(pointerX/1024.f-0.5f)*1.45f;
+                    const float ay=(pointerY/768.f-0.5f)*1.08f;
+                    const float co=std::cos(panelAngle),si=std::sin(panelAngle);
+                    panelPosition.x-=(panelScale-oldScale)*(co*ax-si*ay);
+                    panelPosition.y-=(panelScale-oldScale)*(si*ax+co*ay);
+                }
             }
-            if(page==vrui::Page::Open && menu.brushMode && menu.hasDepthPixels()
+            if((page==vrui::Page::Open || page==vrui::Page::Immersive) &&
+                menu.brushMode && menu.hasDepthPixels()
                 && brushSizeStick.isActive && std::abs(brushSizeStick.currentState.y)>0.15f) {
                 menu.brushRadius=std::clamp(menu.brushRadius+
                     brushSizeStick.currentState.y*dt*23.f,3.f,60.f);
             }
             const bool pushDown=push.isActive && push.currentState>=0.5f;
             const bool pullDown=pressed.isActive && pressed.currentState>=0.5f;
-            const bool canPaint=page==vrui::Page::Open && menu.brushMode &&
-                menu.hasDepthPixels() && !dragging;
+            const bool immersive=page==vrui::Page::Immersive;
+            const bool canPaint=(page==vrui::Page::Open || immersive) &&
+                menu.brushMode && menu.hasDepthPixels() && !dragging;
             float brushU=0.f,brushV=0.f;
             const bool paintLeft=canPaint && pushDown && leftPointer &&
-                menu.hitPhoto(leftPointerX,leftPointerY,false,brushU,brushV);
+                !menu.onTools(leftPointerX,leftPointerY,immersive) &&
+                menu.hitPhoto(leftPointerX,leftPointerY,immersive,brushU,brushV);
             // Trigger presses on Undo, Redo, Back or any other menu item
             // must not start a brush stroke or block Undo/Redo.
             const bool paintRight=canPaint && pullDown && pointer &&
-                menu.hitPhoto(pointerX,pointerY,false,brushU,brushV);
+                !menu.onTools(pointerX,pointerY,immersive) &&
+                menu.hitPhoto(pointerX,pointerY,immersive,brushU,brushV);
             menu.painting=paintLeft||paintRight;
             menu.paintingLeft=paintLeft;
+            menu.paintingRight=paintRight;
             if(menu.painting && !wasPainting)menu.beginStroke();
             bool painted=false;
             if(canPaint){
-                if(paintLeft)painted|=menu.brushAt(leftPointerX,leftPointerY,false);
-                if(paintRight)painted|=menu.brushAt(pointerX,pointerY,true);
+                if(paintLeft)painted|=menu.brushAt(leftPointerX,leftPointerY,false,immersive);
+                if(paintRight)painted|=menu.brushAt(pointerX,pointerY,true,immersive);
             }
             strokeEdited|=painted;
             if(wasPainting && !menu.painting) {
@@ -673,15 +708,18 @@ void run(JNIEnv* env, jobject activity) {
                 strokeEdited=false;
             }
             wasPainting=menu.painting;
-            const int hovered=(pointer && !dragging && page!=vrui::Page::Immersive)
+            const int overlayHover=(pointer&&!dragging)
+                ?menu.toolbarAt(pointerX,pointerY,immersive):-1;
+            const int hovered=(pointer && !dragging && !immersive)
                 ? vrui::buttonAt(page,pointerX,pointerY) : -1;
+            const int hit=overlayHover>=0?overlayHover:hovered;
             const bool triggerDown=pressed.isActive && pressed.currentState>=0.5f;
             const bool aDown=compare.isActive && compare.currentState;
             const bool bDown=exitView.isActive && exitView.currentState;
-            // Dedicated photo-only mode has no visible menu: B (or trigger) returns
-            // to the editor, and A toggles the stereo comparison without leaving VR.
+            // Thumbstick click is the sole immersive exit control.
+            // Trigger remains available for painting and in-view controls.
             if(page==vrui::Page::Immersive) {
-                if((bDown&&!wasB)||(triggerDown&&!wasPressed)) {
+                if(bDown&&!wasB) {
                     page=vrui::Page::Open;
                     panelPosition=editorPosition;
                     panelScale=editorScale;
@@ -693,7 +731,25 @@ void run(JNIEnv* env, jobject activity) {
                 } else if(aDown&&!wasA) {
                     menu.stereoEnabled=!menu.stereoEnabled;
                 }
-            } else if(triggerDown&&!wasPressed && hovered>=0) {
+            }
+            // Drag strength sliders while holding the right trigger.
+            if(!dragging && pointer && triggerDown && !wasPressed &&
+               (overlayHover==26 || overlayHover==27)) activeSlider=overlayHover;
+            if(!triggerDown)activeSlider=-1;
+            if(activeSlider>=0 && pointer && !dragging)
+                menu.slideAt(activeSlider,pointerX,immersive);
+            if(triggerDown&&!wasPressed && !dragging && activeSlider<0 && hit>=20) {
+                switch(hit) {
+                    case 20: menu.stereoEnabled=!menu.stereoEnabled;break;
+                    case 21: if(menu.hasDepthPixels())menu.brushMode=!menu.brushMode;break;
+                    case 22: menu.brushSoft=!menu.brushSoft;break;
+                    case 23: menu.edgeAware=!menu.edgeAware;break;
+                    case 24: if(menu.undoDepth())saveEditedDepth(env,activity,menu.depthCpu);break;
+                    case 25: if(menu.redoDepth())saveEditedDepth(env,activity,menu.depthCpu);break;
+                    default:break;
+                }
+            } else if(triggerDown&&!wasPressed && !dragging && activeSlider<0 &&
+                       page!=vrui::Page::Immersive && hovered>=0 && overlayHover<0) {
                 if(hovered==3) page=vrui::Page::Home;
                 else if(page==vrui::Page::Home && hovered==11) {
                     requestUpdateFromVr(env,activity);
@@ -728,6 +784,8 @@ void run(JNIEnv* env, jobject activity) {
                     menu.stereoEnabled=!menu.stereoEnabled;
                 } else if(page==vrui::Page::Open && hovered==7 && menu.hasPhoto()) {
                     menu.depthLevel=(menu.depthLevel+1)%3;
+                    menu.disparityStrength=menu.depthLevel==0?0.45f:
+                                           menu.depthLevel==1?0.8f:1.2f;
                 } else if(page==vrui::Page::Open && hovered==5) {
                     menu.resetPhotoView();
                     panelPosition={0.f,0.f,-1.9f};
@@ -773,12 +831,13 @@ void run(JNIEnv* env, jobject activity) {
                 glClear(GL_COLOR_BUFFER_BIT);
                 glDisable(GL_SCISSOR_TEST);
                 const float eyeSign=eye==0?-1.f:1.f;
-                // Show the active left-hand push cursor during strokes; normally
-                // keep the right-hand menu pointer visible.
-                const bool showLeft=page==vrui::Page::Open && menu.brushMode &&
-                                    menu.paintingLeft && leftPointer;
-                menu.draw(page,hovered,showLeft?leftPointerX:pointerX,
-                          showLeft?leftPointerY:pointerY,showLeft||pointer,eyeSign);
+                // Both controllers have independent visible pointers.
+                menu.draw(page,hovered,pointerX,pointerY,false,eyeSign);
+                menu.drawTools(page,overlayHover);
+                menu.drawHandCursor(leftPointerX,leftPointerY,leftPointer,
+                                    true,paintLeft,immersive);
+                menu.drawHandCursor(pointerX,pointerY,pointer,
+                                    false,paintRight,immersive);
             }
             glBindFramebuffer(GL_FRAMEBUFFER,0);
             glFlush();
