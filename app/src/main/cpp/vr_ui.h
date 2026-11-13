@@ -136,6 +136,7 @@ struct Renderer {
     }
     float disparityStrength=0.8f;
     std::vector<float> photoLuminance;
+    std::vector<uint8_t> photoRgb;
     // Immersive controls are rendered on a separate physical compositor quad.
     // Coordinates use that quad's 1024x768 logical UI space.
     int toolbarAt(float x,float y,bool immersive) const {
@@ -265,11 +266,18 @@ struct Renderer {
             const float falloff=relative<=hardness?1.f:
                 std::pow(std::clamp((1.f-relative)/std::max(0.01f,1.f-hardness),0.f,1.f),1.3f);
             const size_t i=size_t(y)*256u+size_t(x);
-            // Optional protection against painting across visible photo edges.
-            const float edgePenalty=(edgeAware && photoLuminance.size()==256u*256u)
-                ?std::exp(-std::abs(photoLuminance[i]-photoLuminance[
-                    size_t(std::clamp(int(cy),0,255))*256u+
-                    size_t(std::clamp(int(cx),0,255))])*10.f):1.f;
+            // Compare *color* rather than luminance alone so same-brightness,
+            // different-hue object boundaries are protected too.
+            float edgePenalty=1.f;
+            if(edgeAware && photoRgb.size()==256u*256u*3u){
+                const size_t anchor=(size_t(std::clamp(int(cy),0,255))*256u+
+                                     size_t(std::clamp(int(cx),0,255)))*3u;
+                const size_t sample=i*3u;
+                const float red=float(int(photoRgb[sample])-int(photoRgb[anchor]))/255.f;
+                const float green=float(int(photoRgb[sample+1])-int(photoRgb[anchor+1]))/255.f;
+                const float blue=float(int(photoRgb[sample+2])-int(photoRgb[anchor+2]))/255.f;
+                edgePenalty=std::exp(-(red*red+green*green+blue*blue)*16.f);
+            }
             const int delta=std::max(0,static_cast<int>(std::lround(
                 8.f*(pullTowardViewer?rightStrength:leftStrength)*falloff*edgePenalty)));
             if(!delta)continue;
@@ -441,12 +449,17 @@ struct Renderer {
         photoWidth=width;photoHeight=height;
         // Cached at depth-map resolution; used only for brush edge guidance.
         photoLuminance.resize(256u*256u);
+        photoRgb.resize(256u*256u*3u);
         for(int y=0;y<256;++y)for(int x=0;x<256;++x) {
             const int sx=std::min(width-1,x*width/256);
             const int sy=std::min(height-1,y*height/256);
             const size_t offset=(size_t(sy)*width+sx)*4;
-            photoLuminance[size_t(y)*256+x]=
-                (0.2126f*rgba[offset]+0.7152f*rgba[offset+1]+0.0722f*rgba[offset+2])/255.f;
+            const size_t index=size_t(y)*256u+size_t(x);
+            photoLuminance[index]=(0.2126f*rgba[offset]+
+                0.7152f*rgba[offset+1]+0.0722f*rgba[offset+2])/255.f;
+            photoRgb[index*3]=rgba[offset];
+            photoRgb[index*3+1]=rgba[offset+1];
+            photoRgb[index*3+2]=rgba[offset+2];
         }
         resetPhotoView();
     }
