@@ -85,6 +85,8 @@ struct XrResources {
     XrActionSet actionSet{XR_NULL_HANDLE};
     XrAction triggerAction{XR_NULL_HANDLE};
     XrAction aimAction{XR_NULL_HANDLE};
+    XrAction stickAction{XR_NULL_HANDLE};
+    XrAction gripAction{XR_NULL_HANDLE};
     XrSpace aimSpace{XR_NULL_HANDLE};
     EGLDisplay display{EGL_NO_DISPLAY};
     EGLContext context{EGL_NO_CONTEXT};
@@ -202,13 +204,29 @@ void run(JNIEnv* env, jobject activity) {
     aimInfo.countSubactionPaths = 1;
     aimInfo.subactionPaths = &rightHand;
     check(xrCreateAction(r.actionSet, &aimInfo, &r.aimAction), "xrCreateAimAction");
+    XrActionCreateInfo stickInfo{XR_TYPE_ACTION_CREATE_INFO};
+    stickInfo.actionType=XR_ACTION_TYPE_VECTOR2F_INPUT;
+    std::strcpy(stickInfo.actionName,"zoom_stick");
+    std::strcpy(stickInfo.localizedActionName,"Zoom Stick");
+    stickInfo.countSubactionPaths=1;
+    stickInfo.subactionPaths=&rightHand;
+    check(xrCreateAction(r.actionSet,&stickInfo,&r.stickAction),"xrCreateStickAction");
+    XrActionCreateInfo gripInfo{XR_TYPE_ACTION_CREATE_INFO};
+    gripInfo.actionType=XR_ACTION_TYPE_FLOAT_INPUT;
+    std::strcpy(gripInfo.actionName,"move_grip");
+    std::strcpy(gripInfo.localizedActionName,"Move Canvas");
+    gripInfo.countSubactionPaths=1;
+    gripInfo.subactionPaths=&rightHand;
+    check(xrCreateAction(r.actionSet,&gripInfo,&r.gripAction),"xrCreateGripAction");
     const XrActionSuggestedBinding suggested[] = {
         {r.triggerAction, path(r.instance, "/user/hand/right/input/trigger/value")},
-        {r.aimAction, path(r.instance, "/user/hand/right/input/aim/pose")}
+        {r.aimAction, path(r.instance, "/user/hand/right/input/aim/pose")},
+        {r.stickAction, path(r.instance, "/user/hand/right/input/thumbstick")},
+        {r.gripAction, path(r.instance, "/user/hand/right/input/squeeze/value")}
     };
     XrInteractionProfileSuggestedBinding profile{XR_TYPE_INTERACTION_PROFILE_SUGGESTED_BINDING};
     profile.interactionProfile = path(r.instance, "/interaction_profiles/oculus/touch_controller");
-    profile.countSuggestedBindings = 2;
+    profile.countSuggestedBindings = 4;
     profile.suggestedBindings = suggested;
     check(xrSuggestInteractionProfileBindings(r.instance, &profile), "xrSuggestInteractionProfileBindings");
     XrSessionActionSetsAttachInfo attach{XR_TYPE_SESSION_ACTION_SETS_ATTACH_INFO};
@@ -252,6 +270,11 @@ void run(JNIEnv* env, jobject activity) {
     if (!menu.initialize()) throw "VR menu shader initialization";
     vrui::Page page = resumeImagePage.exchange(false) ? vrui::Page::Open : vrui::Page::Home;
     bool wasPressed = false;
+    bool dragging=false;
+    XrVector3f dragOrigin{0.f,0.f,0.f};
+    XrVector3f dragPanel{0.f,0.f,-1.9f};
+    XrVector3f panelPosition{0.f,0.f,-1.9f};
+    auto lastFrame=std::chrono::steady_clock::now();
     bool running = false;
     log("OpenXR compositor initialized");
     while (!stopRequested.load()) {
@@ -300,10 +323,25 @@ void run(JNIEnv* env, jobject activity) {
             XrActionStateFloat pressed{XR_TYPE_ACTION_STATE_FLOAT};
             xrGetActionStateFloat(r.session, &get, &pressed);
 
-            // Point at a fixed, world-anchored quad using the right controller's aim pose.
+            XrActionStateGetInfo stickGet{XR_TYPE_ACTION_STATE_GET_INFO};
+            stickGet.action=r.stickAction;
+            stickGet.subactionPath=rightHand;
+            XrActionStateVector2f stick{XR_TYPE_ACTION_STATE_VECTOR2F};
+            xrGetActionStateVector2f(r.session,&stickGet,&stick);
+            XrActionStateGetInfo gripGet{XR_TYPE_ACTION_STATE_GET_INFO};
+            gripGet.action=r.gripAction;
+            gripGet.subactionPath=rightHand;
+            XrActionStateFloat grip{XR_TYPE_ACTION_STATE_FLOAT};
+            xrGetActionStateFloat(r.session,&gripGet,&grip);
+            const auto now=std::chrono::steady_clock::now();
+            const float dt=std::clamp(std::chrono::duration<float>(now-lastFrame).count(),0.f,0.1f);
+            lastFrame=now;
+            // Point at the world-anchored panel using the controller aim pose.
             // The OpenXR action pose is queried at the compositor's predicted display time.
             bool pointer = false;
             float pointerX = 0.f, pointerY = 0.f;
+            bool validAim=false;
+            XrVector3f aimPosition{0.f,0.f,0.f};
             XrActionStateGetInfo aimGet{XR_TYPE_ACTION_STATE_GET_INFO};
             aimGet.action = r.aimAction;
             aimGet.subactionPath = rightHand;
@@ -314,28 +352,50 @@ void run(JNIEnv* env, jobject activity) {
                                                &location)) &&
                     (location.locationFlags & XR_SPACE_LOCATION_POSITION_VALID_BIT) &&
                     (location.locationFlags & XR_SPACE_LOCATION_ORIENTATION_VALID_BIT)) {
+                    validAim=true;
+                    aimPosition=location.pose.position;
                     const auto& q = location.pose.orientation;
                     // Rotate (0,0,-1) by the controller's normalized quaternion.
                     const float dx = -2.f*(q.x*q.z + q.w*q.y);
                     const float dy = -2.f*(q.y*q.z - q.w*q.x);
                     const float dz = -1.f + 2.f*(q.x*q.x + q.y*q.y);
                     if (dz < -0.001f) {
-                        const float t = (-1.9f - location.pose.position.z)/dz;
+                        const float t = (panelPosition.z - location.pose.position.z)/dz;
                         if (t > 0.f) {
                             const float x = location.pose.position.x + dx*t;
                             const float y = location.pose.position.y + dy*t;
-                            pointerX = (x / 1.45f + 0.5f)*1024.f;
-                            pointerY = (y / 1.08f + 0.5f)*768.f;
+                            pointerX = ((x-panelPosition.x) / 1.45f + 0.5f)*1024.f;
+                            pointerY = ((y-panelPosition.y) / 1.08f + 0.5f)*768.f;
                             pointer = pointerX>=0.f && pointerX<=1024.f &&
                                       pointerY>=0.f && pointerY<=768.f;
                         }
                     }
                 }
             }
-            const int hovered = pointer ? vrui::buttonAt(page,pointerX,pointerY) : -1;
+            const bool gripDown=validAim && grip.isActive && grip.currentState>0.6f;
+            if(page==vrui::Page::Open && gripDown && !dragging) {
+                dragging=true;
+                dragOrigin=aimPosition;
+                dragPanel=panelPosition;
+            }
+            if(!gripDown) dragging=false;
+            if(dragging) {
+                panelPosition.x=std::clamp(dragPanel.x+aimPosition.x-dragOrigin.x,-2.f,2.f);
+                panelPosition.y=std::clamp(dragPanel.y+aimPosition.y-dragOrigin.y,-1.5f,1.5f);
+                panelPosition.z=std::clamp(dragPanel.z+aimPosition.z-dragOrigin.z,-4.f,-0.55f);
+            }
+            if(page==vrui::Page::Open && stick.isActive && !dragging &&
+               std::abs(stick.currentState.y)>0.15f) {
+                menu.changeZoom(stick.currentState.y * dt * 1.5f,pointerX,pointerY,pointer);
+            }
+            const int hovered = pointer && !dragging ? vrui::buttonAt(page,pointerX,pointerY) : -1;
             const bool triggerDown = pressed.isActive && pressed.currentState >= 0.5f;
             if (triggerDown && !wasPressed && hovered >= 0) {
                 if (hovered == 3) page = vrui::Page::Home;
+                else if (page == vrui::Page::Open && hovered == 5) {
+                    menu.resetPhotoView();
+                    panelPosition={0.f,0.f,-1.9f};
+                }
                 else if (page == vrui::Page::Open && hovered == 4) {
                     resumeImagePage.store(true);
                     callPicker(env,activity);
@@ -370,7 +430,7 @@ void run(JNIEnv* env, jobject activity) {
             quad.space = r.space;
             quad.eyeVisibility = XR_EYE_VISIBILITY_BOTH;
             quad.pose.orientation.w = 1.f;
-            quad.pose.position.z = -1.9f;
+            quad.pose.position=panelPosition;
             quad.size = {1.45f, 1.08f};
             quad.subImage.swapchain = r.swapchain;
             quad.subImage.imageRect.extent = {1024, 768};
