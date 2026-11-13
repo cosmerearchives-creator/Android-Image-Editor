@@ -1,0 +1,53 @@
+name: Android build and stable release
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish the checked-out main version as a stable release
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    if: github.event_name != 'workflow_dispatch' || !inputs.publish
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Build and test version comparison
+        run: bash scripts/ci-build.sh
+
+  release:
+    if: github.event_name == 'workflow_dispatch' && inputs.publish && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    environment: stable-release
+    concurrency:
+      group: android-stable-release
+      cancel-in-progress: false
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Build and test version comparison
+        run: bash scripts/ci-build.sh
+      - name: Sign and verify APK
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          EXPECTED_CERT: ${{ vars.ANDROID_SIGNING_CERT_SHA256 }}
+        run: bash scripts/sign-release.sh
+      - name: Publish verified APK from main
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash scripts/publish-release.sh
