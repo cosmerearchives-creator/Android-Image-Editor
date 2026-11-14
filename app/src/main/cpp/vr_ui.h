@@ -205,7 +205,7 @@ struct Renderer {
     bool edgeAware=true;
     float brushStrength=1.0f;
     float leftStrength=1.0f,rightStrength=1.0f;
-    float leftRadius=13.f,rightRadius=13.f;
+    float leftRadius=26.f,rightRadius=26.f;
     float leftHardness=0.f,rightHardness=0.f;
     std::vector<std::string> projectNames;
     int projectPage=0;
@@ -254,8 +254,8 @@ struct Renderer {
             case 26:disparityStrength=t*2.f;break;
             case 29:leftStrength=0.1f+t*2.9f;break;
             case 27:rightStrength=0.1f+t*2.9f;break;
-            case 30:leftRadius=3.f+t*57.f;break;
-            case 31:rightRadius=3.f+t*57.f;break;
+            case 30:leftRadius=6.f+t*114.f;break;
+            case 31:rightRadius=6.f+t*114.f;break;
             case 32:leftHardness=t;break;
             case 33:rightHardness=t;break;
         }
@@ -849,9 +849,9 @@ struct Renderer {
         box(v,45,348,930*full,12,purpleHover);
         box(v,45+930*full-6,339,12,30,white);
         const float leftValues[]={ (leftStrength-.1f)/2.9f,
-                                   (leftRadius-3.f)/57.f,leftHardness };
+                                   (leftRadius-6.f)/114.f,leftHardness };
         const float rightValues[]={ (rightStrength-.1f)/2.9f,
-                                    (rightRadius-3.f)/57.f,rightHardness };
+                                    (rightRadius-6.f)/114.f,rightHardness };
         const char* namesL[]={"LEFT PUSH POWER","LEFT BRUSH SIZE","LEFT HARDNESS"};
         const char* namesR[]={"RIGHT PULL POWER","RIGHT BRUSH SIZE","RIGHT HARDNESS"};
         const int ys[]={265,180,95};
@@ -895,11 +895,13 @@ struct Renderer {
     // Cursor outlines are always legible in Quest: strong dark halo, vivid
     // hand-specific stroke, and a visibly different color while sculpting.
     void drawHandCursor(float x,float y,bool valid,bool left,bool active,
-                        bool immersive) {
+                        bool immersive,bool held=false) {
         if(!valid)return;
         std::vector<float> v;
         const Color idle=left?Color{0.26f,0.77f,1.f}:Color{1.f,0.42f,0.73f};
-        const Color ink=active?Color{0.34f,1.f,0.31f}:idle;
+        // Green means sculpting, amber means trigger held but sculpt blocked.
+        const Color ink=active?Color{0.34f,1.f,0.31f}:
+                        held?Color{1.f,0.75f,0.18f}:idle;
         const Color outline{0.015f,0.012f,0.025f};
         if(brushMode && hasPhoto()){
             float radius=26.f;
@@ -911,7 +913,7 @@ struct Renderer {
                 // The brush operates on 256x256 depth pixels. Use the larger
                 // projected dimension for a circular, clearly readable guide.
                 const float brushPixels=left?leftRadius:rightRadius;
-                radius=std::max(14.f,brushPixels*std::max(pw,ph)*zoom/float(DEPTH_EDGE));
+                radius=std::max(14.f,brushPixels*std::min(pw,ph)*zoom/float(DEPTH_EDGE));
             }
             radius=std::min(radius,300.f);
             constexpr int segments=64;
@@ -946,10 +948,10 @@ struct Renderer {
             }
         }else{
             box(v,x-12,y-4,24,8,outline);
-            box(v,x-10,y-2,20,4,idle);
+            box(v,x-10,y-2,20,4,ink);
             if(!left){
                 box(v,x-4,y-12,8,24,outline);
-                box(v,x-2,y-10,4,20,idle);
+                box(v,x-2,y-10,4,20,ink);
             }
         }
         submitUi(v);
