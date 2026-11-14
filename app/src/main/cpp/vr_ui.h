@@ -1572,9 +1572,9 @@ struct Renderer {
             submitUi(v);
             return;
         }
+        box(v,0,0,1024,768,{0.075f,0.055f,0.13f});
         box(v,860,620,148,37,hover==34?purpleHover:purple);
         label(v,"HIDE X",882,628,2,white);
-        box(v,0,0,1024,768,{0.075f,0.055f,0.13f});
         box(v,16,657,992,101,hover==28?purpleHover:purple);
         label(v,"MOVE PANEL - HOLD GRIP",92,693,4,white);
         const char* names[]={
