@@ -979,7 +979,8 @@ void run(JNIEnv* env, jobject activity) {
             wasPainting=menu.painting;
             const int overlayHover=immersive
                 ?(toolPointer&&!toolDragging?menu.toolbarAt(toolPointerX,toolPointerY,true):-1)
-                :(pointer&&!dragging?menu.toolbarAt(pointerX,pointerY,false):-1);
+                :(page==vrui::Page::Open && pointer&&!dragging?
+                  menu.toolbarAt(pointerX,pointerY,false):-1);
             const int hovered=(pointer && !dragging && !immersive)
                 ? vrui::buttonAt(page,pointerX,pointerY) : -1;
             const int hit=overlayHover>=0?overlayHover:hovered;
