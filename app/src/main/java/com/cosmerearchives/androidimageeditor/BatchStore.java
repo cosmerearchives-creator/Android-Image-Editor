@@ -39,8 +39,8 @@ public final class BatchStore {
     private static File cache(Context ctx,String name){return new File(root(ctx),name);}
     public static File wall(Context ctx){return cache(ctx,"wall.png");}
     public static File wallDepth(Context ctx){return cache(ctx,"wall_depth.png");}
-    public static File sphere(Context ctx){return cache(ctx,"sphere.png");}
-    public static File sphereDepth(Context ctx){return cache(ctx,"sphere_depth.png");}
+    public static File sphere(Context ctx){return cache(ctx,"cylinder_v1.png");}
+    public static File sphereDepth(Context ctx){return cache(ctx,"cylinder_depth_v1.png");}
     private static File[] entries(Context ctx){
         File[] items=root(ctx).listFiles(f->f.isDirectory()&&new File(f,PHOTO).isFile());
         if(items==null)return new File[0];
