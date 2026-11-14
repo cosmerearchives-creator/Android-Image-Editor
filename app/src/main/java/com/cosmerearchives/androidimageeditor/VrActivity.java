@@ -240,7 +240,7 @@ public final class VrActivity extends Activity {
     /** The XR thread sends a copy at stroke end; saving never blocks rendering. */
     @SuppressWarnings("unused")
     public void saveEditedDepth(byte[] gray) {
-        if(gray==null || gray.length!=512*512){
+        if(gray==null || gray.length!=1024*1024){
             Log.w(TAG,"Skipping invalid depth snapshot size: "+(gray==null?0:gray.length));
             return;
         }
