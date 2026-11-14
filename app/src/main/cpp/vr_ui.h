@@ -108,7 +108,13 @@ inline int buttonAt(Page page,float x,float y) {
             if(x>=420&&x<=639)return 7;
         }
     } else if(page==Page::Mask){
+        if(y>=720&&y<=760){
+            if(x<395)return 117;
+            if(x<625)return 118;
+            return 119;
+        }
         if(y>=665&&y<=715)return x<512?100:101;
+        if(y>=110&&y<=180)return x<512?120:121;
         if(y>=590&&y<=648){
             if(x<340)return 102;
             if(x<512)return 103;
@@ -172,6 +178,41 @@ struct Renderer {
     int collageCount=0,collageActive=0;
     bool selectionMode=false;
     bool maskSubtract=false;
+    bool maskSmartFill=false; // default: literal brush, not flood fill
+    float maskBrushRadius=28.f;
+    std::vector<std::vector<uint8_t>> maskUndo,maskRedo;
+    std::vector<uint8_t> maskStrokeBefore;
+    bool maskStrokeActive=false;
+    bool canUndoMask()const{return !maskUndo.empty();}
+    bool canRedoMask()const{return !maskRedo.empty();}
+    void beginMaskEdit(){if(maskStrokeActive)return;maskStrokeBefore=selectionMask;maskStrokeActive=true;}
+    bool finishMaskEdit(){
+        if(!maskStrokeActive)return false;
+        maskStrokeActive=false;
+        const bool changed=maskStrokeBefore!=selectionMask;
+        if(changed){
+            if(maskUndo.size()>=8)maskUndo.erase(maskUndo.begin());
+            maskUndo.push_back(std::move(maskStrokeBefore));
+            maskRedo.clear();
+        }
+        maskStrokeBefore.clear();return changed;
+    }
+    bool undoMask(){
+        if(maskStrokeActive||maskUndo.empty())return false;
+        if(maskRedo.size()>=8)maskRedo.erase(maskRedo.begin());
+        maskRedo.push_back(std::move(selectionMask));
+        selectionMask=std::move(maskUndo.back());maskUndo.pop_back();
+        if(hasSelection())uploadMask();else clearMask();
+        return true;
+    }
+    bool redoMask(){
+        if(maskStrokeActive||maskRedo.empty())return false;
+        if(maskUndo.size()>=8)maskUndo.erase(maskUndo.begin());
+        maskUndo.push_back(std::move(selectionMask));
+        selectionMask=std::move(maskRedo.back());maskRedo.pop_back();
+        if(hasSelection())uploadMask();else clearMask();
+        return true;
+    }
     int maskTolerance=65;
     bool depthGuidedSelection=true;
     int maskDepthTolerance=30;
@@ -181,9 +222,11 @@ struct Renderer {
     // modify the depth map or remove manual refinement capability.
     bool applyAiMask(const std::vector<uint8_t>& mask){
         if(mask.size()!=size_t(MASK_EDGE)*MASK_EDGE||!hasPhoto())return false;
+        beginMaskEdit();
         selectionMask=mask;
         uploadMask();
         autoMaskStatus=0;
+        finishMaskEdit();
         return true;
     }
     std::vector<uint8_t> selectionMask;
@@ -214,6 +257,42 @@ struct Renderer {
         if(!hasSelection())return;
         for(auto& p:selectionMask)p=p?0:255;
         uploadMask();
+    }
+    // Literal pixel edit: no flood fill, no model call and no color matching.
+    // A controller stroke is one history entry. Update only its local GPU patch.
+    bool paintMaskAt(float sx,float sy,bool add,bool fullPhoto=true){
+        float u=0.f,v=0.f;
+        if(!hitPhoto(sx,sy,fullPhoto,u,v))return false;
+        const float cx=u*float(MASK_EDGE-1),cy=(1.f-v)*float(MASK_EDGE-1);
+        const int radius=int(std::ceil(maskBrushRadius));
+        const int xa=std::max(0,int(cx)-radius),xb=std::min(MASK_EDGE-1,int(cx)+radius);
+        const int ya=std::max(0,int(cy)-radius),yb=std::min(MASK_EDGE-1,int(cy)+radius);
+        if(!hasSelection()){
+            if(!add)return false;
+            selectionMask.assign(size_t(MASK_EDGE)*MASK_EDGE,0);
+        }
+        bool changed=false;
+        for(int y=ya;y<=yb;++y)for(int x=xa;x<=xb;++x){
+            if(std::hypot(float(x)-cx,float(y)-cy)>maskBrushRadius)continue;
+            uint8_t& pixel=selectionMask[size_t(y)*MASK_EDGE+size_t(x)];
+            const uint8_t desired=add?255:0;
+            if(pixel!=desired){pixel=desired;changed=true;}
+        }
+        if(!changed)return false;
+        if(!selectionTexture){uploadMask();return true;}
+        const int width=xb-xa+1,height=yb-ya+1;
+        std::vector<uint8_t> patch(size_t(width)*height);
+        for(int row=0;row<height;++row)
+            std::copy_n(selectionMask.data()+size_t(ya+row)*MASK_EDGE+size_t(xa),
+                        width,patch.data()+size_t(row)*width);
+        glActiveTexture(GL_TEXTURE2);
+        glBindTexture(GL_TEXTURE_2D,selectionTexture);
+        glPixelStorei(GL_UNPACK_ALIGNMENT,1);
+        glTexSubImage2D(GL_TEXTURE_2D,0,xa,ya,width,height,
+                        GL_RED,GL_UNSIGNED_BYTE,patch.data());
+        glBindTexture(GL_TEXTURE_2D,0);
+        glActiveTexture(GL_TEXTURE0);
+        return true;
     }
     void adjustMaskTolerance(int delta){
         maskTolerance=std::clamp(maskTolerance+delta,10,150);
@@ -1000,12 +1079,25 @@ struct Renderer {
                 label(v,hasSelection()?"SELECTION ACTIVE":"SELECT AN OBJECT",176,565,2,muted);
                 const std::string tolerance="TOLERANCE "+std::to_string(maskTolerance);
                 label(v,tolerance.c_str(),610,565,2,muted);
+                box(v,170,720,212,40,hovered==117?purpleHover:button);
+                label(v,"MASK UNDO",184,732,2,canUndoMask()?white:muted);
+                box(v,399,720,210,40,hovered==118?purpleHover:button);
+                label(v,"MASK REDO",413,732,2,canRedoMask()?white:muted);
+                box(v,625,720,229,40,hovered==119?purpleHover:
+                    maskSmartFill?purple:button);
+                label(v,maskSmartFill?"SMART FILL ON":"DIRECT PAINT",636,732,2,white);
+                box(v,170,110,330,70,hovered==120?purpleHover:button);
+                label(v,"SMALLER BRUSH",190,133,2,white);
+                box(v,524,110,330,70,hovered==121?purpleHover:button);
+                label(v,"LARGER BRUSH",544,133,2,white);
+                const std::string brushInfo="MASK BRUSH "+std::to_string(int(maskBrushRadius))+" PX";
+                label(v,brushInfo.c_str(),176,189,2,muted);
                 box(v,170,665,330,50,hovered==100?purpleHover:
                     !maskSubtract?purple:button);
-                label(v,"ADD REGION",191,680,3,white);
+                label(v,maskSmartFill?"SMART ADD":"PAINT ADD",191,680,3,white);
                 box(v,524,665,330,50,hovered==101?purpleHover:
                     maskSubtract?purple:button);
-                label(v,"REMOVE REGION",543,680,3,white);
+                label(v,maskSmartFill?"SMART REMOVE":"PAINT ERASE",543,680,3,white);
                 const char* operations[]={"LESS COLOR","MORE COLOR","EXPAND","CONTRACT",
                     "SMOOTH","INVERT","CLEAR","SELECT ALL"};
                 for(int i=0;i<8;i++){
