@@ -32,12 +32,54 @@ public final class VrActivity extends Activity {
     private native void notifyImageChanged();
     private native void notifyDepthChanged();
     private native void reportAiDepthStatus(int state,int progress);
+    private native void reportAiSegmentStatus(int state,int progress);
+    private native void submitAiSelectionMask(byte[] mask);
     private final java.util.concurrent.atomic.AtomicBoolean aiCancel =
         new java.util.concurrent.atomic.AtomicBoolean(false);
     private final java.util.concurrent.atomic.AtomicBoolean aiRunning =
         new java.util.concurrent.atomic.AtomicBoolean(false);
     private final java.util.concurrent.ExecutorService aiWorker =
         java.util.concurrent.Executors.newSingleThreadExecutor();
+    private final java.util.concurrent.atomic.AtomicBoolean segmentCancel =
+        new java.util.concurrent.atomic.AtomicBoolean(false);
+    private final java.util.concurrent.atomic.AtomicBoolean segmentRunning =
+        new java.util.concurrent.atomic.AtomicBoolean(false);
+    private final java.util.concurrent.ExecutorService segmentWorker =
+        java.util.concurrent.Executors.newSingleThreadExecutor();
+    private final java.util.concurrent.atomic.AtomicLong imageGeneration =
+        new java.util.concurrent.atomic.AtomicLong();
+
+    /** Optional offline-after-download subject segmentation; never replaces depth. */
+    @SuppressWarnings("unused")
+    public void requestAiSubjectSelection() {
+        if(!segmentRunning.compareAndSet(false,true))return;
+        segmentCancel.set(false);
+        final long generation=imageGeneration.get();
+        reportAiSegmentStatus(1,0);
+        segmentWorker.execute(() -> {
+            try {
+                byte[] mask=AiSegment.infer(getApplicationContext(),segmentCancel,
+                    progress -> reportAiSegmentStatus(progress<60?1:2,progress));
+                if(segmentCancel.get()||generation!=imageGeneration.get()){
+                    reportAiSegmentStatus(5,0);
+                    return;
+                }
+                submitAiSelectionMask(mask);
+                reportAiSegmentStatus(3,100);
+                runOnUiThread(() -> Toast.makeText(this,
+                    "AI subject mask ready - refine or return to editor",
+                    Toast.LENGTH_LONG).show());
+            }catch(Exception error){
+                boolean canceled=segmentCancel.get()||
+                    generation!=imageGeneration.get();
+                Log.w(TAG,"AI subject selection failed",error);
+                reportAiSegmentStatus(canceled?5:4,0);
+                if(!canceled)runOnUiThread(() -> Toast.makeText(this,
+                    "AI selection unavailable: "+error.getMessage(),
+                    Toast.LENGTH_LONG).show());
+            }finally{segmentRunning.set(false);}
+        });
+    }
 
     /** Starts an optional ~27 MB verified model download, then fully local inference. */
     @SuppressWarnings("unused")
@@ -388,6 +430,9 @@ public final class VrActivity extends Activity {
             return;
         final Uri selected = data.getData();
         aiCancel.set(true);
+        segmentCancel.set(true);
+        imageGeneration.incrementAndGet();
+        reportAiSegmentStatus(0,0);
         depthGeneration.incrementAndGet();
         reportAiDepthStatus(0,0);
         Toast.makeText(this, "Importing image locally…", Toast.LENGTH_SHORT).show();
