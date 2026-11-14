@@ -57,6 +57,70 @@ public final class VrActivity extends Activity {
     private final AtomicBoolean batchBusy=new AtomicBoolean(false);
     private final AtomicBoolean batchCancel=new AtomicBoolean(false);
     private volatile int pendingBatchView=0;
+    private volatile int activeSavedCylinder=-1;
+    @SuppressWarnings("unused")
+    public int loadGalleryTheme(){
+        return getSharedPreferences("vr_gallery",MODE_PRIVATE).getInt("theme",0);
+    }
+    @SuppressWarnings("unused")
+    public void saveGalleryTheme(int theme){
+        getSharedPreferences("vr_gallery",MODE_PRIVATE).edit()
+            .putInt("theme",Math.max(0,Math.min(5,theme))).apply();
+    }
+    @SuppressWarnings("unused")
+    public int activeCylinderTheme(){
+        return activeSavedCylinder>=0
+            ?BatchStore.savedCylinderTheme(getApplicationContext(),activeSavedCylinder)
+            :loadGalleryTheme();
+    }
+    @SuppressWarnings("unused")
+    public void requestSaveCylinder(int theme){
+        if(!batchBusy.compareAndSet(false,true))return;
+        int count=BatchStore.count(getApplicationContext());
+        if(count==0){
+            batchBusy.set(false);
+            reportBatchStatus(6,0,0);
+            runOnUiThread(()->Toast.makeText(this,
+                "Import images before saving a cylinder",Toast.LENGTH_LONG).show());
+            return;
+        }
+        reportBatchStatus(3,0,count);
+        batchWorker.execute(()->{
+            try{
+                BatchStore.build(getApplicationContext(),true,
+                    p->reportBatchStatus(3,p,count));
+                String saved=BatchStore.saveCylinder(getApplicationContext(),theme);
+                reportBatchStatus(4,100,count);
+                runOnUiThread(()->Toast.makeText(this,
+                    "Cylinder saved: "+saved,Toast.LENGTH_LONG).show());
+            }catch(Exception e){
+                Log.e(TAG,"Cylinder save failed",e);
+                reportBatchStatus(6,0,count);
+                runOnUiThread(()->Toast.makeText(this,
+                    "Couldn't save cylinder: "+e.getMessage(),Toast.LENGTH_LONG).show());
+            }finally{batchBusy.set(false);}
+        });
+    }
+    @SuppressWarnings("unused")
+    public void requestSavedCylinders(){
+        runOnUiThread(()->{
+            String[] names=BatchStore.savedCylinderNames(getApplicationContext());
+            if(names.length==0){
+                Toast.makeText(this,"No saved cylinders yet. Choose SAVE CYLINDER.",
+                    Toast.LENGTH_LONG).show();
+                return;
+            }
+            new android.app.AlertDialog.Builder(this)
+                .setTitle("Saved cylinders")
+                .setItems(names,(dialog,index)->{
+                    if(batchBusy.get())return;
+                    activeSavedCylinder=index;
+                    notifyBatchGalleryReady(3);
+                })
+                .setNegativeButton("CANCEL",null).show();
+        });
+    }
+
 
     private static final int BATCH_FOLDER=13;
     private static final String PICKER_PREFS="batch_file_picker";
@@ -318,6 +382,7 @@ public final class VrActivity extends Activity {
             return;
         }
         pendingBatchView=0;
+        activeSavedCylinder=-1;
         if(!batchBusy.compareAndSet(false,true))return;
         reportBatchStatus(3,0,count);
         batchWorker.execute(()->{
@@ -378,6 +443,9 @@ public final class VrActivity extends Activity {
     }
     @SuppressWarnings("unused")
     public int[] batchPixels(boolean spherical,boolean depth){
+        if(spherical&&activeSavedCylinder>=0)
+            return BatchStore.loadSavedPixels(getApplicationContext(),
+                activeSavedCylinder,depth);
         return BatchStore.loadPixels(getApplicationContext(),spherical,depth);
     }
     @SuppressWarnings("unused")
