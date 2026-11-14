@@ -48,6 +48,27 @@ public final class BatchStore {
         return items;
     }
     private static final String DISPLAY_NAME="import_name.txt";
+    private static final String SOURCE_URI="import_uri.txt";
+    public static boolean wasImported(Context ctx,Uri source){
+        if(source==null)return false;
+        String value=source.toString();
+        for(File entry:entries(ctx)){
+            File record=new File(entry,SOURCE_URI);
+            if(!record.isFile())continue;
+            try(InputStream in=new FileInputStream(record)){
+                byte[] data=new byte[(int)Math.min(4096,record.length())];
+                int read=in.read(data);
+                if(read>0 && value.equals(new String(data,0,read,
+                    java.nio.charset.StandardCharsets.UTF_8)))return true;
+            }catch(IOException ignored){}
+        }
+        return false;
+    }
+    private static void saveSourceUri(Uri source,File entry){
+        try(FileOutputStream out=new FileOutputStream(new File(entry,SOURCE_URI))){
+            out.write(source.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        }catch(IOException ignored){}
+    }
     public static File[] importedImages(Context ctx){return entries(ctx);}
     public static String importedName(File entry){
         File info=new File(entry,DISPLAY_NAME);
@@ -152,6 +173,7 @@ public final class BatchStore {
                     temp.delete();throw new IOException("Cannot store imported image");
                 }
                 writeImportedName(ctx,sources.get(i),dir);
+                saveSourceUri(sources.get(i),dir);
                 added++;
             }else temp.delete();
             progress.accept((i+1)*100/sources.size());
