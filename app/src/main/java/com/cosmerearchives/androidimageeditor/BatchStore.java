@@ -57,15 +57,34 @@ public final class BatchStore {
             try(InputStream in=new FileInputStream(record)){
                 byte[] data=new byte[(int)Math.min(4096,record.length())];
                 int read=in.read(data);
-                if(read>0)ids.add(new String(data,0,read,
-                    java.nio.charset.StandardCharsets.UTF_8));
+                if(read>0){
+                    String all=new String(data,0,read,
+                        java.nio.charset.StandardCharsets.UTF_8);
+                    for(String line:all.split("\\n"))if(!line.isEmpty())ids.add(line.trim());
+                }
             }catch(IOException ignored){}
         }
         return ids;
     }
     private static void saveSourceUri(Uri source,File entry){
-        try(FileOutputStream out=new FileOutputStream(new File(entry,SOURCE_URI))){
-            out.write(source.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        File record=new File(entry,SOURCE_URI);
+        String value=source.toString();
+        try{
+            String existing="";
+            if(record.isFile()){
+                try(InputStream in=new FileInputStream(record)){
+                    byte[] bytes=new byte[(int)Math.min(4096,record.length())];
+                    int count=in.read(bytes);
+                    if(count>0)existing=new String(bytes,0,count,
+                        java.nio.charset.StandardCharsets.UTF_8);
+                }
+            }
+            for(String line:existing.split("\\n"))if(value.equals(line.trim()))return;
+            try(FileOutputStream out=new FileOutputStream(record,true)){
+                if(!existing.isEmpty()&&!existing.endsWith("\\n"))out.write('\n');
+                out.write(value.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                out.write('\n');
+            }
         }catch(IOException ignored){}
     }
     public static File[] importedImages(Context ctx){return entries(ctx);}
@@ -174,7 +193,14 @@ public final class BatchStore {
                 writeImportedName(ctx,sources.get(i),dir);
                 saveSourceUri(sources.get(i),dir);
                 added++;
-            }else temp.delete();
+            }else {
+                temp.delete();
+                // Older cached imports have no source URI: learn it when the
+                // user selects the duplicate again without duplicating media.
+                saveSourceUri(sources.get(i),dir);
+                if(!new File(dir,DISPLAY_NAME).isFile())
+                    writeImportedName(ctx,sources.get(i),dir);
+            }
             progress.accept((i+1)*100/sources.size());
         }
         // Invalidate gallery atlases only if a genuinely new image arrived.
