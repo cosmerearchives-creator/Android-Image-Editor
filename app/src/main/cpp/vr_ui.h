@@ -121,6 +121,7 @@ inline int buttonAt(Page page,float x,float y) {
             if(x<684)return 108;
             return 109;
         }
+        if(y>=402&&y<=480)return 115;
         if(y>=310&&y<=360){
             if(x<512)return 112;
             if(x<684)return 113;
@@ -236,6 +237,80 @@ struct Renderer {
         }
         selectionMask=std::move(next);
         uploadMask();
+    }
+    // Automatic foreground proposal from the currently applied depth map.
+    // The optional AI depth model supplies the depth map; this routine is
+    // geometric segmentation, NOT semantic object recognition.
+    bool autoForegroundMask(){
+        if(!hasDepthPixels() || !hasPhoto())return false;
+        constexpr int edge=MASK_EDGE;
+        constexpr size_t count=size_t(edge)*edge;
+        // Use the top fifth of the image's relative depth distribution.
+        // This adapts to each imported image rather than assuming fixed
+        // near/far values in a grayscale depth PNG.
+        std::array<int,256> histogram{};
+        uint8_t minimum=255,maximum=0;
+        for(uint8_t d:depthCpu){
+            histogram[d]++;
+            minimum=std::min(minimum,d);
+            maximum=std::max(maximum,d);
+        }
+        if(int(maximum)-int(minimum)<14)return false;
+        int accumulation=0;
+        int threshold=int(maximum);
+        for(int d=255;d>=0;--d){
+            accumulation+=histogram[size_t(d)];
+            if(accumulation>=int(count/5)){
+                threshold=d;
+                break;
+            }
+        }
+        // Prevent an almost-uniform image from becoming "all foreground."
+        threshold=std::max(threshold,int(minimum)+(int(maximum)-int(minimum))/3);
+        std::vector<uint8_t> visited(count,0),candidate(count,0);
+        std::vector<int> queue;
+        queue.reserve(16384);
+        float bestScore=-1.f;
+        std::vector<int> winner;
+        for(size_t start=0;start<count;++start){
+            if(visited[start]||depthCpu[start]<threshold)continue;
+            queue.clear();
+            queue.push_back(int(start));
+            visited[start]=1;
+            double centerWeight=0.0,depthSum=0.0;
+            for(size_t head=0;head<queue.size();++head){
+                const int p=queue[head],x=p%edge,y=p/edge;
+                const float dx=(float(x)-float(edge)/2.f)/(float(edge)/2.f);
+                const float dy=(float(y)-float(edge)/2.f)/(float(edge)/2.f);
+                centerWeight+=std::max(0.0,1.0-double(dx*dx+dy*dy));
+                depthSum+=depthCpu[size_t(p)];
+                const int around[]={x>0?p-1:-1,x+1<edge?p+1:-1,
+                                    y>0?p-edge:-1,y+1<edge?p+edge:-1};
+                for(int next:around){
+                    if(next<0||visited[size_t(next)]||
+                       depthCpu[size_t(next)]<threshold)continue;
+                    visited[size_t(next)]=1;
+                    queue.push_back(next);
+                }
+            }
+            if(queue.size()<256)continue;
+            // Large, central, near components are preferred to isolated
+            // highlights; do not silently select the entire image.
+            if(queue.size()>count*3/4)continue;
+            const double area=double(queue.size());
+            const float score=float(
+                area*(0.5+centerWeight/std::max(1.0,area))*
+                (0.5+depthSum/(255.0*std::max(1.0,area))));
+            if(score>bestScore){
+                bestScore=score;
+                winner=queue;
+            }
+        }
+        if(winner.empty())return false;
+        selectionMask.assign(count,0);
+        for(int pixel:winner)selectionMask[size_t(pixel)]=255;
+        uploadMask();
+        return true;
     }
     bool selectAt(float sx,float sy,bool additive=true,bool fullPhoto=false){
         if(photoRgb.size()!=size_t(DEPTH_EDGE)*DEPTH_EDGE*3u)return false;
@@ -927,6 +1002,8 @@ struct Renderer {
                         hovered==102+i?purpleHover:button);
                     label(v,operations[i],x+8,y+(i<4?20:35),2,white);
                 }
+                box(v,170,402,684,78,hovered==115?purpleHover:purple);
+                label(v,"AUTO FOREGROUND FROM DEPTH",190,428,2,white);
                 box(v,170,310,330,50,hovered==112?purpleHover:
                     depthGuidedSelection?purple:button);
                 label(v,depthGuidedSelection?"DEPTH GUIDE ON":"DEPTH GUIDE OFF",
