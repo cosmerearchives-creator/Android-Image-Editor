@@ -49,6 +49,80 @@ public final class VrActivity extends Activity {
     private final java.util.concurrent.atomic.AtomicLong imageGeneration =
         new java.util.concurrent.atomic.AtomicLong();
 
+    /**
+     * Primary one-click workflow: verified on-device depth model, automatic
+     * apply, then verified foreground segmentation. No manual preview step.
+     * Both models remain cached for future offline conversions.
+     */
+    @SuppressWarnings("unused")
+    public void requestAutoConvert() {
+        if(!aiRunning.compareAndSet(false,true))return;
+        aiCancel.set(false);
+        final long depthEpoch=depthGeneration.get();
+        final long imageEpoch=imageGeneration.get();
+        QuickDepth.discardCandidate(getApplicationContext());
+        reportAiDepthStatus(1,0);
+        aiWorker.execute(() -> {
+            try {
+                byte[] estimated=AiDepth.infer(getApplicationContext(),aiCancel,
+                    progress -> reportAiDepthStatus(progress<55?1:2,
+                        Math.min(75,Math.round(progress*.75f))));
+                if(aiCancel.get()||depthEpoch!=depthGeneration.get()||
+                   imageEpoch!=imageGeneration.get()) {
+                    reportAiDepthStatus(5,0);
+                    return;
+                }
+                QuickDepth.saveCandidate(getApplicationContext(),estimated);
+                if(!QuickDepth.applyCandidate(getApplicationContext()))
+                    throw new IOException("Could not apply AI depth map");
+                notifyDepthChanged();
+                reportAiDepthStatus(2,80);
+                // A depth result is valuable even if this second model can't
+                // identify a distinct subject. Do not undo successful depth.
+                if(!segmentRunning.compareAndSet(false,true)){
+                    reportAiDepthStatus(7,100);
+                    return;
+                }
+                try {
+                    byte[] subject=AiSegment.infer(getApplicationContext(),aiCancel,
+                        progress -> reportAiDepthStatus(progress<55?2:2,
+                            80+Math.min(20,progress/5)));
+                    if(aiCancel.get()||imageEpoch!=imageGeneration.get()){
+                        reportAiDepthStatus(5,0);
+                        return;
+                    }
+                    submitAiSelectionMask(subject);
+                    reportAiSegmentStatus(3,100);
+                    reportAiDepthStatus(6,100);
+                    runOnUiThread(() -> Toast.makeText(this,
+                        "AI 3D conversion ready",Toast.LENGTH_SHORT).show());
+                }catch(Exception segmentError){
+                    if(aiCancel.get()||imageEpoch!=imageGeneration.get()){
+                        reportAiDepthStatus(5,0);
+                        return;
+                    }
+                    Log.w(TAG,"Auto depth succeeded; subject selection unavailable",
+                        segmentError);
+                    reportAiSegmentStatus(4,0);
+                    reportAiDepthStatus(7,100);
+                    runOnUiThread(() -> Toast.makeText(this,
+                        "AI depth ready; automatic subject selection unavailable",
+                        Toast.LENGTH_LONG).show());
+                }finally {
+                    segmentRunning.set(false);
+                }
+            }catch(Exception error){
+                boolean cancelled=aiCancel.get()||depthEpoch!=depthGeneration.get()||
+                    imageEpoch!=imageGeneration.get();
+                Log.w(TAG,"Automatic 3D conversion stopped",error);
+                reportAiDepthStatus(cancelled?5:4,0);
+                if(!cancelled)runOnUiThread(() -> Toast.makeText(this,
+                    "AI conversion failed: "+error.getMessage(),
+                    Toast.LENGTH_LONG).show());
+            }finally {aiRunning.set(false);}
+        });
+    }
+
     /** Optional offline-after-download subject segmentation; never replaces depth. */
     @SuppressWarnings("unused")
     public void requestAiSubjectSelection() {
@@ -186,6 +260,9 @@ public final class VrActivity extends Activity {
     @SuppressWarnings("unused")
     public void requestOpenProject(int index){
         aiCancel.set(true);
+        segmentCancel.set(true);
+        imageGeneration.incrementAndGet();
+        reportAiSegmentStatus(0,0);
         depthGeneration.incrementAndGet();
         try {depthSaver.execute(() -> {
             try {
