@@ -678,6 +678,7 @@ void run(JNIEnv* env, jobject activity) {
     XrVector3f startMidpoint{0.f,0.f,0.f};
     XrVector3f anchorWorld{0.f,0.f,-1.9f};
     XrVector3f anchorLocal{0.f,0.f,0.f};
+    int batchStatsTick=44;
     auto lastFrame=std::chrono::steady_clock::now();
     bool running = false;
     log("OpenXR compositor initialized");
@@ -1464,7 +1465,10 @@ void run(JNIEnv* env, jobject activity) {
             menu.batchState=batchState.load();
             menu.batchProgress=batchPercent.load();
             menu.batchCount=batchCount.load();
-            if(page==vrui::Page::Gallery)refreshBatchStats(env,activity,menu);
+            if(page==vrui::Page::Gallery && ++batchStatsTick>=45){
+                refreshBatchStats(env,activity,menu);
+                batchStatsTick=0;
+            }
             menu.updateState=vrUpdateState.load();
             menu.updatePercent=vrUpdatePercent.load();
             menu.aiState=aiDepthState.load();
