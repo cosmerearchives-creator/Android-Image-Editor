@@ -1032,7 +1032,8 @@ void run(JNIEnv* env, jobject activity) {
             wasPainting=menu.painting;
             const int overlayHover=immersive
                 ?(toolPointer&&!toolDragging?menu.toolbarAt(toolPointerX,toolPointerY,true):-1)
-                :(page==vrui::Page::Open && detachedEditor && toolPointer&&!toolDragging?
+                :(page==vrui::Page::Open && menu.advancedVisible &&
+                  detachedEditor && toolPointer&&!toolDragging?
                   menu.toolbarAt(toolPointerX,toolPointerY,false):-1);
             const int hovered=detachedEditor
                 ?(toolPointer&&!toolDragging?vrui::buttonAt(page,toolPointerX,toolPointerY,
@@ -1356,10 +1357,12 @@ void run(JNIEnv* env, jobject activity) {
                 if(!detachedTools && page==vrui::Page::AiDepth)menu.drawAiOverlay();
                 if(!detachedTools && !immersive && menu.advancedVisible)
                     menu.drawTools(page,overlayHover);
-                menu.drawHandCursor(leftPointerX,leftPointerY,leftPointer,
-                                    true,paintLeft,fullPhoto,pushDown);
-                menu.drawHandCursor(pointerX,pointerY,pointer,
-                                    false,paintRight,fullPhoto,pullDown);
+                if(!immersive||menu.immersiveToolsVisible){
+                    menu.drawHandCursor(leftPointerX,leftPointerY,leftPointer,
+                                        true,paintLeft,fullPhoto,pushDown);
+                    menu.drawHandCursor(pointerX,pointerY,pointer,
+                                        false,paintRight,fullPhoto,pullDown);
+                }
                 if(page==vrui::Page::Mask)
                     menu.drawSelectionCursor(pointerX,pointerY,
                                              pointer&&!toolPointer,maskPainting);
