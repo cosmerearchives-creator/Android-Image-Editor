@@ -170,7 +170,7 @@ struct Renderer {
         uploadMask();
     }
     bool selectAt(float sx,float sy){
-        if(photoRgb.size()!=65536u*3u)return false;
+        if(photoRgb.size()!=size_t(DEPTH_EDGE)*DEPTH_EDGE*3u)return false;
         float u=0.f,v=0.f;
         if(!hitPhoto(sx,sy,false,u,v))return false;
         int x=std::clamp(int(u*255),0,255),y=std::clamp(int((1.f-v)*255),0,255);
@@ -178,14 +178,16 @@ struct Renderer {
         std::vector<uint8_t> chosen(65536u,0);
         std::vector<int> pending{start};
         chosen[start]=255;
-        const int red=photoRgb[3*start],green=photoRgb[3*start+1],blue=photoRgb[3*start+2];
+        const int seed=((y*2)*DEPTH_EDGE+x*2)*3;
+        const int red=photoRgb[seed],green=photoRgb[seed+1],blue=photoRgb[seed+2];
         for(size_t i=0;i<pending.size();i++){
             int p=pending[i],px=p%256,py=p/256;
             const int around[]={px? p-1:-1,px<255?p+1:-1,py?p-256:-1,py<255?p+256:-1};
             for(int q:around){
                 if(q<0||chosen[q])continue;
-                int dr=int(photoRgb[3*q])-red,dg=int(photoRgb[3*q+1])-green,
-                    db=int(photoRgb[3*q+2])-blue;
+                const int colorIndex=(((q/256)*2)*DEPTH_EDGE+(q%256)*2)*3;
+                int dr=int(photoRgb[colorIndex])-red,dg=int(photoRgb[colorIndex+1])-green,
+                    db=int(photoRgb[colorIndex+2])-blue;
                 if(dr*dr+dg*dg+db*db>4225)continue;
                 chosen[q]=255;pending.push_back(q);
             }
@@ -286,7 +288,7 @@ struct Renderer {
         glActiveTexture(GL_TEXTURE1);
         glBindTexture(GL_TEXTURE_2D,depthTexture);
         glPixelStorei(GL_UNPACK_ALIGNMENT,1);
-        glTexSubImage2D(GL_TEXTURE_2D,0,0,0,256,256,GL_RED,
+        glTexSubImage2D(GL_TEXTURE_2D,0,0,0,DEPTH_EDGE,DEPTH_EDGE,GL_RED,
                         GL_UNSIGNED_BYTE,depthCpu.data());
         glBindTexture(GL_TEXTURE_2D,0);
         glActiveTexture(GL_TEXTURE0);
@@ -309,9 +311,10 @@ struct Renderer {
         restoreGpuDepth();
         return true;
     }
-    float brushRadius=13.f; // pixels of 256x256 depth image
+    static constexpr int DEPTH_EDGE=512;
+    float brushRadius=26.f; // pixels of 512x512 editable depth image
     std::vector<uint8_t> depthCpu;
-    bool hasDepthPixels() const {return depthCpu.size()==256u*256u;}
+    bool hasDepthPixels() const {return depthCpu.size()==size_t(DEPTH_EDGE)*DEPTH_EDGE;}
     bool hitPhoto(float sx,float sy,bool immersive,float& u,float& v) const {
         if(!hasPhoto())return false;
         float w=immersive?1024.f:704.f,h=immersive?768.f:300.f;
@@ -327,14 +330,14 @@ struct Renderer {
         if(!brushMode||!hasDepthPixels())return false;
         float u=0.f,v=0.f;
         if(!hitPhoto(sx,sy,immersive,u,v))return false;
-        const float cx=u*255.f,cy=(1.f-v)*255.f;
+        const float cx=u*float(DEPTH_EDGE-1),cy=(1.f-v)*float(DEPTH_EDGE-1);
         const float radiusValue=pullTowardViewer?rightRadius:leftRadius;
         const float hardness=pullTowardViewer?rightHardness:leftHardness;
         const int radius=static_cast<int>(std::ceil(radiusValue));
         const int xa=std::max(0,static_cast<int>(cx)-radius),
-                  xb=std::min(255,static_cast<int>(cx)+radius),
+                  xb=std::min(DEPTH_EDGE-1,static_cast<int>(cx)+radius),
                   ya=std::max(0,static_cast<int>(cy)-radius),
-                  yb=std::min(255,static_cast<int>(cy)+radius);
+                  yb=std::min(DEPTH_EDGE-1,static_cast<int>(cy)+radius);
         bool edited=false;
         for(int y=ya;y<=yb;++y)for(int x=xa;x<=xb;++x){
             const float dist=std::hypot(float(x)-cx,float(y)-cy);
@@ -342,14 +345,14 @@ struct Renderer {
             const float relative=dist/radiusValue;
             const float falloff=relative<=hardness?1.f:
                 std::pow(std::clamp((1.f-relative)/std::max(0.01f,1.f-hardness),0.f,1.f),1.3f);
-            const size_t i=size_t(y)*256u+size_t(x);
-            if(hasSelection()&&!selectionMask[i])continue;
+            const size_t i=size_t(y)*DEPTH_EDGE+size_t(x);
+            if(hasSelection()&&!selectionMask[size_t(y/2)*256u+size_t(x/2)])continue;
             // Compare *color* rather than luminance alone so same-brightness,
             // different-hue object boundaries are protected too.
             float edgePenalty=1.f;
-            if(edgeAware && photoRgb.size()==256u*256u*3u){
-                const size_t anchor=(size_t(std::clamp(int(cy),0,255))*256u+
-                                     size_t(std::clamp(int(cx),0,255)))*3u;
+            if(edgeAware && photoRgb.size()==size_t(DEPTH_EDGE)*DEPTH_EDGE*3u){
+                const size_t anchor=(size_t(std::clamp(int(cy),0,DEPTH_EDGE-1))*DEPTH_EDGE+
+                                     size_t(std::clamp(int(cx),0,DEPTH_EDGE-1)))*3u;
                 const size_t sample=i*3u;
                 const float red=float(int(photoRgb[sample])-int(photoRgb[anchor]))/255.f;
                 const float green=float(int(photoRgb[sample+1])-int(photoRgb[anchor+1]))/255.f;
@@ -366,7 +369,7 @@ struct Renderer {
             glActiveTexture(GL_TEXTURE1);
             glBindTexture(GL_TEXTURE_2D,depthTexture);
             glPixelStorei(GL_UNPACK_ALIGNMENT,1);
-            glTexSubImage2D(GL_TEXTURE_2D,0,0,0,256,256,GL_RED,
+            glTexSubImage2D(GL_TEXTURE_2D,0,0,0,DEPTH_EDGE,DEPTH_EDGE,GL_RED,
                             GL_UNSIGNED_BYTE,depthCpu.data());
             glBindTexture(GL_TEXTURE_2D,0);
             glActiveTexture(GL_TEXTURE0);
@@ -382,7 +385,7 @@ struct Renderer {
     }
     void uploadQuickDepth(const std::vector<uint8_t>& gray,int width,int height){
         clearQuickDepth();
-        if(width!=256||height!=256||gray.size()!=size_t(width)*size_t(height))return;
+        if(width!=DEPTH_EDGE||height!=DEPTH_EDGE||gray.size()!=size_t(width)*size_t(height))return;
         depthCpu=gray;
         glGenTextures(1,&depthTexture);
         glActiveTexture(GL_TEXTURE1);
@@ -571,13 +574,13 @@ struct Renderer {
         glBindTexture(GL_TEXTURE_2D,0);
         photoWidth=width;photoHeight=height;
         // Cached at depth-map resolution; used only for brush edge guidance.
-        photoLuminance.resize(256u*256u);
-        photoRgb.resize(256u*256u*3u);
-        for(int y=0;y<256;++y)for(int x=0;x<256;++x) {
-            const int sx=std::min(width-1,x*width/256);
-            const int sy=std::min(height-1,y*height/256);
+        photoLuminance.resize(size_t(DEPTH_EDGE)*DEPTH_EDGE);
+        photoRgb.resize(size_t(DEPTH_EDGE)*DEPTH_EDGE*3u);
+        for(int y=0;y<DEPTH_EDGE;++y)for(int x=0;x<DEPTH_EDGE;++x) {
+            const int sx=std::min(width-1,x*width/DEPTH_EDGE);
+            const int sy=std::min(height-1,y*height/DEPTH_EDGE);
             const size_t offset=(size_t(sy)*width+sx)*4;
-            const size_t index=size_t(y)*256u+size_t(x);
+            const size_t index=size_t(y)*DEPTH_EDGE+size_t(x);
             photoLuminance[index]=(0.2126f*rgba[offset]+
                 0.7152f*rgba[offset+1]+0.0722f*rgba[offset+2])/255.f;
             photoRgb[index*3]=rgba[offset];
@@ -908,7 +911,7 @@ struct Renderer {
                 // The brush operates on 256x256 depth pixels. Use the larger
                 // projected dimension for a circular, clearly readable guide.
                 const float brushPixels=left?leftRadius:rightRadius;
-                radius=std::max(26.f,brushPixels*std::max(pw,ph)*zoom/256.f);
+                radius=std::max(14.f,brushPixels*std::max(pw,ph)*zoom/float(DEPTH_EDGE));
             }
             radius=std::min(radius,300.f);
             constexpr int segments=64;
