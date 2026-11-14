@@ -168,7 +168,8 @@ struct Renderer {
     int maskTolerance=65;
     std::vector<uint8_t> selectionMask;
     GLuint selectionTexture=0;
-    bool hasSelection()const{return selectionMask.size()==65536u;}
+    static constexpr int MASK_EDGE=1024;
+    bool hasSelection()const{return selectionMask.size()==size_t(MASK_EDGE)*MASK_EDGE;}
     void uploadMask(){
         if(!hasSelection())return;
         if(!selectionTexture)glGenTextures(1,&selectionTexture);
@@ -179,7 +180,7 @@ struct Renderer {
         glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_S,GL_CLAMP_TO_EDGE);
         glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_T,GL_CLAMP_TO_EDGE);
         glPixelStorei(GL_UNPACK_ALIGNMENT,1);
-        glTexImage2D(GL_TEXTURE_2D,0,GL_R8,256,256,0,GL_RED,GL_UNSIGNED_BYTE,selectionMask.data());
+        glTexImage2D(GL_TEXTURE_2D,0,GL_R8,MASK_EDGE,MASK_EDGE,0,GL_RED,GL_UNSIGNED_BYTE,selectionMask.data());
         glBindTexture(GL_TEXTURE_2D,0);
         glActiveTexture(GL_TEXTURE0);
     }
@@ -199,32 +200,32 @@ struct Renderer {
     void growOrShrinkMask(bool grow){
         if(!hasSelection())return;
         std::vector<uint8_t> next(selectionMask.size(),0);
-        for(int y=0;y<256;++y)for(int x=0;x<256;++x){
+        for(int y=0;y<MASK_EDGE;++y)for(int x=0;x<MASK_EDGE;++x){
             bool result=!grow;
             for(int oy=-1;oy<=1;++oy)for(int ox=-1;ox<=1;++ox){
                 const int sx=x+ox,sy=y+oy;
-                const bool chosen=sx>=0&&sx<256&&sy>=0&&sy<256
-                    &&selectionMask[size_t(sy)*256u+size_t(sx)]!=0;
+                const bool chosen=sx>=0&&sx<MASK_EDGE&&sy>=0&&sy<MASK_EDGE
+                    &&selectionMask[size_t(sy)*MASK_EDGEu+size_t(sx)]!=0;
                 if(grow)result=result||chosen;
                 else result=result&&chosen;
             }
-            next[size_t(y)*256u+size_t(x)]=result?255:0;
+            next[size_t(y)*MASK_EDGEu+size_t(x)]=result?255:0;
         }
         selectionMask=std::move(next);
         uploadMask();
     }
-    void selectAllMask(){selectionMask.assign(65536u,255);uploadMask();}
+    void selectAllMask(){selectionMask.assign(size_t(MASK_EDGE)*MASK_EDGE,MASK_EDGE-1);uploadMask();}
     void smoothMask(){
         if(!hasSelection())return;
         std::vector<uint8_t> next(selectionMask.size(),0);
-        for(int y=0;y<256;++y)for(int x=0;x<256;++x){
+        for(int y=0;y<MASK_EDGE;++y)for(int x=0;x<MASK_EDGE;++x){
             int count=0;
             for(int oy=-1;oy<=1;++oy)for(int ox=-1;ox<=1;++ox){
                 const int sx=x+ox,sy=y+oy;
-                if(sx>=0&&sx<256&&sy>=0&&sy<256&&
-                   selectionMask[size_t(sy)*256u+size_t(sx)])++count;
+                if(sx>=0&&sx<MASK_EDGE&&sy>=0&&sy<MASK_EDGE&&
+                   selectionMask[size_t(sy)*MASK_EDGEu+size_t(sx)])++count;
             }
-            next[size_t(y)*256u+size_t(x)]=count>=5?255:0;
+            next[size_t(y)*MASK_EDGEu+size_t(x)]=count>=5?255:0;
         }
         selectionMask=std::move(next);
         uploadMask();
@@ -233,19 +234,19 @@ struct Renderer {
         if(photoRgb.size()!=size_t(DEPTH_EDGE)*DEPTH_EDGE*3u)return false;
         float u=0.f,v=0.f;
         if(!hitPhoto(sx,sy,fullPhoto,u,v))return false;
-        int x=std::clamp(int(u*255),0,255),y=std::clamp(int((1.f-v)*255),0,255);
-        int start=y*256+x;
-        std::vector<uint8_t> chosen(65536u,0);
+        int x=std::clamp(int(u*MASK_EDGE-1),0,MASK_EDGE-1),y=std::clamp(int((1.f-v)*MASK_EDGE-1),0,MASK_EDGE-1);
+        int start=y*MASK_EDGE+x;
+        std::vector<uint8_t> chosen(size_t(MASK_EDGE)*MASK_EDGE,0);
         std::vector<int> pending{start};
         chosen[start]=255;
-        const int seed=((y*2)*DEPTH_EDGE+x*2)*3;
+        const int seed=(y*DEPTH_EDGE+x)*3;
         const int red=photoRgb[seed],green=photoRgb[seed+1],blue=photoRgb[seed+2];
         for(size_t i=0;i<pending.size();i++){
-            int p=pending[i],px=p%256,py=p/256;
-            const int around[]={px? p-1:-1,px<255?p+1:-1,py?p-256:-1,py<255?p+256:-1};
+            int p=pending[i],px=p%MASK_EDGE,py=p/MASK_EDGE;
+            const int around[]={px? p-1:-1,px<255?p+1:-1,py?p-MASK_EDGE:-1,py<255?p+MASK_EDGE:-1};
             for(int q:around){
                 if(q<0||chosen[q])continue;
-                const int colorIndex=(((q/256)*2)*DEPTH_EDGE+(q%256)*2)*3;
+                const int colorIndex=q*3;
                 int dr=int(photoRgb[colorIndex])-red,dg=int(photoRgb[colorIndex+1])-green,
                     db=int(photoRgb[colorIndex+2])-blue;
                 if(dr*dr+dg*dg+db*db>maskTolerance*maskTolerance)continue;
@@ -253,7 +254,7 @@ struct Renderer {
             }
         }
         if(!hasSelection()){
-            selectionMask.assign(65536u,0);
+            selectionMask.assign(size_t(MASK_EDGE)*MASK_EDGE,0);
         }
         for(size_t p=0;p<chosen.size();++p){
             if(!chosen[p])continue;
@@ -285,7 +286,7 @@ struct Renderer {
     bool edgeAware=true;
     float brushStrength=1.0f;
     float leftStrength=1.0f,rightStrength=1.0f;
-    float leftRadius=26.f,rightRadius=26.f;
+    float leftRadius=52.f,rightRadius=52.f;
     float leftHardness=0.f,rightHardness=0.f;
     std::vector<std::string> projectNames;
     int projectPage=0;
@@ -346,13 +347,13 @@ struct Renderer {
             case 26:disparityStrength=t*2.f;break;
             case 29:leftStrength=0.1f+t*2.9f;break;
             case 27:rightStrength=0.1f+t*2.9f;break;
-            case 30:leftRadius=6.f+t*114.f;break;
-            case 31:rightRadius=6.f+t*114.f;break;
+            case 30:leftRadius=12.f+t*228.f;break;
+            case 31:rightRadius=12.f+t*228.f;break;
             case 32:leftHardness=t;break;
             case 33:rightHardness=t;break;
         }
     }
-    // Stroke-wise history; cap memory (~1 MiB each stack at 16 snapshots).
+    // 1024px maps use 1 MiB per snapshot; cap undo/redo at 8 strokes each.
     std::vector<std::vector<uint8_t>> undoHistory,redoHistory;
     std::vector<uint8_t> strokeBefore;
     bool strokeActive=false;
@@ -368,7 +369,7 @@ struct Renderer {
         strokeActive=false;
         bool modified=strokeBefore!=depthCpu;
         if(modified) {
-            if(undoHistory.size()>=16)undoHistory.erase(undoHistory.begin());
+            if(undoHistory.size()>=8)undoHistory.erase(undoHistory.begin());
             undoHistory.push_back(std::move(strokeBefore));
             redoHistory.clear();
         }
@@ -387,7 +388,7 @@ struct Renderer {
     }
     bool undoDepth() {
         if(strokeActive||undoHistory.empty()||!hasDepthPixels())return false;
-        if(redoHistory.size()>=16)redoHistory.erase(redoHistory.begin());
+        if(redoHistory.size()>=8)redoHistory.erase(redoHistory.begin());
         redoHistory.push_back(depthCpu);
         depthCpu=std::move(undoHistory.back());
         undoHistory.pop_back();
@@ -396,15 +397,15 @@ struct Renderer {
     }
     bool redoDepth() {
         if(strokeActive||redoHistory.empty()||!hasDepthPixels())return false;
-        if(undoHistory.size()>=16)undoHistory.erase(undoHistory.begin());
+        if(undoHistory.size()>=8)undoHistory.erase(undoHistory.begin());
         undoHistory.push_back(depthCpu);
         depthCpu=std::move(redoHistory.back());
         redoHistory.pop_back();
         restoreGpuDepth();
         return true;
     }
-    static constexpr int DEPTH_EDGE=512;
-    float brushRadius=26.f; // pixels of 512x512 editable depth image
+    static constexpr int DEPTH_EDGE=1024;
+    float brushRadius=52.f; // 1024px depth pixels; 2x old size maintains physical radius
     std::vector<uint8_t> depthCpu;
     bool hasDepthPixels() const {return depthCpu.size()==size_t(DEPTH_EDGE)*DEPTH_EDGE;}
     bool hitPhoto(float sx,float sy,bool immersive,float& u,float& v) const {
@@ -438,7 +439,7 @@ struct Renderer {
             const float falloff=relative<=hardness?1.f:
                 std::pow(std::clamp((1.f-relative)/std::max(0.01f,1.f-hardness),0.f,1.f),1.3f);
             const size_t i=size_t(y)*DEPTH_EDGE+size_t(x);
-            if(hasSelection()&&!selectionMask[size_t(y/2)*256u+size_t(x/2)])continue;
+            if(hasSelection()&&!selectionMask[i])continue;
             // Compare *color* rather than luminance alone so same-brightness,
             // different-hue object boundaries are protected too.
             float edgePenalty=1.f;
@@ -1062,9 +1063,9 @@ struct Renderer {
         box(v,45,348,930*full,12,purpleHover);
         box(v,45+930*full-6,339,12,30,white);
         const float leftValues[]={ (leftStrength-.1f)/2.9f,
-                                   (leftRadius-6.f)/114.f,leftHardness };
+                                   (leftRadius-12.f)/228.f,leftHardness };
         const float rightValues[]={ (rightStrength-.1f)/2.9f,
-                                    (rightRadius-6.f)/114.f,rightHardness };
+                                    (rightRadius-12.f)/228.f,rightHardness };
         const char* namesL[]={"LEFT PUSH POWER","LEFT BRUSH SIZE","LEFT HARDNESS"};
         const char* namesR[]={"RIGHT PULL POWER","RIGHT BRUSH SIZE","RIGHT HARDNESS"};
         const int ys[]={265,180,95};
@@ -1123,8 +1124,8 @@ struct Renderer {
                 float pw=immersive?1024.f:684.f,ph=immersive?768.f:208.f;
                 const float aspect=float(photoWidth)/float(photoHeight);
                 if(aspect>pw/ph)ph=pw/aspect;else pw=ph*aspect;
-                // The brush operates on 256x256 depth pixels. Use the larger
-                // projected dimension for a circular, clearly readable guide.
+                // The brush operates on the 1024px depth grid; preserve
+                // physical guide size as resolution changes.
                 const float brushPixels=left?leftRadius:rightRadius;
                 radius=std::max(14.f,brushPixels*std::min(pw,ph)*zoom/float(DEPTH_EDGE));
             }
