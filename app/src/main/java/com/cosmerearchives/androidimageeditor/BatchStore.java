@@ -39,8 +39,8 @@ public final class BatchStore {
     private static File cache(Context ctx,String name){return new File(root(ctx),name);}
     public static File wall(Context ctx){return cache(ctx,"wall.png");}
     public static File wallDepth(Context ctx){return cache(ctx,"wall_depth.png");}
-    public static File sphere(Context ctx){return cache(ctx,"cylinder_v3.png");}
-    public static File sphereDepth(Context ctx){return cache(ctx,"cylinder_depth_v3.png");}
+    public static File sphere(Context ctx){return cache(ctx,"cylinder_v4.png");}
+    public static File sphereDepth(Context ctx){return cache(ctx,"cylinder_depth_v4.png");}
     private static File[] entries(Context ctx){
         File[] items=root(ctx).listFiles(f->f.isDirectory()&&new File(f,PHOTO).isFile());
         if(items==null)return new File[0];
@@ -329,40 +329,18 @@ public final class BatchStore {
         if(!spherical){
             drawTiles(ctx,list,canvas,width,height,columns,rows,depths,false,progress);
         }else{
-            // Atlas vertical bands (in bitmap top-down coordinates):
-            // ceiling 25%, wall 50%, floor 25%. UV mapping reverses this in GL.
-            // The wall gets most images; caps receive their own images, not a
-            // pole-stretched equirectangular panorama.
-            int wallCount=Math.max(1,Math.min(list.length,(int)Math.ceil(list.length*0.70)));
-            int remaining=list.length-wallCount;
-            int ceilingCount=(remaining+1)/2;
-            int floorCount=remaining-ceilingCount;
-            File[] wallItems=java.util.Arrays.copyOfRange(list,0,wallCount);
-            File[] ceilingItems=ceilingCount==0?new File[]{list[0]}:
-                java.util.Arrays.copyOfRange(list,wallCount,wallCount+ceilingCount);
-            File[] floorItems=floorCount==0?new File[]{list[list.length-1]}:
-                java.util.Arrays.copyOfRange(list,wallCount+ceilingCount,list.length);
-            File[][] surfaces={ceilingItems,wallItems,floorItems};
-            int[] tops={0,height/4,3*height/4};
-            int[] heights={height/4,height/2,height-height*3/4};
+            // The ceiling and floor belong to the chosen environment.
+            // All pictures live on the wall, which occupies the central 50%
+            // of the atlas. Leave the caps fully transparent.
             canvas.drawColor(Color.TRANSPARENT,android.graphics.PorterDuff.Mode.CLEAR);
-            for(int surface=0;surface<3;surface++){
-                File[] section=surfaces[surface];
-                canvas.save();
-                canvas.translate(0,tops[surface]);
-                canvas.clipRect(0,0,width,heights[surface]);
-                // Floor/ceiling are planar circular surfaces, NOT a horizontal
-                // panorama. Each cap must use a square UV region: the old
-                // 4096x512 strip stretched pictures eight-fold horizontally.
-                int availableWidth=surface==1?width:heights[surface];
-                if(surface!=1)canvas.translate((width-availableWidth)*0.5f,0);
-                int cols=Math.max(1,(int)Math.ceil(Math.sqrt(section.length*4.0)));
-                int sectionRows=(section.length+cols-1)/cols;
-                final int part=surface;
-                drawTiles(ctx,section,canvas,availableWidth,heights[surface],cols,
-                    sectionRows,depths,true,p->progress.accept((part*100+p)/3));
-                canvas.restore();
-            }
+            canvas.save();
+            canvas.translate(0,height/4);
+            canvas.clipRect(0,0,width,height/2);
+            int wallColumns=Math.max(1,(int)Math.ceil(Math.sqrt(list.length*4.0)));
+            int wallRows=(list.length+wallColumns-1)/wallColumns;
+            drawTiles(ctx,list,canvas,width,height/2,wallColumns,wallRows,
+                depths,true,progress);
+            canvas.restore();
         }
         return atlas;
     }
