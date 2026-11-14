@@ -92,7 +92,7 @@ bool batchPixels(JNIEnv* env,jobject activity,bool spherical,bool depth,
     for(size_t i=0;i<argb.size();++i){
         const uint32_t p=static_cast<uint32_t>(argb[i]);
         rgba[i*4]=uint8_t(p>>16);rgba[i*4+1]=uint8_t(p>>8);
-        rgba[i*4+2]=uint8_t(p);rgba[i*4+3]=255;
+        rgba[i*4+2]=uint8_t(p);rgba[i*4+3]=uint8_t(p>>24);
     }
     return true;
 }
