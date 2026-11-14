@@ -47,6 +47,35 @@ public final class BatchStore {
         Arrays.sort(items,Comparator.comparing(File::getName));
         return items;
     }
+    private static final String DISPLAY_NAME="import_name.txt";
+    public static File[] importedImages(Context ctx){return entries(ctx);}
+    public static String importedName(File entry){
+        File info=new File(entry,DISPLAY_NAME);
+        if(info.isFile()){
+            try{
+                byte[] data=new byte[(int)Math.min(256,info.length())];
+                try(FileInputStream in=new FileInputStream(info)){
+                    int n=in.read(data);
+                    if(n>0)return new String(data,0,n,java.nio.charset.StandardCharsets.UTF_8);
+                }
+            }catch(IOException ignored){}
+        }
+        return "Previously imported image";
+    }
+    private static void writeImportedName(Context ctx,Uri source,File entry){
+        String name=null;
+        try(android.database.Cursor cursor=ctx.getContentResolver().query(
+                source,new String[]{android.provider.OpenableColumns.DISPLAY_NAME},
+                null,null,null)){
+            if(cursor!=null&&cursor.moveToFirst())name=cursor.getString(0);
+        }catch(RuntimeException ignored){}
+        if(name==null||name.trim().isEmpty())name="Imported image";
+        name=name.replace('\n',' ').replace('\r',' ');
+        if(name.length()>110)name=name.substring(0,110);
+        try(FileOutputStream out=new FileOutputStream(new File(entry,DISPLAY_NAME))){
+            out.write(name.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        }catch(IOException ignored){}
+    }
     public static int count(Context ctx){return entries(ctx).length;}
     public static int converted(Context ctx){
         int result=0;
@@ -122,6 +151,7 @@ public final class BatchStore {
                 if(!temp.renameTo(new File(dir,PHOTO))){
                     temp.delete();throw new IOException("Cannot store imported image");
                 }
+                writeImportedName(ctx,sources.get(i),dir);
                 added++;
             }else temp.delete();
             progress.accept((i+1)*100/sources.size());
