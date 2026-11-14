@@ -1391,3 +1391,22 @@ Java_com_cosmerearchives_androidimageeditor_VrActivity_reportAiDepthStatus(
     aiDepthState.store(static_cast<int>(state));
     aiDepthPercent.store(std::clamp(static_cast<int>(progress),0,100));
 }
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_cosmerearchives_androidimageeditor_VrActivity_reportAiSegmentStatus(
+        JNIEnv*,jobject,jint state,jint progress){
+    aiSegmentState.store(static_cast<int>(state));
+    aiSegmentPercent.store(std::clamp(static_cast<int>(progress),0,100));
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_cosmerearchives_androidimageeditor_VrActivity_submitAiSelectionMask(
+        JNIEnv* env,jobject,jbyteArray input){
+    if(!input || env->GetArrayLength(input)!=1024*1024)return;
+    std::vector<uint8_t> next(1024u*1024u);
+    env->GetByteArrayRegion(input,0,1024*1024,
+        reinterpret_cast<jbyte*>(next.data()));
+    if(env->ExceptionCheck())return;
+    std::lock_guard<std::mutex> lock(aiMaskMutex);
+    pendingAiMask.swap(next);
+}
