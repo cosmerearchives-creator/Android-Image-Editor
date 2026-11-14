@@ -81,7 +81,7 @@ public final class BatchStore {
             }
             for(String line:existing.split("\\n"))if(value.equals(line.trim()))return;
             try(FileOutputStream out=new FileOutputStream(record,true)){
-                if(!existing.isEmpty()&&!existing.endsWith("\\n"))out.write('\n');
+                if(!existing.isEmpty()&&existing.charAt(existing.length()-1)!=10)out.write('\n');
                 out.write(value.getBytes(java.nio.charset.StandardCharsets.UTF_8));
                 out.write('\n');
             }
