@@ -174,6 +174,7 @@ struct Renderer {
     int maskTolerance=65;
     bool depthGuidedSelection=true;
     int maskDepthTolerance=30;
+    int autoMaskStatus=0; // 0 idle, 1 generated, 2 no reliable region
     std::vector<uint8_t> selectionMask;
     GLuint selectionTexture=0;
     static constexpr int MASK_EDGE=1024;
@@ -193,6 +194,7 @@ struct Renderer {
         glActiveTexture(GL_TEXTURE0);
     }
     void clearMask(){
+        autoMaskStatus=0;
         selectionMask.clear();
         if(selectionTexture)glDeleteTextures(1,&selectionTexture);
         selectionTexture=0;
@@ -1004,6 +1006,10 @@ struct Renderer {
                 }
                 box(v,170,402,684,78,hovered==115?purpleHover:purple);
                 label(v,"AUTO FOREGROUND FROM DEPTH",190,428,2,white);
+                if(autoMaskStatus==1)
+                    label(v,"FOREGROUND MASK READY",183,494,2,muted);
+                else if(autoMaskStatus==2)
+                    label(v,"NO DISTINCT FOREGROUND FOUND",183,494,2,muted);
                 box(v,170,310,330,50,hovered==112?purpleHover:
                     depthGuidedSelection?purple:button);
                 label(v,depthGuidedSelection?"DEPTH GUIDE ON":"DEPTH GUIDE OFF",
