@@ -1054,7 +1054,7 @@ void run(JNIEnv* env, jobject activity) {
             if(activeSlider>=0 && sliderAim && !dragging && !toolDragging)
                 menu.slideAt(activeSlider,sliderX,immersive);
             if(triggerDown&&!wasPressed && !dragging && activeSlider<0 &&
-               ((hit>=20 && hit<=25) || (hit>=90 && hit<=99))) {
+               ((hit>=20 && hit<=25) || (hit>=90 && hit<=99) || hit==111)) {
                 switch(hit) {
                     case 20: menu.stereoEnabled=!menu.stereoEnabled;break;
                     case 21:
@@ -1073,6 +1073,9 @@ void run(JNIEnv* env, jobject activity) {
                     case 24: if(menu.undoDepth())saveEditedDepth(env,activity,menu.depthCpu);break;
                     case 25: if(menu.redoDepth())saveEditedDepth(env,activity,menu.depthCpu);break;
                     case 90: if(page==vrui::Page::Open) page=vrui::Page::Curves;break;
+                    case 111: if(page==vrui::Page::Curves)
+                        menu.gapFillMode=(menu.gapFillMode+1)%3;
+                        break;
                     case 91: if(page==vrui::Page::Curves) page=vrui::Page::Open;break;
                     case 92:case 93:case 94:case 95:case 96:case 97:case 98:case 99:
                         if(page==vrui::Page::Curves)menu.adjustCurve(hit);
