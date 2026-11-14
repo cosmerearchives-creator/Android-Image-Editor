@@ -14,8 +14,9 @@ import java.io.IOException;
  * brightness, center prominence, vertical location, and edge-preserving smoothing.
  */
 public final class QuickDepth {
-    private static final int W = 256;
-    private static final int H = 256;
+    // Quick heuristic generation is 512px; manual editing remains 1024px.
+    private static final int W = 512;
+    private static final int H = 512;
     private static final int EDIT_EDGE=1024;
     private static final String DEPTH_FILE = "vr_depth_quick.png";
     private static final String CANDIDATE = "vr_depth_ai_candidate.png";
@@ -50,13 +51,13 @@ public final class QuickDepth {
         return true;
     }
     private static void saveImage(File destination,byte[] gray) throws IOException {
-        if(gray==null || gray.length!=W*H)
+        if(gray==null || gray.length!=256*256)
             throw new IOException("Invalid depth map dimensions");
-        int[] encoded=new int[W*H];
+        int[] encoded=new int[256*256];
         for(int i=0;i<encoded.length;i++){
             int value=gray[i]&255;encoded[i]=Color.argb(255,value,value,value);
         }
-        Bitmap bitmap=Bitmap.createBitmap(encoded,W,H,Bitmap.Config.ARGB_8888);
+        Bitmap bitmap=Bitmap.createBitmap(encoded,256,256,Bitmap.Config.ARGB_8888);
         File stage=new File(destination.getParentFile(),destination.getName()+".partial");
         try {
             try(FileOutputStream stream=new FileOutputStream(stage)) {
@@ -148,6 +149,9 @@ public final class QuickDepth {
             float[] luminance = new float[count];
             float[] result = new float[count];
             float[] smooth = new float[count];
+            // Keep full RGB at the native estimation grid. Equal-brightness
+            // differently colored objects must remain distinct boundaries.
+            int[] rgb = pixels;
             for(int y=0; y<H; y++) {
                 for(int x=0; x<W; x++) {
                     int index=y*W+x, p=pixels[index];
@@ -162,8 +166,8 @@ public final class QuickDepth {
                                         0.17f*height,0.05f,0.95f);
                 }
             }
-            // Edge-aware 5x5 bilateral smoothing reduces pixel-level flicker
-            // without mixing strong luminance boundaries indiscriminately.
+            // RGB- and depth-guided smoothing preserves boundaries between
+            // equal-luminance colors and avoids bleeding depth through edges.
             for(int y=0; y<H; y++) for(int x=0; x<W; x++) {
                 int centerIndex=y*W+x;
                 float sum=0, weights=0;
@@ -171,8 +175,14 @@ public final class QuickDepth {
                     int sx=Math.min(W-1,Math.max(0,x+ox));
                     int sy=Math.min(H-1,Math.max(0,y+oy));
                     int index=sy*W+sx;
-                    float dl=luminance[index]-luminance[centerIndex];
-                    float w=(float)Math.exp(-(ox*ox+oy*oy)/4.0f - dl*dl*22f);
+                    int a=rgb[index],b=rgb[centerIndex];
+                    float dr=(Color.red(a)-Color.red(b))/255f;
+                    float dg=(Color.green(a)-Color.green(b))/255f;
+                    float db=(Color.blue(a)-Color.blue(b))/255f;
+                    float colorDistance=dr*dr+dg*dg+db*db;
+                    float depthDifference=result[index]-result[centerIndex];
+                    float w=(float)Math.exp(-(ox*ox+oy*oy)/4.0f -
+                        colorDistance*22f-depthDifference*50f);
                     sum+=result[index]*w;
                     weights+=w;
                 }
