@@ -250,7 +250,7 @@ struct Renderer {
             if(y>=65&&y<=140)return x<510?32:33;
             return -1;
         }
-        if(y>=335&&y<=405){
+        if(y>=300&&y<=349){
             if(x>=180&&x<=495)return 26;
             if(x>=510&&x<=845)return 27;
         }
@@ -332,10 +332,10 @@ struct Renderer {
     bool hasDepthPixels() const {return depthCpu.size()==size_t(DEPTH_EDGE)*DEPTH_EDGE;}
     bool hitPhoto(float sx,float sy,bool immersive,float& u,float& v) const {
         if(!hasPhoto())return false;
-        float w=immersive?1024.f:704.f,h=immersive?768.f:300.f;
+        float w=immersive?1024.f:684.f,h=immersive?768.f:208.f;
         float aspect=float(photoWidth)/float(photoHeight);
         if(aspect>w/h)h=w/aspect;else w=h*aspect;
-        float x=512.f-w*.5f,y=(immersive?384.f:450.f)-h*.5f;
+        float x=512.f-w*.5f,y=(immersive?384.f:457.f)-h*.5f;
         if(sx<x||sx>x+w||sy<y||sy>y+h)return false;
         u=centerU+((sx-x)/w-.5f)/zoom;
         v=centerV+(.5f-(sy-y)/h)/zoom;
@@ -429,10 +429,10 @@ struct Renderer {
         if(!hasPhoto() || std::abs(delta)<0.001f)return;
         const float next=std::clamp(zoom*std::exp(delta),1.f,12.f);
         if(std::abs(next-zoom)<0.00001f)return;
-        float w=immersive?1024.f:704.f,h=immersive?768.f:300.f;
+        float w=immersive?1024.f:684.f,h=immersive?768.f:208.f;
         const float ratio=float(photoWidth)/float(photoHeight);
         if(ratio>w/h)h=w/ratio;else w=h*ratio;
-        const float x=512.f-w/2.f,y=(immersive?384.f:450.f)-h/2.f;
+        const float x=512.f-w/2.f,y=(immersive?384.f:457.f)-h/2.f;
         const float px=pointer?std::clamp((cursorX-x)/w,0.f,1.f):0.5f;
         const float py=pointer?std::clamp((cursorY-y)/h,0.f,1.f):0.5f;
         // Hold the content under the aim cursor fixed while zooming.
@@ -616,10 +616,10 @@ struct Renderer {
     void drawPhoto(float eyeSign,bool immersive=false){
         if(!photoTexture || !photoProgram)return;
         // Fit without cropping or stretching, preserving photo aspect ratio.
-        float w=immersive?1024.f:704.f,h=immersive?768.f:300.f;
+        float w=immersive?1024.f:684.f,h=immersive?768.f:208.f;
         const float ratio=float(photoWidth)/float(photoHeight);
         if(ratio > w/h) h=w/ratio; else w=h*ratio;
-        const float x=512.f-w/2.f,y=(immersive?384.f:450.f)-h/2.f;
+        const float x=512.f-w/2.f,y=(immersive?384.f:457.f)-h/2.f;
         // Explicit normalized texture coordinates preserve source orientation.
         const float half=0.5f/zoom;
         const float u0=centerU-half,u1=centerU+half;
@@ -698,7 +698,8 @@ struct Renderer {
                 page==Page::Collage?"COLLAGE LAYERS":
                 page==Page::Curves?"DEPTH CURVES":"VIEW GALLERY";
             int n=static_cast<int>(std::strlen(title));
-            label(v,title,512-n*15,(page==Page::Open||page==Page::Projects)?630:475,5,white);
+            if(page!=Page::Open)
+                label(v,title,512-n*15,page==Page::Projects?630:475,5,white);
             if(page==Page::Open) {
                 box(v,170,665,215,50,hovered==14?purpleHover:button);
                 label(v,"SAVE PROJECT",184,678,2,white);
@@ -718,13 +719,15 @@ struct Renderer {
                 label(v,"CLEAR MASK",404,610,2,hasSelection()?white:muted);
                 box(v,610,590,244,58,hovered==62?purpleHover:button);
                 label(v,"INVERT MASK",624,610,2,hasSelection()?white:muted);
-                if(brushMode && !hasDepthPixels())
-                    label(v,"CREATE QUICK DEPTH FIRST",190,568,2,{1.f,0.7f,0.2f});
-                if(brushMode && hasDepthPixels()) {
-                    label(v,"L PUSH R PULL",700,574,2,muted);
-                    const std::string brushText="LEFT "+std::to_string(int(leftRadius))+
-                        " RIGHT "+std::to_string(int(rightRadius));
-                    label(v,brushText.c_str(),690,550,2,muted);
+                const char* state=!hasPhoto()?"IMPORT AN IMAGE":
+                    quickConverting?"CREATING DEPTH...":
+                    !hasDepthPixels()?"QUICK DEPTH REQUIRED":
+                    brushMode?"BRUSH READY":"DEPTH READY";
+                label(v,state,176,567,2,quickConverting?purpleHover:muted);
+                if(brushMode && hasDepthPixels()){
+                    const std::string sizes="L "+std::to_string(int(leftRadius))+
+                        "  R "+std::to_string(int(rightRadius));
+                    label(v,sizes.c_str(),700,567,2,muted);
                 }
                 if(!hasPhoto()) label(v,"NO IMAGE IMPORTED",235,411,4,muted);
                 box(v,170,205,163,86,hovered==4?purpleHover:button);
@@ -742,8 +745,7 @@ struct Renderer {
                 box(v,645,36,209,52,hovered==5?purpleHover:button);
                 label(v,"RESET VIEW",665,51,2,white);
                 if(hasPhoto()) {
-                    label(v,hasQuickDepth()?"QUICK DEPTH MAP":quickConverting?"CONVERTING DEPTH":"HEURISTIC DEPTH",180,310,2,muted);
-                    label(v,"BOTH GRIPS RESIZE ROTATE",204,304,2,muted);
+                    label(v,"INDEX TRIGGERS SCULPT",175,187,2,muted);
                 }
             } else if(page==Page::Curves){
                 box(v,170,36,684,69,hovered==91?purpleHover:purple);
@@ -856,10 +858,10 @@ struct Renderer {
     void drawTools(Page page,int hover) {
         if(page!=Page::Open)return;
         std::vector<float> v;
-        box(v,170,330,684,84,{0.095f,0.075f,0.14f});
-        const float dl=180.f,dr=495.f,bl=510.f,br=845.f,y=348.f;
-        label(v,"DEPTH",184,375,2,white);
-        label(v,"RIGHT POWER",514,375,2,white);
+        box(v,170,298,684,53,{0.095f,0.075f,0.14f});
+        const float dl=180.f,dr=495.f,bl=510.f,br=845.f,y=307.f;
+        label(v,"DEPTH",184,328,2,white);
+        label(v,"RIGHT POWER",514,328,2,white);
         box(v,dl,y,dr-dl,7,{0.25f,0.20f,0.32f});
         box(v,dl,y,(dr-dl)*disparityStrength/2.f,7,purpleHover);
         box(v,dl+(dr-dl)*disparityStrength/2.f-5,y-6,10,19,white);
@@ -957,7 +959,7 @@ struct Renderer {
             float radius=26.f;
             float u=0.f,w=0.f;
             if(hitPhoto(x,y,immersive,u,w)){
-                float pw=immersive?1024.f:704.f,ph=immersive?768.f:300.f;
+                float pw=immersive?1024.f:684.f,ph=immersive?768.f:208.f;
                 const float aspect=float(photoWidth)/float(photoHeight);
                 if(aspect>pw/ph)ph=pw/aspect;else pw=ph*aspect;
                 // The brush operates on 256x256 depth pixels. Use the larger
