@@ -193,16 +193,17 @@ void refreshDepth(JNIEnv* env,jobject activity,vrui::Renderer& menu) {
             jintArray pixels=static_cast<jintArray>(env->CallStaticObjectMethod(cls,method,ctx));
             if(pixels) {
                 const jsize count=env->GetArrayLength(pixels);
-                if(count==256*256+2){
+                constexpr int kEdge=vrui::Renderer::DEPTH_EDGE;
+                if(count==kEdge*kEdge+2){
                     jint sizes[2]{0,0};
                     env->GetIntArrayRegion(pixels,0,2,sizes);
-                    if(sizes[0]==256 && sizes[1]==256) {
-                        std::vector<jint> argb(256*256);
-                        env->GetIntArrayRegion(pixels,2,256*256,argb.data());
-                        std::vector<uint8_t> gray(256*256);
+                    if(sizes[0]==kEdge && sizes[1]==kEdge) {
+                        std::vector<jint> argb(kEdge*kEdge);
+                        env->GetIntArrayRegion(pixels,2,kEdge*kEdge,argb.data());
+                        std::vector<uint8_t> gray(kEdge*kEdge);
                         for(size_t i=0;i<gray.size();++i)
                             gray[i]=static_cast<uint8_t>(argb[i] & 0xFF);
-                        menu.uploadQuickDepth(gray,256,256);
+                        menu.uploadQuickDepth(gray,kEdge,kEdge);
                     }
                 }
                 env->DeleteLocalRef(pixels);
