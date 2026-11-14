@@ -145,10 +145,14 @@ public final class AiSegment {
 
     public static byte[] infer(Context ctx,AtomicBoolean cancel,IntConsumer progress)
         throws Exception {
+        return infer(ctx,cancel,progress,new File(ctx.getFilesDir(),"vr_import.png"));
+    }
+    public static byte[] infer(Context ctx,AtomicBoolean cancel,IntConsumer progress,
+                               File photoFile) throws Exception {
         File model=ensureModel(ctx,cancel,progress);
         checkCancel(cancel);
         Bitmap original=BitmapFactory.decodeFile(
-            new File(ctx.getFilesDir(),"vr_import.png").getAbsolutePath());
+            photoFile.getAbsolutePath());
         if(original==null)throw new IOException("Import a photo first");
         float[] input;
         try{input=inputFor(original);}finally{original.recycle();}
