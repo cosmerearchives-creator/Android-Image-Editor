@@ -96,6 +96,28 @@ bool batchPixels(JNIEnv* env,jobject activity,bool spherical,bool depth,
     }
     return true;
 }
+bool loadBatchView(JNIEnv* env,jobject activity,vrui::Renderer& renderer,
+                   int mode){
+    const bool spherical=mode==2;
+    std::vector<uint8_t> color,depth;
+    int width=0,height=0,dw=0,dh=0;
+    if(!batchPixels(env,activity,spherical,false,color,width,height))return false;
+    if(!batchPixels(env,activity,spherical,true,depth,dw,dh))return false;
+    if(spherical){
+        renderer.uploadSphere(color,width,height);
+        renderer.uploadSphereDepth(depth,dw,dh);
+    }else{
+        renderer.uploadPhoto(color,width,height);
+        if(dw==1024&&dh==1024){
+            std::vector<uint8_t> gray(size_t(dw)*dh);
+            for(size_t i=0;i<gray.size();++i)gray[i]=depth[i*4];
+            renderer.uploadQuickDepth(gray,dw,dh);
+        }
+        renderer.stereoEnabled=true;
+        renderer.resetPhotoView();
+    }
+    return true;
+}
 std::atomic<bool> projectsNeedReload{true};
 void loadPanelLayout(JNIEnv* env,jobject activity,XrVector3f& pos,float& scale){
     jclass cls=env->GetObjectClass(activity);
@@ -849,7 +871,7 @@ void run(JNIEnv* env, jobject activity) {
                 page==vrui::Page::Mask || page==vrui::Page::Collage ||
                 page==vrui::Page::AiDepth || page==vrui::Page::Curves;
             const bool detachedTools=immersivePanel||detachedEditor;
-            const bool fullPhoto=detachedTools;
+            const bool fullPhoto=detachedTools||page==vrui::Page::Wall;
             const bool tinyTools=immersivePanel&&!menu.immersiveToolsVisible;
             const float panelW=tinyTools?.252f:1.40f;
             const float panelH=tinyTools?.189f:1.05f;
@@ -993,7 +1015,8 @@ void run(JNIEnv* env, jobject activity) {
                 panelPosition.z=std::clamp(dragPanel.z+hand.z-dragOrigin.z,-4.f,-0.55f);
             }
             const bool dragging=dragMode!=DragMode::None;
-            if((page==vrui::Page::Open || page==vrui::Page::Immersive) &&
+            if((page==vrui::Page::Open || page==vrui::Page::Immersive ||
+                page==vrui::Page::Wall) &&
                stick.isActive && !dragging && std::abs(stick.currentState.y)>0.15f) {
                 menu.changeZoom(stick.currentState.y * dt * 1.5f,pointerX,pointerY,
                                 pointer,fullPhoto);
@@ -1114,6 +1137,32 @@ void run(JNIEnv* env, jobject activity) {
             const bool bDown=exitView.isActive && exitView.currentState;
             // Thumbstick click is the sole immersive exit control.
             // Trigger remains available for painting and in-view controls.
+            if(page==vrui::Page::Wall || page==vrui::Page::Sphere){
+                if(bDown&&!wasB){
+                    page=vrui::Page::Gallery;
+                    imageNeedsReload.store(true);
+                    depthNeedsReload.store(true);
+                    dragMode=DragMode::None;
+                    panelPosition={0.f,0.f,-1.9f};
+                    panelScale=1.f;
+                    panelAngle=0.f;
+                }else if(page==vrui::Page::Wall&&triggerDown&&!wasPressed&&pointer&&!dragging){
+                    float u=0.f,v=0.f;
+                    if(menu.hitPhoto(pointerX,pointerY,true,u,v)&&menu.batchCount>0){
+                        const int columns=std::max(1,int(std::ceil(
+                            std::sqrt(float(menu.batchCount)))));
+                        const int rows=(menu.batchCount+columns-1)/columns;
+                        const int col=std::clamp(int(u*columns),0,columns-1);
+                        const int row=std::clamp(int((1.f-v)*rows),0,rows-1);
+                        const int selected=row*columns+col;
+                        if(selected<menu.batchCount){
+                            batchMethod(env,activity,"requestOpenBatchImage","(I)V",
+                                        selected);
+                            page=vrui::Page::Open;
+                        }
+                    }
+                }
+            }
             if(page==vrui::Page::Immersive) {
                 if(bDown&&!wasB) {
                     page=vrui::Page::Open;
@@ -1412,6 +1461,16 @@ void run(JNIEnv* env, jobject activity) {
             menu.aiSegmentState=aiSegmentState.load();
             menu.aiSegmentPercent=aiSegmentPercent.load();
             if(projectsNeedReload.exchange(false))refreshProjectList(env,activity,menu);
+            const int galleryReady=batchReadyMode.exchange(0);
+            if(galleryReady!=0 && loadBatchView(env,activity,menu,galleryReady)){
+                page=galleryReady==1?vrui::Page::Wall:vrui::Page::Sphere;
+                panelPosition={0.f,0.f,-1.9f};
+                panelScale=galleryReady==1?3.7f:1.f;
+                panelAngle=0.f;
+                dragMode=DragMode::None;
+                menu.brushMode=false;
+                menu.selectionOverlayVisible=false;
+            }
             if(imageNeedsReload.exchange(false)) {
                 {
                     std::lock_guard<std::mutex> lock(aiMaskMutex);
@@ -1447,7 +1506,8 @@ void run(JNIEnv* env, jobject activity) {
                 glDisable(GL_SCISSOR_TEST);
                 const float eyeSign=eye==0?-1.f:1.f;
                 // Both controllers have independent visible pointers.
-                menu.draw(detachedEditor?vrui::Page::Immersive:page,
+                menu.draw((page==vrui::Page::Wall||detachedEditor)?
+                              vrui::Page::Immersive:page,
                           detachedEditor?-1:hovered,pointerX,pointerY,false,eyeSign);
                 if(!detachedTools && page==vrui::Page::AiDepth)menu.drawAiOverlay();
                 if(!detachedTools && !immersive && menu.advancedVisible)
