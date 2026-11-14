@@ -58,14 +58,69 @@ public final class VrActivity extends Activity {
     private final AtomicBoolean batchCancel=new AtomicBoolean(false);
     private volatile int pendingBatchView=0;
 
-    /** Bulk processing never changes the current editor image. */
+    private void openBatchDocumentPicker(){
+        Intent picker=new Intent(Intent.ACTION_OPEN_DOCUMENT)
+            .addCategory(Intent.CATEGORY_OPENABLE).setType("image/*")
+            .putExtra(Intent.EXTRA_ALLOW_MULTIPLE,true);
+        try{startActivityForResult(picker,BATCH_PICK);}
+        catch(android.content.ActivityNotFoundException e){
+            Toast.makeText(this,"No image picker available",Toast.LENGTH_LONG).show();
+        }
+    }
+
+    /** Persistent imported thumbnails are shown before the Android system picker.
+     *  Android's external document picker does not support per-file imported badges.
+     */
     @SuppressWarnings("unused")
     public void requestBatchImport(){
         runOnUiThread(()->{
-            Intent picker=new Intent(Intent.ACTION_OPEN_DOCUMENT)
-                .addCategory(Intent.CATEGORY_OPENABLE).setType("image/*")
-                .putExtra(Intent.EXTRA_ALLOW_MULTIPLE,true);
-            startActivityForResult(picker,BATCH_PICK);
+            File[] imported=BatchStore.importedImages(getApplicationContext());
+            if(imported.length==0){openBatchDocumentPicker();return;}
+            android.widget.LinearLayout list=new android.widget.LinearLayout(this);
+            list.setOrientation(android.widget.LinearLayout.VERTICAL);
+            int padding=(int)(12*getResources().getDisplayMetrics().density);
+            list.setPadding(padding,padding,padding,padding);
+            android.widget.TextView intro=new android.widget.TextView(this);
+            intro.setText(imported.length+" images already imported. Those images will be skipped if selected again.");
+            intro.setPadding(0,0,0,padding);
+            list.addView(intro);
+            // Bounded thumbnail decoding prevents large imported libraries from
+            // exhausting memory simply by opening the import chooser.
+            int shown=Math.min(imported.length,32);
+            for(int i=0;i<shown;i++){
+                File entry=imported[i];
+                android.widget.LinearLayout row=new android.widget.LinearLayout(this);
+                row.setOrientation(android.widget.LinearLayout.HORIZONTAL);
+                row.setPadding(0,4,0,4);
+                android.widget.ImageView thumbnail=new android.widget.ImageView(this);
+                android.graphics.BitmapFactory.Options options=new android.graphics.BitmapFactory.Options();
+                options.inSampleSize=8;
+                android.graphics.Bitmap preview=android.graphics.BitmapFactory.decodeFile(
+                    new File(entry,"source.png").getAbsolutePath(),options);
+                if(preview!=null)thumbnail.setImageBitmap(preview);
+                row.addView(thumbnail,new android.widget.LinearLayout.LayoutParams(
+                    (int)(72*getResources().getDisplayMetrics().density),
+                    (int)(72*getResources().getDisplayMetrics().density)));
+                android.widget.TextView label=new android.widget.TextView(this);
+                label.setText("  IMPORTED  -  "+BatchStore.importedName(entry));
+                label.setGravity(android.view.Gravity.CENTER_VERTICAL);
+                row.addView(label,new android.widget.LinearLayout.LayoutParams(
+                    0,(int)(72*getResources().getDisplayMetrics().density),1));
+                list.addView(row);
+            }
+            if(imported.length>shown){
+                android.widget.TextView more=new android.widget.TextView(this);
+                more.setText("And "+(imported.length-shown)+" more imported images");
+                list.addView(more);
+            }
+            android.widget.ScrollView scroll=new android.widget.ScrollView(this);
+            scroll.addView(list);
+            new android.app.AlertDialog.Builder(this)
+                .setTitle("Already imported")
+                .setView(scroll)
+                .setPositiveButton("SELECT MORE IMAGES",(dialog,which)->openBatchDocumentPicker())
+                .setNegativeButton("CANCEL",null)
+                .show();
         });
     }
     @SuppressWarnings("unused")
@@ -695,7 +750,7 @@ public final class VrActivity extends Activity {
                         batchCancel,p->reportBatchStatus(1,p,picked.size()));
                     reportBatchStatus(8,100,BatchStore.count(getApplicationContext()));
                     runOnUiThread(()->Toast.makeText(this,
-                        added+" new images imported into batch",
+                        added+" added, "+(picked.size()-added)+" already imported (skipped)",
                         Toast.LENGTH_LONG).show());
                 }catch(Exception e){
                     Log.e(TAG,"Bulk import failed",e);
