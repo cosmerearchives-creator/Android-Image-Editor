@@ -135,10 +135,14 @@ public final class AiDepth {
     }
     public static byte[] infer(Context ctx, AtomicBoolean cancel, IntConsumer status)
         throws Exception {
+        return infer(ctx,cancel,status,new File(ctx.getFilesDir(),"vr_import.png"));
+    }
+    public static byte[] infer(Context ctx, AtomicBoolean cancel, IntConsumer status,
+                               File photoFile) throws Exception {
         File model=ensureModel(ctx,cancel,status);
         checkCancel(cancel);
         Bitmap original=BitmapFactory.decodeFile(
-            new File(ctx.getFilesDir(),"vr_import.png").getAbsolutePath());
+            photoFile.getAbsolutePath());
         if(original==null)throw new IOException("Import an image before AI conversion");
         float[] input;
         try{input=inputFor(original);}finally{original.recycle();}
