@@ -58,7 +58,7 @@ public final class CollageStore {
     }
     private static JSONObject item(int id){
         JSONObject o=new JSONObject();
-        try{o.put("id",id);o.put("x",0.5);o.put("y",0.5);o.put("size",1.0);o.put("depth",0.5);}
+        try{o.put("id",id);o.put("x",0.5);o.put("y",0.5);o.put("size",1.0);o.put("depth",0.5);o.put("rotation",0.0);}
         catch(Exception e){throw new IllegalStateException(e);}
         return o;
     }
@@ -129,7 +129,8 @@ public final class CollageStore {
         compose(ctx,state);
     }
     // Action: 0 prev, 1 next, 2 left, 3 right, 4 up, 5 down,
-    // 6 smaller, 7 larger, 8 backward (layer depth), 9 forward.
+    // 6 smaller, 7 larger, 8 depth back, 9 depth forward,
+    // 12 rotate counterclockwise, 13 clockwise, 14 send behind, 15 bring forward.
     public static synchronized void edit(Context ctx,int action)throws Exception{
         JSONObject state=ensure(ctx);
         JSONArray items=state.getJSONArray("layers");
@@ -137,7 +138,20 @@ public final class CollageStore {
         active=Math.max(0,Math.min(total-1,active));
         if(action==0)active=(active+total-1)%total;
         else if(action==1)active=(active+1)%total;
-        else{
+        else if(action==14 || action==15){
+            int destination=active+(action==14?-1:1);
+            if(destination>=0 && destination<total){
+                JSONObject first=items.getJSONObject(active);
+                JSONObject second=items.getJSONObject(destination);
+                items.put(active,second);
+                items.put(destination,first);
+                active=destination;
+            }
+        } else if(action==12 || action==13){
+            JSONObject part=items.getJSONObject(active);
+            double degrees=part.optDouble("rotation",0)+(action==12?-15:15);
+            part.put("rotation",(degrees+360)%360);
+        } else{
             JSONObject part=items.getJSONObject(active);
             String key=action==2||action==3?"x":action==4||action==5?"y":
                        action==6||action==7?"size":"depth";
@@ -168,7 +182,7 @@ public final class CollageStore {
         for(int i=0;i<layers.length();i++){
             JSONObject entry=layers.getJSONObject(i);
             Bitmap src=BitmapFactory.decodeFile(layer(ctx,entry.getInt("id")).getPath());
-            if(src==null)continue;
+            if(src==null)throw new IOException("Missing collage layer image: "+entry.getInt("id"));
             try{
                 float scale=(float)entry.getDouble("size");
                 float cx=(float)entry.getDouble("x")*SIZE;
@@ -177,12 +191,19 @@ public final class CollageStore {
                 float w=scale*SIZE,h=scale*SIZE;
                 if(aspect>=1)h/=aspect;else w*=aspect;
                 RectF bounds=new RectF(cx-w/2,cy-h/2,cx+w/2,cy+h/2);
+                float angle=(float)entry.optDouble("rotation",0);
+                photoCanvas.save();
+                photoCanvas.rotate(angle,cx,cy);
                 photoCanvas.drawBitmap(src,null,bounds,paint);
+                photoCanvas.restore();
                 // A layer's alpha defines the area where its independent depth applies.
                 Bitmap coverage=Bitmap.createBitmap(256,256,Bitmap.Config.ARGB_8888);
                 Canvas mask=new Canvas(coverage);
                 RectF db=new RectF(bounds.left/4,bounds.top/4,bounds.right/4,bounds.bottom/4);
+                mask.save();
+                mask.rotate(angle,cx/4,cy/4);
                 mask.drawBitmap(src,null,db,paint);
+                mask.restore();
                 int[] pixels=new int[65536];coverage.getPixels(pixels,0,256,0,0,256,256);
                 int gray=Math.max(0,Math.min(255,(int)Math.round(entry.getDouble("depth")*255)));
                 Paint dp=new Paint();
