@@ -17,7 +17,7 @@ permissions:
 
 jobs:
   build:
-    if: github.event_name != 'workflow_dispatch' || !inputs.publish
+    if: (github.event_name != 'workflow_dispatch' || !inputs.publish) && !(github.event_name == 'push' && startsWith(github.event.head_commit.message, 'release:'))
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
@@ -27,7 +27,7 @@ jobs:
         run: bash scripts/ci-build.sh
 
   release:
-    if: github.event_name == 'workflow_dispatch' && inputs.publish && github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' && ((github.event_name == 'workflow_dispatch' && inputs.publish) || (github.event_name == 'push' && startsWith(github.event.head_commit.message, 'release:')))
     runs-on: ubuntu-24.04
     environment: stable-release
     concurrency:
