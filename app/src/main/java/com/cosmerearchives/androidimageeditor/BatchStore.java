@@ -47,8 +47,8 @@ public final class BatchStore {
         Arrays.sort(items,Comparator.comparing(File::getName));
         return items;
     }
-    public static synchronized int count(Context ctx){return entries(ctx).length;}
-    public static synchronized int converted(Context ctx){
+    public static int count(Context ctx){return entries(ctx).length;}
+    public static int converted(Context ctx){
         int result=0;
         for(File f:entries(ctx))if(new File(f,DEPTH).isFile())result++;
         return result;
@@ -105,7 +105,7 @@ public final class BatchStore {
         loaded.recycle();return smaller;
     }
     /** Duplicates are identified by the content of the locally decoded source. */
-    public static synchronized int importImages(Context ctx,List<Uri> sources,
+    public static int importImages(Context ctx,List<Uri> sources,
                                                  AtomicBoolean flag,IntConsumer progress)
         throws Exception{
         int added=0;
@@ -227,7 +227,7 @@ public final class BatchStore {
         drawTiles(ctx,list,canvas,width,height,columns,rows,depths,progress);
         return atlas;
     }
-    public static synchronized void build(Context ctx,boolean spherical,
+    public static void build(Context ctx,boolean spherical,
                                           IntConsumer progress)throws IOException{
         File output=spherical?sphere(ctx):wall(ctx);
         File outputDepth=spherical?sphereDepth(ctx):wallDepth(ctx);
@@ -252,7 +252,7 @@ public final class BatchStore {
             return out;
         }finally{image.recycle();}
     }
-    public static synchronized void openImage(Context ctx,int index)throws IOException{
+    public static void openImage(Context ctx,int index)throws IOException{
         File[] list=entries(ctx);
         if(index<0||index>=list.length)throw new IOException("Batch image not found");
         File source=new File(list[index],PHOTO);
@@ -272,7 +272,7 @@ public final class BatchStore {
         ctx.getSharedPreferences("vr_batch",0).edit().remove("active_id").apply();
     }
     /** Sync a manually edited batch image back to its cached depth. */
-    public static synchronized void syncActive(Context ctx)throws IOException{
+    public static void syncActive(Context ctx)throws IOException{
         String id=ctx.getSharedPreferences("vr_batch",0).getString("active_id",null);
         if(id==null)return;
         File folder=new File(root(ctx),id);
