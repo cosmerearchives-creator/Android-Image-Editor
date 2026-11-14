@@ -1352,9 +1352,6 @@ struct Renderer {
                     label(v,"INDEX TRIGGERS SCULPT",175,187,2,muted);
                 }
                 } // advanced controls
-                box(v,755,92,99,98,hovered==131?purpleHover:button);
-                label(v,advancedVisible?"X":"+",791,129,4,white);
-                label(v,advancedVisible?"HIDE":"TOOLS",773,101,2,white);
             } else if(page==Page::Mask){
                 // Photo occupies y=353..561. All controls stay outside it.
                 label(v,hasSelection()?"SELECTION ACTIVE":"SELECT AN OBJECT",176,565,2,muted);
@@ -1521,6 +1518,13 @@ struct Renderer {
             }
             box(v,170,92,684,98,hovered==3?purpleHover:purple);
             label(v,"BACK",440,121,4,white);
+            // Must be drawn AFTER the shared Back button, or the button
+            // would visually cover the reveal icon while still capturing it.
+            if(page==Page::Open){
+                box(v,755,92,99,98,hovered==131?purpleHover:button);
+                label(v,advancedVisible?"X":"+",791,129,4,white);
+                label(v,advancedVisible?"HIDE":"TOOLS",773,101,2,white);
+            }
         }
         glUseProgram(program);glBindVertexArray(vao);glBindBuffer(GL_ARRAY_BUFFER,vbo);
         glBufferData(GL_ARRAY_BUFFER,v.size()*sizeof(float),v.data(),GL_STREAM_DRAW);
