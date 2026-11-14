@@ -1035,6 +1035,9 @@ void run(JNIEnv* env, jobject activity) {
                 else if(page==vrui::Page::Open && hovered==70)page=vrui::Page::Collage;
                 else if(page==vrui::Page::Collage && hovered==82)page=vrui::Page::Open;
                 else if(page==vrui::Page::Collage && hovered==81)collagePicker(env,activity);
+                else if(page==vrui::Page::Collage && hovered>=83 && hovered<=86){
+                    collageCommand(env,activity,hovered-83+12);
+                }
                 else if(page==vrui::Page::Collage && hovered>=71 && hovered<=80){
                     collageCommand(env,activity,hovered-71);
                     if(hovered==71)menu.collageActive=menu.collageCount?
