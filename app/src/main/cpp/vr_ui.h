@@ -1647,7 +1647,7 @@ struct Renderer {
                     batchState==7?"EXPORT - CHOOSE A DESTINATION":
                     batchState==8?"IMAGES IMPORTED":"READY";
                 label(v,state,180,305,2,white);
-                if(batchState==1||batchState==2||batchState==3){
+                if(batchState==1||batchState==2||batchState==3||batchState==7){
                     box(v,180,276,655,12,{0.24f,0.20f,0.32f});
                     box(v,180,276,655.f*batchProgress/100.f,12,purpleHover);
                     const std::string percent=std::to_string(batchProgress)+"%";
