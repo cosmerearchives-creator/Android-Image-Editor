@@ -126,9 +126,11 @@ public final class BatchStore {
             }else temp.delete();
             progress.accept((i+1)*100/sources.size());
         }
-        // These contact sheets may be stale after new imports.
-        wall(ctx).delete();wallDepth(ctx).delete();
-        sphere(ctx).delete();sphereDepth(ctx).delete();
+        // Invalidate gallery atlases only if a genuinely new image arrived.
+        if(added>0){
+            wall(ctx).delete();wallDepth(ctx).delete();
+            sphere(ctx).delete();sphereDepth(ctx).delete();
+        }
         return added;
     }
     private static void saveGray(byte[] pixels,File out)throws IOException{
@@ -231,6 +233,10 @@ public final class BatchStore {
                                           IntConsumer progress)throws IOException{
         File output=spherical?sphere(ctx):wall(ctx);
         File outputDepth=spherical?sphereDepth(ctx):wallDepth(ctx);
+        if(output.isFile()&&outputDepth.isFile()){
+            progress.accept(100);
+            return;
+        }
         Bitmap photo=produce(ctx,spherical,false,p->
             progress.accept(Math.min(75,p*3/4)));
         try{savePng(photo,output);}finally{photo.recycle();}
