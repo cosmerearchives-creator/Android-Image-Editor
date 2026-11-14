@@ -1040,7 +1040,7 @@ void run(JNIEnv* env, jobject activity) {
             if(page==vrui::Page::Mask && triggerDown && !wasPressed &&
                pointer && !toolPointer &&
                menu.hasPhoto() && !dragging) {
-                menu.selectAt(pointerX,pointerY,!menu.maskSubtract);
+                menu.selectAt(pointerX,pointerY,!menu.maskSubtract,true);
             }
             // Drag strength sliders while holding the right trigger.
             const bool sliderAim=detachedTools?toolPointer:pointer;
@@ -1053,7 +1053,8 @@ void run(JNIEnv* env, jobject activity) {
             if(!triggerDown)activeSlider=-1;
             if(activeSlider>=0 && sliderAim && !dragging && !toolDragging)
                 menu.slideAt(activeSlider,sliderX,immersive);
-            if(triggerDown&&!wasPressed && !dragging && activeSlider<0 && hit>=20) {
+            if(triggerDown&&!wasPressed && !dragging && activeSlider<0 &&
+               ((hit>=20 && hit<=25) || (hit>=90 && hit<=99))) {
                 switch(hit) {
                     case 20: menu.stereoEnabled=!menu.stereoEnabled;break;
                     case 21:
