@@ -1277,9 +1277,11 @@ void run(JNIEnv* env, jobject activity) {
                 else if(page==vrui::Page::Gallery && hovered==152)
                     batchMethod(env,activity,"requestBatchView","(IZ)V",1,false);
                 else if(page==vrui::Page::Gallery && hovered==153){
-                    if(menu.galleryAvailable())
+                    // Only compile the optional shader after the user requests
+                    // a cylindrical room. A failure cannot break VR launch.
+                    if(menu.initializeGallery())
                         batchMethod(env,activity,"requestBatchView","(IZ)V",2,false);
-                    else menu.batchState=6;
+                    else batchState.store(9);
                 }
                 else if(page==vrui::Page::Gallery && hovered==154)
                     batchMethod(env,activity,"requestBatchExport","(Z)V",0,false);
@@ -1513,7 +1515,7 @@ void run(JNIEnv* env, jobject activity) {
                 // A faulty optional gallery shader must not strand the user in
                 // a black VR layer. Return to the standard functional UI.
                 page=vrui::Page::Gallery;
-                menu.batchState=6;
+                batchState.store(9);
                 log("Cylinder unavailable; staying in VR gallery menu");
             }
             {
