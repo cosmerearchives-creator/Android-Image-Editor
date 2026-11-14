@@ -125,6 +125,7 @@ inline int buttonAt(Page page,float x,float y) {
         return -1;
     } else if(page==Page::Curves){
         if(y>=36&&y<=105)return 91;
+        if(y>=116&&y<=186)return 111;
         const int rows[]={535,425,315,205};
         for(int i=0;i<4;i++)if(y>=rows[i]&&y<=rows[i]+70)return 92+i*2+(x>=512?1:0);
         return -1;
@@ -294,6 +295,8 @@ struct Renderer {
     }
     float disparityStrength=0.8f;
     float nearBoost=0.f,farPush=0.f,depthContrast=1.f,depthMidpoint=0.5f;
+    int gapFillMode=1; // 0 off, 1 conservative, 2 stronger; preview only
+    float gapFillStrength() const {return gapFillMode==2?1.f:gapFillMode==1?0.45f:0.f;}
     void adjustCurve(int button){
         const float sign=button%2?1.f:-1.f;
         switch((button-92)/2){
@@ -558,7 +561,7 @@ struct Renderer {
             }
         )";
         const char* photoFs=R"(#version 300 es
-            precision mediump float;
+            precision highp float;
             in vec2 uv;
             uniform sampler2D photograph;
             uniform sampler2D quickDepth;
@@ -571,6 +574,7 @@ struct Renderer {
              uniform float farPush;
              uniform float depthContrast;
              uniform float depthMidpoint;
+             uniform float gapFillStrength;
             out vec4 frag;
             // Stable inverse stereo warp for strong depth settings.
             // Keep the true depth center neutral to minimize unwanted drift.
@@ -628,9 +632,50 @@ struct Renderer {
                                 vec2(0.001),vec2(0.999));
                 float nextDepth=curveDepth(guidedDepth(next));
                 if(nextDepth>foreground+0.12)sampleUv=next;
-                // Avoid repeated sampling outside the photograph.
+                // Edge-gap compensation from nearby known background.
+                // This is not generative inpainting of hidden content.
                 sampleUv=clamp(sampleUv,vec2(0.001),vec2(0.999));
-                frag=texture(photograph,sampleUv);
+                vec3 result=texture(photograph,sampleUv).rgb;
+                if(gapFillStrength>0.0 && useQuickDepth==1 &&
+                   abs(eyeSign*depthStrength)>0.05){
+                    float stepX=1.0/float(textureSize(photograph,0).x);
+                    float depthStep=2.0/float(textureSize(quickDepth,0).x);
+                    float centerD=mapDepth(sampleUv);
+                    float leftD=mapDepth(sampleUv-vec2(depthStep,0.0));
+                    float rightD=mapDepth(sampleUv+vec2(depthStep,0.0));
+                    float edge=max(abs(centerD-leftD),abs(centerD-rightD));
+                    if(edge>0.075){
+                        float best=1.0;
+                        vec2 bestUv=sampleUv;
+                        float reach=max(stepX*2.0,
+                            min(0.032,abs(depthStrength)*0.015));
+                        for(int k=1;k<=6;k++){
+                            float offset=reach*(float(k)/6.0);
+                            for(int side=0;side<2;side++){
+                                float signX=side==0?-1.0:1.0;
+                                vec2 candidate=clamp(sampleUv+
+                                    vec2(signX*offset,0.0),
+                                    vec2(0.001),vec2(0.999));
+                                float d=mapDepth(candidate);
+                                float backgroundGain=centerD-d;
+                                if(backgroundGain>0.09){
+                                    float score=offset/reach-3.0*backgroundGain;
+                                    if(score<best){
+                                        best=score;
+                                        bestUv=candidate;
+                                    }
+                                }
+                            }
+                        }
+                        if(best<1.0){
+                            float amount=gapFillStrength*
+                                smoothstep(0.075,0.22,edge)*0.8;
+                            result=mix(result,texture(photograph,bestUv).rgb,
+                                       amount);
+                        }
+                    }
+                }
+                frag=vec4(result,1.0);
                 if(hasSelection==1 && texture(selectionMask,sampleUv).r>0.5)
                     frag.rgb=mix(frag.rgb,vec3(0.35,0.25,0.85),0.32);
             }
@@ -714,6 +759,7 @@ struct Renderer {
         glUniform1f(glGetUniformLocation(photoProgram,"farPush"),farPush);
         glUniform1f(glGetUniformLocation(photoProgram,"depthContrast"),depthContrast);
         glUniform1f(glGetUniformLocation(photoProgram,"depthMidpoint"),depthMidpoint);
+        glUniform1f(glGetUniformLocation(photoProgram,"gapFillStrength"),gapFillStrength());
         glActiveTexture(GL_TEXTURE0);
         glBindTexture(GL_TEXTURE_2D,photoTexture);
         glActiveTexture(GL_TEXTURE1);
@@ -862,7 +908,11 @@ struct Renderer {
                     const std::string value=std::to_string(int(vals[i]*100.f))+" PCT";
                     label(v,value.c_str(),648,y+80,2,white);
                 }
-                label(v,"DEPTH CURVES AFFECT PREVIEW ONLY",181,142,2,muted);
+                box(v,170,116,684,70,hovered==111?purpleHover:button);
+                const char* fill=gapFillMode==0?"GAP FILL OFF":
+                    gapFillMode==1?"GAP FILL LOW":"GAP FILL HIGH";
+                label(v,fill,288,137,3,white);
+                label(v,"PREVIEW ONLY - NOT AI INPAINTING",181,96,2,muted);
             } else if(page==Page::Collage){
                 const std::string count="LAYER "+std::to_string(collageCount?collageActive+1:0)+
                     " OF "+std::to_string(collageCount);
