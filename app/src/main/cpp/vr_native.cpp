@@ -1283,8 +1283,15 @@ void run(JNIEnv* env, jobject activity) {
                 else if(page==vrui::Page::Gallery && hovered==156 &&
                         batchState.load()==5)
                     batchMethod(env,activity,"confirmLargeBatchView","()V");
-                else if(page==vrui::Page::Open && hovered>=132&&hovered<=134)
+                else if(page==vrui::Page::Open && hovered>=132&&hovered<=134){
                     menu.depthStyle=hovered-132;
+                    if(menu.hasPhoto()){
+                        if(!menu.hasDepthPixels()&&aiDepthState.load()!=1&&
+                           aiDepthState.load()!=2)
+                            aiControl(env,activity,"requestAutoConvert");
+                        else if(menu.hasDepthPixels())menu.stereoEnabled=true;
+                    }
+                }
                 else if(page==vrui::Page::Open && hovered==131){
                     menu.advancedVisible=!menu.advancedVisible;
                     menu.brushMode=false;
