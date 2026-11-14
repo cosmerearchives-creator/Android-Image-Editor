@@ -687,6 +687,7 @@ struct Renderer {
     }
     bool advancedVisible=false;
     bool immersiveToolsVisible=false;
+    bool selectionOverlayVisible=false;
     bool brushMode=false;
     bool painting=false;
     bool paintingLeft=false;
@@ -1210,7 +1211,7 @@ struct Renderer {
         glUniform1i(glGetUniformLocation(photoProgram,"photograph"),0);
         glUniform1i(glGetUniformLocation(photoProgram,"quickDepth"),1);
         glUniform1i(glGetUniformLocation(photoProgram,"selectionMask"),2);
-        glUniform1i(glGetUniformLocation(photoProgram,"hasSelection"),hasSelection()?1:0);
+        glUniform1i(glGetUniformLocation(photoProgram,"hasSelection"),hasSelection()&&selectionOverlayVisible?1:0);
         glUniform1i(glGetUniformLocation(photoProgram,"useQuickDepth"),hasQuickDepth()?1:0);
         glUniform1f(glGetUniformLocation(photoProgram,"eyeSign"),eyeSign);
         glUniform1f(glGetUniformLocation(photoProgram,"depthStrength"),depthStrength());
