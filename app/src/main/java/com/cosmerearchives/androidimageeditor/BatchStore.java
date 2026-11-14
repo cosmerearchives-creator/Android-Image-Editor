@@ -49,20 +49,19 @@ public final class BatchStore {
     }
     private static final String DISPLAY_NAME="import_name.txt";
     private static final String SOURCE_URI="import_uri.txt";
-    public static boolean wasImported(Context ctx,Uri source){
-        if(source==null)return false;
-        String value=source.toString();
+    public static java.util.Set<String> importedUris(Context ctx){
+        java.util.HashSet<String> ids=new java.util.HashSet<>();
         for(File entry:entries(ctx)){
             File record=new File(entry,SOURCE_URI);
             if(!record.isFile())continue;
             try(InputStream in=new FileInputStream(record)){
                 byte[] data=new byte[(int)Math.min(4096,record.length())];
                 int read=in.read(data);
-                if(read>0 && value.equals(new String(data,0,read,
-                    java.nio.charset.StandardCharsets.UTF_8)))return true;
+                if(read>0)ids.add(new String(data,0,read,
+                    java.nio.charset.StandardCharsets.UTF_8));
             }catch(IOException ignored){}
         }
-        return false;
+        return ids;
     }
     private static void saveSourceUri(Uri source,File entry){
         try(FileOutputStream out=new FileOutputStream(new File(entry,SOURCE_URI))){
