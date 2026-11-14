@@ -81,7 +81,7 @@ inline void label(std::vector<float>& v,const char* s,int x,int y,int scale,Colo
                         float(scale),float(scale),color);
     }
 }
-inline int buttonAt(Page page,float x,float y) {
+inline int buttonAt(Page page,float x,float y,bool advancedVisible=true) {
     if(x<170||x>854) return -1;
     if(page==Page::Home) {
         if(y>=444&&y<=540)return 0;
@@ -89,6 +89,15 @@ inline int buttonAt(Page page,float x,float y) {
         if(y>=186&&y<=282)return 2;
         if(y>=58&&y<=154)return 11;
     } else if (page==Page::Open) {
+        // Always-visible reveal icon in the top-right corner.
+        if(y>=92&&y<=190&&x>=755)return 131;
+        if(!advancedVisible){
+            if(y>=590&&y<=650)return 130; // one-click AI conversion
+            if(y>=665&&y<=715)return 14; // save current work
+            if(y>=205&&y<=291)return x<512?4:8;
+            if(y>=92&&y<=190)return 3; // back
+            return -1;
+        }
         if(y>=730&&y<=765)return x<512?70:90;
         if(y>=590&&y<=650)return x<390?60:x<610?61:62;
         if(y>=665&&y<=715) {
@@ -676,6 +685,8 @@ struct Renderer {
         selectionMode=false;
         return true;
     }
+    bool advancedVisible=false;
+    bool immersiveToolsVisible=false;
     bool brushMode=false;
     bool painting=false;
     bool paintingLeft=false;
@@ -725,6 +736,10 @@ struct Renderer {
     // Coordinates use that quad's 1024x768 logical UI space.
     int toolbarAt(float x,float y,bool immersive) const {
         if(immersive){
+            // Closed immersive panel exposes exactly one reveal icon.
+            if(!immersiveToolsVisible)
+                return x>=860&&x<=1008&&y>=660&&y<=752?34:-1;
+            if(x>=860&&x<=1008&&y>=620&&y<=657)return 34;
             if(x<16||x>1008||y<16||y>752)return -1;
             if(y>=660)return 28;
             if(y>=515&&y<=615){
@@ -1266,6 +1281,27 @@ struct Renderer {
             if(page!=Page::Open && page!=Page::Mask)
                 label(v,title,512-n*15,page==Page::Projects?630:475,5,white);
             if(page==Page::Open) {
+                if(!advancedVisible){
+                    box(v,170,590,684,60,hovered==130?purpleHover:purple);
+                    label(v,aiState==1?"AI MODEL DOWNLOADING":
+                        aiState==2?"AI CONVERTING":
+                        aiState==6?"AI 3D READY":
+                        aiState==7?"DEPTH READY - SUBJECT FAILED":
+                        "AI CONVERT - ONE CLICK",190,608,3,white);
+                    if(aiState==1||aiState==2){
+                        const std::string progress="PROGRESS "+std::to_string(aiPercent)+"%";
+                        label(v,progress.c_str(),628,573,2,muted);
+                    }
+                    if(aiState==4)label(v,"AI CONVERSION FAILED - TRY AGAIN",180,562,2,muted);
+                    box(v,170,665,684,50,hovered==14?purpleHover:button);
+                    label(v,"SAVE PROJECT",370,680,3,white);
+                    box(v,170,205,330,86,hovered==4?purpleHover:button);
+                    label(v,"IMPORT IMAGE",213,235,3,white);
+                    box(v,524,205,330,86,hovered==8?purpleHover:button);
+                    label(v,"IMMERSIVE VIEW",545,235,3,white);
+                    label(v,hasPhoto()?"IMAGE READY":"IMPORT AN IMAGE TO BEGIN",
+                          182,562,2,muted);
+                }else{
                 box(v,170,665,215,50,hovered==14?purpleHover:button);
                 label(v,"SAVE PROJECT",184,678,2,white);
                 box(v,395,665,215,50,hovered==15?purpleHover:button);
@@ -1314,6 +1350,10 @@ struct Renderer {
                 if(hasPhoto()) {
                     label(v,"INDEX TRIGGERS SCULPT",175,187,2,muted);
                 }
+                } // advanced controls
+                box(v,755,92,99,98,hovered==131?purpleHover:button);
+                label(v,advancedVisible?"X":"+",791,129,4,white);
+                label(v,advancedVisible?"HIDE":"TOOLS",773,101,2,white);
             } else if(page==Page::Mask){
                 // Photo occupies y=353..561. All controls stay outside it.
                 label(v,hasSelection()?"SELECTION ACTIVE":"SELECT AN OBJECT",176,565,2,muted);
@@ -1526,6 +1566,14 @@ struct Renderer {
     }
     void drawFloatingTools(int hover,float pointerX,float pointerY,bool pointer) {
         std::vector<float> v;
+        if(!immersiveToolsVisible){
+            box(v,860,660,148,92,hover==34?purpleHover:purple);
+            label(v,"TOOLS +",878,695,2,white);
+            submitUi(v);
+            return;
+        }
+        box(v,860,620,148,37,hover==34?purpleHover:purple);
+        label(v,"HIDE X",882,628,2,white);
         box(v,0,0,1024,768,{0.075f,0.055f,0.13f});
         box(v,16,657,992,101,hover==28?purpleHover:purple);
         label(v,"MOVE PANEL - HOLD GRIP",92,693,4,white);
