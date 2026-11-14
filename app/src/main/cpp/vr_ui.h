@@ -212,6 +212,7 @@ struct Renderer {
         selectionMask=std::move(next);
         uploadMask();
     }
+    void selectAllMask(){selectionMask.assign(65536u,255);uploadMask();}
     void smoothMask(){
         if(!hasSelection())return;
         std::vector<uint8_t> next(selectionMask.size(),0);
@@ -768,10 +769,11 @@ struct Renderer {
             const char* title=page==Page::Open?"OPEN IMAGE":
                 page==Page::Projects?"MY PROJECTS":
                 page==Page::AiDepth?"AI DEPTH":
+                page==Page::Mask?"REFINE SELECTION":
                 page==Page::Collage?"COLLAGE LAYERS":
                 page==Page::Curves?"DEPTH CURVES":"VIEW GALLERY";
             int n=static_cast<int>(std::strlen(title));
-            if(page!=Page::Open)
+            if(page!=Page::Open && page!=Page::Mask)
                 label(v,title,512-n*15,page==Page::Projects?630:475,5,white);
             if(page==Page::Open) {
                 box(v,170,665,215,50,hovered==14?purpleHover:button);
@@ -787,7 +789,7 @@ struct Renderer {
                 box(v,518,730,336,36,hovered==90?purpleHover:purple);
                 label(v,"DEPTH CURVES",596,738,2,white);
                 box(v,170,590,210,58,hovered==60?purpleHover:(selectionMode?purple:button));
-                label(v,selectionMode?"PICK AREA":"SELECT AREA",184,610,2,white);
+                label(v,"REFINE MASK",184,610,2,white);
                 box(v,390,590,210,58,hovered==61?purpleHover:button);
                 label(v,"CLEAR MASK",404,610,2,hasSelection()?white:muted);
                 box(v,610,590,244,58,hovered==62?purpleHover:button);
@@ -822,6 +824,28 @@ struct Renderer {
                 if(hasPhoto()) {
                     label(v,"INDEX TRIGGERS SCULPT",175,187,2,muted);
                 }
+            } else if(page==Page::Mask){
+                // Photo occupies y=353..561. All controls stay outside it.
+                label(v,hasSelection()?"SELECTION ACTIVE":"SELECT AN OBJECT",176,565,2,muted);
+                const std::string tolerance="TOLERANCE "+std::to_string(maskTolerance);
+                label(v,tolerance.c_str(),610,565,2,muted);
+                box(v,170,665,330,50,hovered==100?purpleHover:
+                    !maskSubtract?purple:button);
+                label(v,"ADD REGION",191,680,3,white);
+                box(v,524,665,330,50,hovered==101?purpleHover:
+                    maskSubtract?purple:button);
+                label(v,"REMOVE REGION",543,680,3,white);
+                const char* operations[]={"LESS COLOR","MORE COLOR","EXPAND","CONTRACT",
+                    "SMOOTH","INVERT","CLEAR","SELECT ALL"};
+                for(int i=0;i<8;i++){
+                    const int x=170+(i%4)*172;
+                    const int y=i<4?590:205;
+                    box(v,float(x),float(y),164,i<4?58:86,
+                        hovered==102+i?purpleHover:button);
+                    label(v,operations[i],x+8,y+(i<4?20:35),2,white);
+                }
+                box(v,170,36,684,52,hovered==110?purpleHover:purple);
+                label(v,"DONE - RETURN TO EDITOR",270,53,2,white);
             } else if(page==Page::Curves){
                 box(v,170,36,684,69,hovered==91?purpleHover:purple);
                 label(v,"BACK TO EDITOR",303,57,3,white);
@@ -918,7 +942,7 @@ struct Renderer {
         glBufferData(GL_ARRAY_BUFFER,v.size()*sizeof(float),v.data(),GL_STREAM_DRAW);
         glDrawArrays(GL_TRIANGLES,0,static_cast<GLsizei>(v.size()/5));
         glBindVertexArray(0);
-        if((page==Page::Open||page==Page::AiDepth||page==Page::Collage) && hasPhoto()) drawPhoto(eyeSign);
+        if((page==Page::Open||page==Page::AiDepth||page==Page::Collage||page==Page::Mask) && hasPhoto()) drawPhoto(eyeSign);
     }
     void submitUi(const std::vector<float>& triangles) {
         if(triangles.empty())return;
