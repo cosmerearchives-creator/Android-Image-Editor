@@ -18,7 +18,7 @@ struct Color {float r,g,b;};
 constexpr Color white{0.96f,0.95f,1.0f}, muted{0.67f,0.63f,0.76f},
     purple{0.34f,0.22f,0.52f}, purpleHover{0.52f,0.36f,0.76f},
     panel{0.095f,0.075f,0.14f}, button{0.17f,0.14f,0.25f};
-enum class Page {Home, Open, Projects, Gallery, Immersive, AiDepth, Collage, Curves, Mask};
+enum class Page {Home, Open, Projects, Gallery, Immersive, AiDepth, Collage, Curves, Mask, Wall, Sphere};
 inline void box(std::vector<float>& vertices,float x,float y,float w,float h,Color c) {
     float a[6][2]={{x,y},{x+w,y},{x,y+h},{x+w,y},{x+w,y+h},{x,y+h}};
     for(auto& p:a) {vertices.push_back(p[0]);vertices.push_back(p[1]);
@@ -83,6 +83,14 @@ inline void label(std::vector<float>& v,const char* s,int x,int y,int scale,Colo
 }
 inline int buttonAt(Page page,float x,float y,bool advancedVisible=true) {
     if(x<170||x>854) return -1;
+    if(page==Page::Gallery){
+        if(y>=580&&y<=660)return x<512?150:151;
+        if(y>=470&&y<=550)return x<512?152:153;
+        if(y>=360&&y<=440)return x<512?154:155;
+        if(y>=240&&y<=330)return 156;
+        if(y>=92&&y<=190)return 3;
+        return -1;
+    }
     if(page==Page::Home) {
         if(y>=444&&y<=540)return 0;
         if(y>=315&&y<=411)return 1;
@@ -92,6 +100,7 @@ inline int buttonAt(Page page,float x,float y,bool advancedVisible=true) {
         // Always-visible reveal icon in the top-right corner.
         if(y>=92&&y<=190&&x>=755)return 131;
         if(!advancedVisible){
+            if(y>=300&&y<=385)return x<395?132:x<615?133:134;
             if(y>=590&&y<=650)return 130; // one-click AI conversion
             if(y>=665&&y<=715)return 14; // save current work
             if(y>=205&&y<=291)return x<512?4:8;
@@ -685,6 +694,8 @@ struct Renderer {
         selectionMode=false;
         return true;
     }
+    int depthStyle=0; // 0 natural, 1 exaggerated, 2 inverted - display transform only
+    int batchState=0,batchProgress=0,batchCount=0,batchConverted=0;
     bool advancedVisible=false;
     bool immersiveToolsVisible=false;
     bool selectionOverlayVisible=false;
@@ -1013,6 +1024,7 @@ struct Renderer {
              uniform float depthContrast;
              uniform float depthMidpoint;
              uniform float gapFillStrength;
+             uniform int invertDepth;
             out vec4 frag;
             // Stable inverse stereo warp for strong depth settings.
             // Keep the true depth center neutral to minimize unwanted drift.
@@ -1046,6 +1058,7 @@ struct Renderer {
                 return sum/weight;
             }
             float curveDepth(float d){
+                if(invertDepth==1)d=1.0-d;
                 float delta=(d-depthMidpoint)*depthContrast;
                 delta=delta>=0.0?delta*(1.0+nearBoost):delta*(1.0+farPush);
                 return clamp(depthMidpoint+delta,0.0,1.0);
@@ -1214,7 +1227,10 @@ struct Renderer {
         glUniform1i(glGetUniformLocation(photoProgram,"hasSelection"),hasSelection()&&selectionOverlayVisible?1:0);
         glUniform1i(glGetUniformLocation(photoProgram,"useQuickDepth"),hasQuickDepth()?1:0);
         glUniform1f(glGetUniformLocation(photoProgram,"eyeSign"),eyeSign);
-        glUniform1f(glGetUniformLocation(photoProgram,"depthStrength"),depthStrength());
+        glUniform1f(glGetUniformLocation(photoProgram,"depthStrength"),
+                    depthStrength()*(depthStyle==1?1.7f:1.f));
+        glUniform1i(glGetUniformLocation(photoProgram,"invertDepth"),
+                    depthStyle==2?1:0);
         glUniform1f(glGetUniformLocation(photoProgram,"nearBoost"),nearBoost);
         glUniform1f(glGetUniformLocation(photoProgram,"farPush"),farPush);
         glUniform1f(glGetUniformLocation(photoProgram,"depthContrast"),depthContrast);
@@ -1283,6 +1299,13 @@ struct Renderer {
                 label(v,title,512-n*15,page==Page::Projects?630:475,5,white);
             if(page==Page::Open) {
                 if(!advancedVisible){
+                    const char* depthNames[]={"NATURAL","EXAGGERATED","INVERTED"};
+                    for(int i=0;i<3;i++){
+                        const float x=170.f+i*230.f;
+                        box(v,x,315,220,70,hovered==132+i?purpleHover:
+                            depthStyle==i?purple:button);
+                        label(v,depthNames[i],int(x+16),339,2,white);
+                    }
                     box(v,170,590,684,60,hovered==130?purpleHover:purple);
                     label(v,aiState==1?"AI MODEL DOWNLOADING":
                         aiState==2?"AI CONVERTING":
@@ -1493,6 +1516,38 @@ struct Renderer {
                 label(v,"APPLY",460,234,2,aiPreview?white:muted);
                 box(v,629,205,225,86,hovered==52?purpleHover:button);
                 label(v,aiState==1||aiState==2?"CANCEL":"DISCARD",646,234,2,white);
+            } else if(page==Page::Gallery){
+                const char* actions[]={"BULK IMPORT","CONVERT MISSING",
+                    "VIEW WALL","VIEW SPHERE","EXPORT WALL","EXPORT SPHERE"};
+                const int ids[]={150,151,152,153,154,155};
+                for(int i=0;i<6;i++){
+                    const int x=i%2==0?170:524;
+                    const int y=i<2?580:i<4?470:360;
+                    box(v,float(x),float(y),330,80,hovered==ids[i]?purpleHover:button);
+                    label(v,actions[i],x+18,y+26,2,white);
+                }
+                const std::string countText="IMAGES "+std::to_string(batchCount)+
+                     "   CACHED "+std::to_string(batchConverted);
+                label(v,countText.c_str(),180,682,3,muted);
+                const char* state=batchState==1?"IMPORTING IMAGES":
+                    batchState==2?"AI CONVERTING IMAGES":
+                    batchState==3?"BUILDING GALLERY":
+                    batchState==4?"GALLERY READY":
+                    batchState==5?"LARGE GALLERY - POSSIBLE SLOWDOWN":
+                    batchState==6?"BULK OPERATION FAILED":
+                    batchState==7?"EXPORT - CHOOSE A DESTINATION":
+                    batchState==8?"IMAGES IMPORTED":"READY";
+                label(v,state,180,305,2,white);
+                if(batchState==1||batchState==2||batchState==3){
+                    box(v,180,276,655,12,{0.24f,0.20f,0.32f});
+                    box(v,180,276,655.f*batchProgress/100.f,12,purpleHover);
+                    const std::string percent=std::to_string(batchProgress)+"%";
+                    label(v,percent.c_str(),782,296,2,muted);
+                }
+                box(v,170,208,684,54,hovered==156?purpleHover:
+                    batchState==5?purple:button);
+                label(v,batchState==5?"CONFIRM VIEW OVER 16 IMAGES":
+                    "WARN ABOVE 16 IMAGES",192,223,2,white);
             } else if(page==Page::Projects) {
                 const int ys[]={495,405,315,225};
                 for(int i=0;i<4;i++){
