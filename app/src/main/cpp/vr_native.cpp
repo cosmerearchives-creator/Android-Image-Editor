@@ -1117,6 +1117,8 @@ void run(JNIEnv* env, jobject activity) {
                         case 108:menu.clearMask();break;
                         case 109:menu.selectAllMask();break;
                     }
+                } else if(page==vrui::Page::Mask && hovered==115){
+                    menu.autoMaskStatus=menu.autoForegroundMask()?1:2;
                 } else if(page==vrui::Page::Mask &&
                     (hovered==112||hovered==113||hovered==114)){
                     if(hovered==112)menu.depthGuidedSelection=!menu.depthGuidedSelection;
