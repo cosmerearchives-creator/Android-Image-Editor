@@ -1028,6 +1028,11 @@ void run(JNIEnv* env, jobject activity) {
                     case 23: menu.edgeAware=!menu.edgeAware;break;
                     case 24: if(menu.undoDepth())saveEditedDepth(env,activity,menu.depthCpu);break;
                     case 25: if(menu.redoDepth())saveEditedDepth(env,activity,menu.depthCpu);break;
+                    case 90: if(page==vrui::Page::Open) page=vrui::Page::Curves;break;
+                    case 91: if(page==vrui::Page::Curves) page=vrui::Page::Open;break;
+                    case 92:case 93:case 94:case 95:case 96:case 97:case 98:case 99:
+                        if(page==vrui::Page::Curves)menu.adjustCurve(hit);
+                        break;
                     default:break;
                 }
             } else if(triggerDown&&!wasPressed && !dragging && activeSlider<0 &&
