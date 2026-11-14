@@ -937,6 +937,8 @@ struct Renderer {
                 label(v,"DEPTH +",704,326,2,white);
                 const std::string depthInfo="DEPTH TOLERANCE "+std::to_string(maskDepthTolerance);
                 label(v,depthInfo.c_str(),176,373,2,muted);
+                if(depthGuidedSelection&&!hasDepthPixels())
+                    label(v,"CREATE OR APPLY DEPTH FIRST",176,391,2,muted);
                 box(v,170,36,684,52,hovered==110?purpleHover:purple);
                 label(v,"DONE - RETURN TO EDITOR",270,53,2,white);
             } else if(page==Page::Curves){
