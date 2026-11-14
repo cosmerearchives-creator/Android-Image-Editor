@@ -1345,6 +1345,9 @@ void run(JNIEnv* env, jobject activity) {
                 }
                 if(!mask.empty())menu.applyAiMask(mask);
             }
+            menu.selectionOverlayVisible=page==vrui::Page::Mask ||
+                (page==vrui::Page::Open&&menu.advancedVisible) ||
+                (page==vrui::Page::Immersive&&menu.immersiveToolsVisible);
             glDisable(GL_DEPTH_TEST);
             glDisable(GL_BLEND);
             for(int eye=0;eye<2;++eye) {
