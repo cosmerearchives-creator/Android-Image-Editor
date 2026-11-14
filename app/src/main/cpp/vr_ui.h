@@ -912,7 +912,7 @@ struct Renderer {
                 const char* fill=gapFillMode==0?"GAP FILL OFF":
                     gapFillMode==1?"GAP FILL LOW":"GAP FILL HIGH";
                 label(v,fill,288,137,3,white);
-                label(v,"PREVIEW ONLY - NOT AI INPAINTING",181,96,2,muted);
+                label(v,"PREVIEW ONLY - NOT AI INPAINTING",190,120,1,muted);
             } else if(page==Page::Collage){
                 const std::string count="LAYER "+std::to_string(collageCount?collageActive+1:0)+
                     " OF "+std::to_string(collageCount);
