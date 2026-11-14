@@ -1183,6 +1183,11 @@ struct Renderer {
         glVertexAttribPointer(2,2,GL_FLOAT,GL_FALSE,4*sizeof(float),
             reinterpret_cast<const void*>(2*sizeof(float)));
         glBindVertexArray(0);
+        // The default VR startup no longer compiles experimental gallery code.
+        return true;
+    }
+    bool initializeGallery(){
+        if(sphereProgram)return true;
         // Bounded cylindrical gallery: azimuth walls, planar ceiling/floor.
         const char* sphereFs=R"(#version 300 es
 precision highp float;
@@ -1269,7 +1274,7 @@ void main(){
         if(!sphereProgram)
             __android_log_print(ANDROID_LOG_ERROR,"ImageEditorXR",
                 "Cylinder renderer unavailable: stable VR editor remains enabled");
-        return true;
+        return sphereProgram!=0;
     }
     void uploadSphere(const std::vector<uint8_t>& rgba,int width,int height){
         if(width<1||height<1||width>4096||height>4096||
@@ -1704,7 +1709,8 @@ void main(){
                     batchState==5?"LARGE GALLERY - POSSIBLE SLOWDOWN":
                     batchState==6?"BULK OPERATION FAILED":
                     batchState==7?"EXPORT - CHOOSE A DESTINATION":
-                    batchState==8?"IMAGES IMPORTED":"READY";
+                    batchState==8?"IMAGES IMPORTED":
+                    batchState==9?"GALLERY RENDERER UNAVAILABLE":"READY";
                 label(v,state,180,305,2,white);
                 if(batchState==1||batchState==2||batchState==3||batchState==7){
                     box(v,180,276,655,12,{0.24f,0.20f,0.32f});
