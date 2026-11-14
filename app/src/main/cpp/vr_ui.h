@@ -243,7 +243,15 @@ struct Renderer {
         glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_S,GL_CLAMP_TO_EDGE);
         glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_T,GL_CLAMP_TO_EDGE);
         glPixelStorei(GL_UNPACK_ALIGNMENT,1);
-        glTexImage2D(GL_TEXTURE_2D,0,GL_R8,MASK_EDGE,MASK_EDGE,0,GL_RED,GL_UNSIGNED_BYTE,selectionMask.data());
+        // CPU masks are image/top-row-first (matching photoRgb and AI output).
+        // GL texture row 0 is the bottom. Flip only at the upload boundary,
+        // not in hitPhoto(), so controller aim and selection logic agree.
+        std::vector<uint8_t> gpuMask(selectionMask.size());
+        for(int y=0;y<MASK_EDGE;++y)
+            std::copy_n(selectionMask.data()+size_t(y)*MASK_EDGE,MASK_EDGE,
+                        gpuMask.data()+size_t(MASK_EDGE-1-y)*MASK_EDGE);
+        glTexImage2D(GL_TEXTURE_2D,0,GL_R8,MASK_EDGE,MASK_EDGE,0,GL_RED,
+                     GL_UNSIGNED_BYTE,gpuMask.data());
         glBindTexture(GL_TEXTURE_2D,0);
         glActiveTexture(GL_TEXTURE0);
     }
@@ -282,13 +290,15 @@ struct Renderer {
         if(!selectionTexture){uploadMask();return true;}
         const int width=xb-xa+1,height=yb-ya+1;
         std::vector<uint8_t> patch(size_t(width)*height);
+        // Same row flip as full mask uploads: first GL patch row is
+        // the bottom-most image row. Keep both paths consistent.
         for(int row=0;row<height;++row)
-            std::copy_n(selectionMask.data()+size_t(ya+row)*MASK_EDGE+size_t(xa),
+            std::copy_n(selectionMask.data()+size_t(yb-row)*MASK_EDGE+size_t(xa),
                         width,patch.data()+size_t(row)*width);
         glActiveTexture(GL_TEXTURE2);
         glBindTexture(GL_TEXTURE_2D,selectionTexture);
         glPixelStorei(GL_UNPACK_ALIGNMENT,1);
-        glTexSubImage2D(GL_TEXTURE_2D,0,xa,ya,width,height,
+        glTexSubImage2D(GL_TEXTURE_2D,0,xa,MASK_EDGE-1-yb,width,height,
                         GL_RED,GL_UNSIGNED_BYTE,patch.data());
         glBindTexture(GL_TEXTURE_2D,0);
         glActiveTexture(GL_TEXTURE0);
