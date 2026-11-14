@@ -375,6 +375,8 @@ public final class VrActivity extends Activity {
         updateWorker.shutdownNow();
         aiCancel.set(true);
         aiWorker.shutdownNow();
+        segmentCancel.set(true);
+        segmentWorker.shutdownNow();
         super.onDestroy();
     }
 
