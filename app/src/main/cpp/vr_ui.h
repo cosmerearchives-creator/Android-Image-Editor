@@ -214,7 +214,7 @@ struct Renderer {
         selectionMask=std::move(next);
         uploadMask();
     }
-    void selectAllMask(){selectionMask.assign(size_t(MASK_EDGE)*MASK_EDGE,MASK_EDGE-1);uploadMask();}
+    void selectAllMask(){selectionMask.assign(size_t(MASK_EDGE)*MASK_EDGE,255);uploadMask();}
     void smoothMask(){
         if(!hasSelection())return;
         std::vector<uint8_t> next(selectionMask.size(),0);
@@ -459,11 +459,20 @@ struct Renderer {
             if(value!=int(depthCpu[i])){depthCpu[i]=static_cast<uint8_t>(value);edited=true;}
         }
         if(edited){
+            // Upload only the small edited rectangle, not the entire 1 MiB
+            // depth map for every interpolated brush sample.
+            const int width=xb-xa+1,height=yb-ya+1;
+            std::vector<uint8_t> patch(size_t(width)*height);
+            for(int row=0;row<height;++row){
+                const uint8_t* source=depthCpu.data()+
+                    size_t(ya+row)*DEPTH_EDGE+size_t(xa);
+                std::copy_n(source,width,patch.data()+size_t(row)*width);
+            }
             glActiveTexture(GL_TEXTURE1);
             glBindTexture(GL_TEXTURE_2D,depthTexture);
             glPixelStorei(GL_UNPACK_ALIGNMENT,1);
-            glTexSubImage2D(GL_TEXTURE_2D,0,0,0,DEPTH_EDGE,DEPTH_EDGE,GL_RED,
-                            GL_UNSIGNED_BYTE,depthCpu.data());
+            glTexSubImage2D(GL_TEXTURE_2D,0,xa,ya,width,height,GL_RED,
+                            GL_UNSIGNED_BYTE,patch.data());
             glBindTexture(GL_TEXTURE_2D,0);
             glActiveTexture(GL_TEXTURE0);
         }
