@@ -4,6 +4,8 @@
 #include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <queue>
+#include <limits>
 #include <vector>
 #include <string>
 #include <GLES3/gl3.h>
@@ -178,7 +180,9 @@ struct Renderer {
     int collageCount=0,collageActive=0;
     bool selectionMode=false;
     bool maskSubtract=false;
-    int maskToolMode=0; // 0 paint, 1 smart color/depth, 2 isolate, 3 object tap
+    int maskToolMode=0; // 0 paint, 1 smart, 2 isolate, 3 object, 4 two-tap split
+    int splitKeepSeed=-1;
+    int splitStatus=0; // 0 ready, 1 pick second seed, 2 split applied, 3 unable
     float maskBrushRadius=28.f;
     std::vector<std::vector<uint8_t>> maskUndo,maskRedo;
     std::vector<uint8_t> maskStrokeBefore;
@@ -412,6 +416,103 @@ struct Renderer {
         selectionMask.assign(count,0);
         for(int pixel:winner)selectionMask[size_t(pixel)]=255;
         uploadMask();
+        return true;
+    }
+    // Two seed, edge-weighted geodesic partition of an existing mask.
+    // Runs on a quarter-resolution grid for Quest 2 responsiveness; writes
+    // a full 1024px mask. This is guided separation, not a semantic model.
+    bool splitSelectionAt(float sx,float sy){
+        if(!hasSelection()||photoRgb.size()!=size_t(MASK_EDGE)*MASK_EDGE*3u)
+            {splitStatus=3;return false;}
+        float u=0.f,v=0.f;
+        if(!hitPhoto(sx,sy,true,u,v))return false;
+        const int x=std::clamp(int(u*(MASK_EDGE-1)),0,MASK_EDGE-1);
+        const int y=std::clamp(int((1.f-v)*(MASK_EDGE-1)),0,MASK_EDGE-1);
+        const int index=y*MASK_EDGE+x;
+        if(!selectionMask[size_t(index)]){splitStatus=3;return false;}
+        if(splitKeepSeed<0){
+            splitKeepSeed=index;splitStatus=1;return false;
+        }
+        const int keep=splitKeepSeed,remove=index;
+        splitKeepSeed=-1;
+        if(keep==remove){splitStatus=3;return false;}
+        constexpr int e=256,step=MASK_EDGE/e,cellCount=e*e;
+        auto toCell=[&](int pixel){
+            return (pixel/MASK_EDGE/step)*e+(pixel%MASK_EDGE/step);
+        };
+        const int keepCell=toCell(keep),removeCell=toCell(remove);
+        if(keepCell==removeCell){splitStatus=3;return false;}
+        std::vector<uint8_t> allowed(cellCount,0);
+        for(int cy=0;cy<e;++cy)for(int cx=0;cx<e;++cx){
+            int hits=0;
+            for(int dy=0;dy<step;++dy)for(int dx=0;dx<step;++dx)
+                hits+=selectionMask[size_t(cy*step+dy)*MASK_EDGE+
+                                    size_t(cx*step+dx)]!=0;
+            allowed[size_t(cy*e+cx)]=hits>0;
+        }
+        allowed[size_t(keepCell)]=1;allowed[size_t(removeCell)]=1;
+        const bool depth=depthGuidedSelection&&hasDepthPixels();
+        struct Node{float cost;int index;uint8_t label;};
+        struct Greater{bool operator()(const Node& a,const Node& b)const{
+            return a.cost>b.cost;
+        }};
+        std::priority_queue<Node,std::vector<Node>,Greater> queue;
+        std::vector<float> distance(cellCount,std::numeric_limits<float>::infinity());
+        std::vector<uint8_t> owner(cellCount,0);
+        distance[size_t(keepCell)]=distance[size_t(removeCell)]=0.f;
+        queue.push({0.f,keepCell,1});
+        queue.push({0.f,removeCell,2});
+        auto samplePixel=[&](int cell){
+            return ((cell/e)*step+step/2)*MASK_EDGE+
+                (cell%e)*step+step/2;
+        };
+        while(!queue.empty()){
+            const Node n=queue.top();queue.pop();
+            if(n.cost>distance[size_t(n.index)]+0.0001f)continue;
+            if(owner[size_t(n.index)]!=0)continue;
+            owner[size_t(n.index)]=n.label;
+            const int cx=n.index%e,cy=n.index/e;
+            const int near=samplePixel(n.index);
+            const int neighbors[]={cx>0?n.index-1:-1,cx<e-1?n.index+1:-1,
+                                   cy>0?n.index-e:-1,cy<e-1?n.index+e:-1};
+            for(int next:neighbors){
+                if(next<0||!allowed[size_t(next)]||
+                   owner[size_t(next)]!=0)continue;
+                const int far=samplePixel(next);
+                float edge=1.f;
+                for(int channel=0;channel<3;++channel){
+                    const float d=(float(photoRgb[size_t(near)*3+channel])-
+                                   float(photoRgb[size_t(far)*3+channel]))/255.f;
+                    edge+=8.f*d*d;
+                }
+                if(depth){
+                    const float dd=(float(depthCpu[size_t(near)])-
+                                    float(depthCpu[size_t(far)]))/255.f;
+                    edge+=16.f*dd*dd;
+                }
+                const float candidate=n.cost+edge;
+                if(candidate<distance[size_t(next)]){
+                    distance[size_t(next)]=candidate;
+                    queue.push({candidate,next,n.label});
+                }
+            }
+        }
+        if(owner[size_t(keepCell)]!=1||owner[size_t(removeCell)]!=2){
+            splitStatus=3;return false;
+        }
+        size_t kept=0,discarded=0;
+        std::vector<uint8_t> next=selectionMask;
+        for(int py=0;py<MASK_EDGE;++py)for(int px=0;px<MASK_EDGE;++px){
+            const size_t pixel=size_t(py)*MASK_EDGE+size_t(px);
+            if(!next[pixel])continue;
+            const uint8_t label=owner[size_t(py/step*e+px/step)];
+            if(label==2){next[pixel]=0;++discarded;}
+            else if(label==1)++kept;
+        }
+        if(kept<16||discarded<16){splitStatus=3;return false;}
+        selectionMask=std::move(next);
+        uploadMask();
+        splitStatus=2;
         return true;
     }
     // Keep one clicked region within an existing AI/manual selection.
@@ -1222,19 +1323,25 @@ struct Renderer {
                 label(v,"MASK REDO",413,732,2,canRedoMask()?white:muted);
                 box(v,625,720,229,40,hovered==119?purpleHover:
                     maskToolMode!=0?purple:button);
-                label(v,maskToolMode==0?"DIRECT PAINT":maskToolMode==1?"SMART FILL":maskToolMode==2?"ISOLATE TAP":"OBJECT TAP",636,732,2,white);
+                label(v,maskToolMode==0?"DIRECT PAINT":maskToolMode==1?"SMART FILL":maskToolMode==2?"ISOLATE TAP":maskToolMode==3?"OBJECT TAP":"SPLIT 2 TAPS",636,732,2,white);
                 box(v,170,110,330,70,hovered==120?purpleHover:button);
                 label(v,"SMALLER BRUSH",190,133,2,white);
                 box(v,524,110,330,70,hovered==121?purpleHover:button);
                 label(v,"LARGER BRUSH",544,133,2,white);
+                if(maskToolMode==4){
+                    const char* splitHelp=splitStatus==1?"NOW TAP THE OBJECT TO EXCLUDE":
+                        splitStatus==2?"SPLIT APPLIED - UNDO TO RESTORE":
+                        splitStatus==3?"SPLIT FAILED - TAP FIRST OBJECT":"TAP OBJECT TO KEEP FIRST";
+                    label(v,splitHelp,176,194,2,muted);
+                }
                 const std::string brushInfo="MASK BRUSH "+std::to_string(int(maskBrushRadius))+" PX";
                 label(v,brushInfo.c_str(),176,189,2,muted);
                 box(v,170,665,330,50,hovered==100?purpleHover:
                     !maskSubtract?purple:button);
-                label(v,maskToolMode==0?"PAINT ADD":maskToolMode==1?"SMART ADD":maskToolMode==2?"ISOLATE KEEP":"OBJECT ADD",191,680,2,white);
+                label(v,maskToolMode==0?"PAINT ADD":maskToolMode==1?"SMART ADD":maskToolMode==2?"ISOLATE KEEP":maskToolMode==3?"OBJECT ADD":"KEEP FIRST",191,680,2,white);
                 box(v,524,665,330,50,hovered==101?purpleHover:
                     maskSubtract?purple:button);
-                label(v,maskToolMode==0?"PAINT ERASE":maskToolMode==1?"SMART REMOVE":maskToolMode==2?"ISOLATE KEEP":"OBJECT REMOVE",543,680,2,white);
+                label(v,maskToolMode==0?"PAINT ERASE":maskToolMode==1?"SMART REMOVE":maskToolMode==2?"ISOLATE KEEP":maskToolMode==3?"OBJECT REMOVE":"REMOVE SECOND",543,680,2,white);
                 const char* operations[]={"LESS COLOR","MORE COLOR","EXPAND","CONTRACT",
                     "SMOOTH","INVERT","CLEAR","SELECT ALL"};
                 for(int i=0;i<8;i++){
