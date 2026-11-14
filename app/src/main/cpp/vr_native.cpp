@@ -1117,6 +1117,13 @@ void run(JNIEnv* env, jobject activity) {
                         case 108:menu.clearMask();break;
                         case 109:menu.selectAllMask();break;
                     }
+                } else if(page==vrui::Page::Mask &&
+                    (hovered==112||hovered==113||hovered==114)){
+                    if(hovered==112)menu.depthGuidedSelection=!menu.depthGuidedSelection;
+                    if(hovered==113)menu.maskDepthTolerance=
+                        std::max(8,menu.maskDepthTolerance-5);
+                    if(hovered==114)menu.maskDepthTolerance=
+                        std::min(100,menu.maskDepthTolerance+5);
                 } else if(page==vrui::Page::Open && hovered==61) {
                     menu.clearMask();menu.selectionMode=false;
                 } else if(page==vrui::Page::Open && hovered==62) {
