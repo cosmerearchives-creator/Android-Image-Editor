@@ -218,7 +218,7 @@ public final class BatchStore {
         int columns=spherical?Math.max(4,(int)Math.ceil(Math.sqrt(list.length*2.0))):
                               Math.max(1,(int)Math.ceil(Math.sqrt(list.length)));
         // Keep small walls small instead of allocating 64 MiB for one image.
-        final int side=Math.min(4096,Math.max(1024,columns*512));
+        final int side=Math.min(3072,Math.max(1024,columns*512));
         final int width=spherical?(depths?2048:4096):depths?1024:side;
         final int height=spherical?(depths?1024:2048):depths?1024:side;
         Bitmap atlas=Bitmap.createBitmap(width,height,Bitmap.Config.ARGB_8888);
@@ -294,14 +294,21 @@ public final class BatchStore {
             stage.delete();throw new IOException("Failed to open cached image");
         }
     }
-    public static void copyTo(Context ctx,boolean spherical,OutputStream stream)
-        throws IOException{
+    public static void copyTo(Context ctx,boolean spherical,OutputStream stream,
+                              IntConsumer progress)throws IOException{
         File file=spherical?sphere(ctx):wall(ctx);
         if(!file.isFile())throw new IOException("Generate a gallery first");
+        long written=0;
         try(InputStream in=new FileInputStream(file)){
             byte[] buffer=new byte[65536];int n;
-            while((n=in.read(buffer))!=-1)stream.write(buffer,0,n);
+            while((n=in.read(buffer))!=-1){
+                stream.write(buffer,0,n);
+                written+=n;
+                progress.accept((int)Math.min(100,100L*written/
+                                          Math.max(1L,file.length())));
+            }
         }
         stream.flush();
+        progress.accept(100);
     }
 }
