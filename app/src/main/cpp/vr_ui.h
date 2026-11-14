@@ -476,24 +476,61 @@ struct Renderer {
             uniform float eyeSign;
             uniform float depthStrength;
             out vec4 frag;
-            // Experimental depth cue based on image brightness and center weighting.
+            // Stable inverse stereo warp for strong depth settings.
+            // Keep the true depth center neutral to minimize unwanted drift.
             float guessedDepth(vec2 p) {
                 vec3 col=texture(photograph,clamp(p,vec2(0.001),vec2(0.999))).rgb;
-                float luminance=dot(col,vec3(0.2126,0.7152,0.0722));
+                float lum=dot(col,vec3(0.2126,0.7152,0.0722));
                 float center=1.0-smoothstep(0.0,0.72,length(p-vec2(0.5)));
-                return clamp(0.25+0.4*center+0.35*luminance,0.0,1.0);
+                return clamp(0.25+0.4*center+0.35*lum,0.0,1.0);
+            }
+            float mapDepth(vec2 p) {
+                p=clamp(p,vec2(0.001),vec2(0.999));
+                return useQuickDepth==1?texture(quickDepth,p).r:guessedDepth(p);
+            }
+            float guidedDepth(vec2 p) {
+                float base=mapDepth(p);
+                if(useQuickDepth==0)return base;
+                vec2 texel=1.0/vec2(textureSize(quickDepth,0));
+                // Weight nearby samples by depth similarity. This reduces
+                // block boundaries without blurring separate depth objects.
+                float sum=base*4.0;
+                float weight=4.0;
+                for(int i=0;i<4;i++){
+                    vec2 delta=i==0?vec2(texel.x,0.0):
+                               i==1?vec2(-texel.x,0.0):
+                               i==2?vec2(0.0,texel.y):vec2(0.0,-texel.y);
+                    float d=mapDepth(p+delta);
+                    float w=exp(-abs(d-base)*28.0);
+                    sum+=d*w;
+                    weight+=w;
+                }
+                return sum/weight;
             }
             void main() {
                 vec2 sampleUv=uv;
-                for(int i=0;i<2;i++){
-                    float depth=useQuickDepth==1
-                        ?texture(quickDepth,clamp(sampleUv,vec2(0.001),vec2(0.999))).r
-                        :guessedDepth(sampleUv);
-                    sampleUv.x=uv.x + eyeSign*depthStrength*(depth-0.5)*0.035;
-                    sampleUv=clamp(sampleUv,vec2(0.001),vec2(0.999));
+                const float disparityUnit=0.035;
+                // Additional fixed-point passes improve convergence when
+                // disparity is much stronger than the previous default.
+                for(int i=0;i<5;i++){
+                    float depth=guidedDepth(sampleUv);
+                    float offset=eyeSign*depthStrength*(depth-0.5)*disparityUnit;
+                    // Retain a narrow safe border to avoid black edge sampling.
+                    vec2 target=vec2(uv.x+offset,uv.y);
+                    sampleUv=mix(sampleUv,clamp(target,vec2(0.001),vec2(0.999)),0.8);
                 }
+                // A final depth check preferentially chooses nearer surfaces
+                // when the inverse warp crosses a sharp foreground boundary.
+                float foreground=guidedDepth(sampleUv);
+                vec2 next=clamp(vec2(uv.x+eyeSign*depthStrength*
+                                    (foreground-0.5)*disparityUnit,uv.y),
+                                vec2(0.001),vec2(0.999));
+                float nextDepth=guidedDepth(next);
+                if(nextDepth>foreground+0.12)sampleUv=next;
+                // Avoid repeated sampling outside the photograph.
+                sampleUv=clamp(sampleUv,vec2(0.001),vec2(0.999));
                 frag=texture(photograph,sampleUv);
-                 if(hasSelection==1 && texture(selectionMask,sampleUv).r>0.5)
+                if(hasSelection==1 && texture(selectionMask,sampleUv).r>0.5)
                     frag.rgb=mix(frag.rgb,vec3(0.35,0.25,0.85),0.32);
             }
         )";
@@ -576,6 +613,8 @@ struct Renderer {
         glBindTexture(GL_TEXTURE_2D,photoTexture);
         glActiveTexture(GL_TEXTURE1);
         glBindTexture(GL_TEXTURE_2D,depthTexture);
+        glActiveTexture(GL_TEXTURE2);
+        glBindTexture(GL_TEXTURE_2D,selectionTexture);
         glActiveTexture(GL_TEXTURE0);
         glBindVertexArray(photoVao);
         glBindBuffer(GL_ARRAY_BUFFER,photoVbo);
