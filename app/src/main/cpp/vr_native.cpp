@@ -18,6 +18,7 @@ std::atomic<bool> stopRequested{false};
 std::atomic<bool> imageNeedsReload{true};
 std::atomic<bool> depthNeedsReload{true};
 std::atomic<int> aiDepthState{0},aiDepthPercent{0};
+std::atomic<bool> auto3dReady{false};
 std::atomic<int> aiSegmentState{0},aiSegmentPercent{0};
 std::mutex aiMaskMutex;
 std::vector<uint8_t> pendingAiMask;
@@ -1316,6 +1317,9 @@ void run(JNIEnv* env, jobject activity) {
             menu.updatePercent=vrUpdatePercent.load();
             menu.aiState=aiDepthState.load();
             menu.aiPercent=aiDepthPercent.load();
+            // One-click conversion should immediately reveal the 3D result.
+            // Only switch on once per conversion, allowing manual 3D toggling.
+            if(auto3dReady.exchange(false))menu.stereoEnabled=true;
             menu.aiPreview=menu.aiState==3;
             menu.aiSegmentState=aiSegmentState.load();
             menu.aiSegmentPercent=aiSegmentPercent.load();
@@ -1484,6 +1488,7 @@ Java_com_cosmerearchives_androidimageeditor_VrActivity_reportAiDepthStatus(
         JNIEnv*,jobject,jint state,jint progress){
     aiDepthState.store(static_cast<int>(state));
     aiDepthPercent.store(std::clamp(static_cast<int>(progress),0,100));
+    if(state==6||state==7)auto3dReady.store(true);
 }
 
 extern "C" JNIEXPORT void JNICALL
