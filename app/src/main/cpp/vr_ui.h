@@ -1237,7 +1237,7 @@ void main(){
  vec3 hit=eye+ray*t;
  vec2 texcoord;
  if(face==0)texcoord=vec2(fract(.5+atan(hit.x,-hit.z)/6.2831853),.25+.5*(h-hit.y)/(2.*h));
- else {vec2 flat=clamp(hit.xz/(2.*r)+.5,.001,.999);texcoord=vec2(flat.x,face==1?.25*flat.y:.75+.25*flat.y);}
+ else {vec2 capUv=clamp(hit.xz/(2.*r)+.5,.001,.999);texcoord=vec2(capUv.x,face==1?.25*capUv.y:.75+.25*capUv.y);}
  float depth=texture(panoDepth,texcoord).r;
  if(styleInverted==1)depth=1.-depth;
  texcoord.x=clamp(texcoord.x+eyeSign*styleScale*(depth-.5)*.0025,.0005,.9995);
