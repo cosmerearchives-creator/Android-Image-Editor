@@ -186,7 +186,8 @@ inline int buttonAt(Page page,float x,float y,bool advancedVisible=true) {
 }
 struct Renderer {
     GLuint program=0,vao=0,vbo=0,photoProgram=0,photoTexture=0,
-           photoVao=0,photoVbo=0,depthTexture=0;
+           photoVao=0,photoVbo=0,depthTexture=0,
+           sphereProgram=0,sphereTexture=0,sphereDepthTexture=0;
     bool hasQuickDepth() const {return depthTexture!=0;}
     bool quickConverting=false;
     int aiState=0; // 0 idle, 1 model download, 2 local inference,
@@ -1169,7 +1170,115 @@ struct Renderer {
         glVertexAttribPointer(2,2,GL_FLOAT,GL_FALSE,4*sizeof(float),
             reinterpret_cast<const void*>(2*sizeof(float)));
         glBindVertexArray(0);
+        // Render the exported equirectangular contact sheet as a true
+        // head-tracked OpenXR projection, not as a flat quad in front of the user.
+        const char* sphereFs=R"(#version 300 es
+            precision highp float;
+            in vec2 uv;
+            uniform sampler2D panorama;
+            uniform sampler2D panoDepth;
+            uniform vec4 orientation;
+            uniform vec4 fovTangent;
+            uniform float eyeSign;
+            uniform float styleScale;
+            uniform int styleInverted;
+            out vec4 frag;
+            vec3 rotateByQuat(vec3 v,vec4 q){
+                vec3 t=2.0*cross(q.xyz,v);
+                return v+q.w*t+cross(q.xyz,t);
+            }
+            void main(){
+                vec3 direction=normalize(vec3(
+                    mix(fovTangent.x,fovTangent.y,uv.x),
+                    mix(fovTangent.z,fovTangent.w,uv.y),-1.0));
+                direction=normalize(rotateByQuat(direction,orientation));
+                float longitude=atan(direction.x,-direction.z);
+                float latitude=asin(clamp(direction.y,-1.0,1.0));
+                vec2 panoUv=vec2(fract(0.5+longitude/6.28318530718),
+                                 clamp(0.5-latitude/3.14159265359,0.001,0.999));
+                // The entire panorama is painted at a fixed radius around the
+                // viewer. Per-photo depth provides subtle optional eye parallax.
+                float d=texture(panoDepth,panoUv).r;
+                if(styleInverted==1)d=1.0-d;
+                panoUv.x=fract(panoUv.x+eyeSign*styleScale*(d-0.5)*0.006);
+                frag=vec4(texture(panorama,panoUv).rgb,1.0);
+            }
+        )";
+        GLuint sf=shader(GL_FRAGMENT_SHADER,sphereFs);
+        GLuint sv=shader(GL_VERTEX_SHADER,photoVs);
+        if(!sf||!sv)return false;
+        sphereProgram=glCreateProgram();
+        glAttachShader(sphereProgram,sv);
+        glAttachShader(sphereProgram,sf);
+        glLinkProgram(sphereProgram);
+        glDeleteShader(sf);glDeleteShader(sv);
+        GLint sphereOk=0;
+        glGetProgramiv(sphereProgram,GL_LINK_STATUS,&sphereOk);
+        if(!sphereOk)return false;
         return true;
+    }
+    void uploadSphere(const std::vector<uint8_t>& rgba,int width,int height){
+        if(width<1||height<1||width>4096||height>4096||
+           rgba.size()!=size_t(width)*height*4u)return;
+        if(sphereTexture)glDeleteTextures(1,&sphereTexture);
+        glGenTextures(1,&sphereTexture);
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D,sphereTexture);
+        glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_S,GL_REPEAT);
+        glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_T,GL_CLAMP_TO_EDGE);
+        glPixelStorei(GL_UNPACK_ALIGNMENT,1);
+        glTexImage2D(GL_TEXTURE_2D,0,GL_RGBA8,width,height,0,GL_RGBA,
+                     GL_UNSIGNED_BYTE,rgba.data());
+        glBindTexture(GL_TEXTURE_2D,0);
+    }
+    void uploadSphereDepth(const std::vector<uint8_t>& rgba,int width,int height){
+        if(width<1||height<1||rgba.size()!=size_t(width)*height*4u)return;
+        std::vector<uint8_t> gray(size_t(width)*height);
+        for(size_t i=0;i<gray.size();++i)gray[i]=rgba[i*4];
+        if(sphereDepthTexture)glDeleteTextures(1,&sphereDepthTexture);
+        glGenTextures(1,&sphereDepthTexture);
+        glActiveTexture(GL_TEXTURE1);
+        glBindTexture(GL_TEXTURE_2D,sphereDepthTexture);
+        glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_S,GL_REPEAT);
+        glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_T,GL_CLAMP_TO_EDGE);
+        glPixelStorei(GL_UNPACK_ALIGNMENT,1);
+        glTexImage2D(GL_TEXTURE_2D,0,GL_R8,width,height,0,GL_RED,
+                     GL_UNSIGNED_BYTE,gray.data());
+        glBindTexture(GL_TEXTURE_2D,0);
+        glActiveTexture(GL_TEXTURE0);
+    }
+    void drawSphere(const float* quaternion,const float* tanFov,float eyeSign){
+        if(!sphereTexture||!sphereProgram)return;
+        const float vertices[]={
+            0.f,0.f,0.f,0.f,1024.f,0.f,1.f,0.f,0.f,768.f,0.f,1.f,
+            1024.f,0.f,1.f,0.f,1024.f,768.f,1.f,1.f,0.f,768.f,0.f,1.f
+        };
+        glUseProgram(sphereProgram);
+        glUniform1i(glGetUniformLocation(sphereProgram,"panorama"),0);
+        glUniform1i(glGetUniformLocation(sphereProgram,"panoDepth"),1);
+        glUniform4fv(glGetUniformLocation(sphereProgram,"orientation"),1,quaternion);
+        glUniform4fv(glGetUniformLocation(sphereProgram,"fovTangent"),1,tanFov);
+        glUniform1f(glGetUniformLocation(sphereProgram,"eyeSign"),eyeSign);
+        glUniform1f(glGetUniformLocation(sphereProgram,"styleScale"),
+                    depthStyle==1?1.65f:1.f);
+        glUniform1i(glGetUniformLocation(sphereProgram,"styleInverted"),
+                    depthStyle==2?1:0);
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D,sphereTexture);
+        glActiveTexture(GL_TEXTURE1);
+        glBindTexture(GL_TEXTURE_2D,sphereDepthTexture);
+        glActiveTexture(GL_TEXTURE0);
+        glBindVertexArray(photoVao);
+        glBindBuffer(GL_ARRAY_BUFFER,photoVbo);
+        glBufferData(GL_ARRAY_BUFFER,sizeof(vertices),vertices,GL_STREAM_DRAW);
+        glDrawArrays(GL_TRIANGLES,0,6);
+        glBindVertexArray(0);
+        glActiveTexture(GL_TEXTURE1);glBindTexture(GL_TEXTURE_2D,0);
+        glActiveTexture(GL_TEXTURE0);glBindTexture(GL_TEXTURE_2D,0);
     }
     void uploadPhoto(const std::vector<uint8_t>& rgba,int width,int height){
         if(photoTexture){glDeleteTextures(1,&photoTexture);photoTexture=0;}
@@ -1813,6 +1922,9 @@ struct Renderer {
         submitUi(v);
     }
     ~Renderer(){clearMask();clearQuickDepth();
+        if(sphereTexture)glDeleteTextures(1,&sphereTexture);
+        if(sphereDepthTexture)glDeleteTextures(1,&sphereDepthTexture);
+        if(sphereProgram)glDeleteProgram(sphereProgram);
         if(photoTexture)glDeleteTextures(1,&photoTexture);
         if(photoProgram)glDeleteProgram(photoProgram);
         if(photoVbo)glDeleteBuffers(1,&photoVbo);
