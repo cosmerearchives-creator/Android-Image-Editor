@@ -16,7 +16,7 @@ struct Color {float r,g,b;};
 constexpr Color white{0.96f,0.95f,1.0f}, muted{0.67f,0.63f,0.76f},
     purple{0.34f,0.22f,0.52f}, purpleHover{0.52f,0.36f,0.76f},
     panel{0.095f,0.075f,0.14f}, button{0.17f,0.14f,0.25f};
-enum class Page {Home, Open, Projects, Gallery, Immersive, AiDepth, Collage, Curves};
+enum class Page {Home, Open, Projects, Gallery, Immersive, AiDepth, Collage, Curves, Mask};
 inline void box(std::vector<float>& vertices,float x,float y,float w,float h,Color c) {
     float a[6][2]={{x,y},{x+w,y},{x,y+h},{x+w,y},{x+w,y+h},{x,y+h}};
     for(auto& p:a) {vertices.push_back(p[0]);vertices.push_back(p[1]);
@@ -107,6 +107,22 @@ inline int buttonAt(Page page,float x,float y) {
             if(x<=409)return 6;
             if(x>=420&&x<=639)return 7;
         }
+    } else if(page==Page::Mask){
+        if(y>=665&&y<=715)return x<512?100:101;
+        if(y>=590&&y<=648){
+            if(x<340)return 102;
+            if(x<512)return 103;
+            if(x<684)return 104;
+            return 105;
+        }
+        if(y>=205&&y<=291){
+            if(x<340)return 106;
+            if(x<512)return 107;
+            if(x<684)return 108;
+            return 109;
+        }
+        if(y>=36&&y<=88)return 110;
+        return -1;
     } else if(page==Page::Curves){
         if(y>=36&&y<=105)return 91;
         const int rows[]={535,425,315,205};
@@ -147,6 +163,8 @@ struct Renderer {
     // v0.8: connected-color selection, constrained depth sculpting.
     int collageCount=0,collageActive=0;
     bool selectionMode=false;
+    bool maskSubtract=false;
+    int maskTolerance=65;
     std::vector<uint8_t> selectionMask;
     GLuint selectionTexture=0;
     bool hasSelection()const{return selectionMask.size()==65536u;}
@@ -174,7 +192,42 @@ struct Renderer {
         for(auto& p:selectionMask)p=p?0:255;
         uploadMask();
     }
-    bool selectAt(float sx,float sy){
+    void adjustMaskTolerance(int delta){
+        maskTolerance=std::clamp(maskTolerance+delta,10,150);
+    }
+    void growOrShrinkMask(bool grow){
+        if(!hasSelection())return;
+        std::vector<uint8_t> next(selectionMask.size(),0);
+        for(int y=0;y<256;++y)for(int x=0;x<256;++x){
+            bool result=!grow;
+            for(int oy=-1;oy<=1;++oy)for(int ox=-1;ox<=1;++ox){
+                const int sx=x+ox,sy=y+oy;
+                const bool chosen=sx>=0&&sx<256&&sy>=0&&sy<256
+                    &&selectionMask[size_t(sy)*256u+size_t(sx)]!=0;
+                if(grow)result=result||chosen;
+                else result=result&&chosen;
+            }
+            next[size_t(y)*256u+size_t(x)]=result?255:0;
+        }
+        selectionMask=std::move(next);
+        uploadMask();
+    }
+    void smoothMask(){
+        if(!hasSelection())return;
+        std::vector<uint8_t> next(selectionMask.size(),0);
+        for(int y=0;y<256;++y)for(int x=0;x<256;++x){
+            int count=0;
+            for(int oy=-1;oy<=1;++oy)for(int ox=-1;ox<=1;++ox){
+                const int sx=x+ox,sy=y+oy;
+                if(sx>=0&&sx<256&&sy>=0&&sy<256&&
+                   selectionMask[size_t(sy)*256u+size_t(sx)])++count;
+            }
+            next[size_t(y)*256u+size_t(x)]=count>=5?255:0;
+        }
+        selectionMask=std::move(next);
+        uploadMask();
+    }
+    bool selectAt(float sx,float sy,bool additive=true){
         if(photoRgb.size()!=size_t(DEPTH_EDGE)*DEPTH_EDGE*3u)return false;
         float u=0.f,v=0.f;
         if(!hitPhoto(sx,sy,false,u,v))return false;
@@ -193,11 +246,17 @@ struct Renderer {
                 const int colorIndex=(((q/256)*2)*DEPTH_EDGE+(q%256)*2)*3;
                 int dr=int(photoRgb[colorIndex])-red,dg=int(photoRgb[colorIndex+1])-green,
                     db=int(photoRgb[colorIndex+2])-blue;
-                if(dr*dr+dg*dg+db*db>4225)continue;
+                if(dr*dr+dg*dg+db*db>maskTolerance*maskTolerance)continue;
                 chosen[q]=255;pending.push_back(q);
             }
         }
-        selectionMask=std::move(chosen);
+        if(!hasSelection()){
+            selectionMask.assign(65536u,0);
+        }
+        for(size_t p=0;p<chosen.size();++p){
+            if(!chosen[p])continue;
+            selectionMask[p]=additive?255:0;
+        }
         uploadMask();
         selectionMode=false;
         return true;
