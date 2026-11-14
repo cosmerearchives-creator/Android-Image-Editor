@@ -11,8 +11,18 @@ if [[ "$head" != "$GITHUB_SHA" ]]; then
   exit 1
 fi
 
+# A manual dispatch can overlap the automatic release-triggered workflow.
+# Serialize via the release-job concurrency group; a repeated run should be
+# idempotent when the existing stable release is exactly this build.
 if gh release view "$tag" --repo "$repo" --json isDraft >/dev/null 2>&1; then
-  echo "::error::Release $tag already exists. Inspect it before attempting publication."
+  existing_target="$(gh api "repos/$repo/git/ref/tags/$tag" --jq .object.sha 2>/dev/null || true)"
+  existing_asset="$(gh release view "$tag" --repo "$repo" --json assets --jq '.assets[].name' | grep -Fx "$apk" || true)"
+  is_draft="$(gh release view "$tag" --repo "$repo" --json isDraft --jq .isDraft)"
+  if [[ "$existing_target" == "$GITHUB_SHA" && "$existing_asset" == "$apk" && "$is_draft" == "false" ]]; then
+    echo "Release $tag is already published for this exact commit and APK. Nothing to do."
+    exit 0
+  fi
+  echo "::error::Release $tag exists but is not a verified stable release for this commit. Refusing to overwrite it."
   exit 1
 fi
 latest="$(gh release list --repo "$repo" --exclude-drafts --exclude-pre-releases --json tagName,isLatest --jq '.[] | select(.isLatest) | .tagName')"
