@@ -16,7 +16,7 @@ import java.io.IOException;
 public final class QuickDepth {
     private static final int W = 256;
     private static final int H = 256;
-    private static final int EDIT_EDGE=512;
+    private static final int EDIT_EDGE=1024;
     private static final String DEPTH_FILE = "vr_depth_quick.png";
     private static final String CANDIDATE = "vr_depth_ai_candidate.png";
     private QuickDepth() {}
@@ -68,15 +68,16 @@ public final class QuickDepth {
                 throw new IOException("Depth preview could not be saved");
         }finally{bitmap.recycle();stage.delete();}
     }
-    // Normalize old 256x256 and newer 512x512 depth PNGs to the 512px
-    // editor grid. Preserve existing projects and the 256px AI model output.
+    // Load legacy 256px and 512px depth PNGs plus native 1024px edits.
+    // Upscaling preserves project compatibility but cannot invent detail.
     private static int[] normalizedPixels(File source) {
         Bitmap bitmap=BitmapFactory.decodeFile(source.getAbsolutePath());
         if(bitmap==null)return null;
         Bitmap resized=bitmap;
         try {
-            if(!((bitmap.getWidth()==W && bitmap.getHeight()==H) ||
-                 (bitmap.getWidth()==EDIT_EDGE && bitmap.getHeight()==EDIT_EDGE)))return null;
+            if(bitmap.getWidth()!=bitmap.getHeight() ||
+               (bitmap.getWidth()!=256 && bitmap.getWidth()!=512 &&
+                bitmap.getWidth()!=EDIT_EDGE))return null;
             if(bitmap.getWidth()!=EDIT_EDGE)
                 resized=Bitmap.createScaledBitmap(bitmap,EDIT_EDGE,EDIT_EDGE,true);
             int[] result=new int[EDIT_EDGE*EDIT_EDGE+2];
@@ -109,7 +110,7 @@ public final class QuickDepth {
         return normalizedPixels(path(ctx));
     }
 
-    /** Persist a 512x512 corrected depth map, retaining legacy 256px compatibility. */
+    /** Persist a 1024px corrected depth map; legacy depth PNGs remain readable. */
     public static synchronized void saveEdited(Context ctx, byte[] gray) throws IOException {
         if(gray==null || gray.length!=EDIT_EDGE*EDIT_EDGE)
             throw new IOException("Invalid depth-map dimensions");
