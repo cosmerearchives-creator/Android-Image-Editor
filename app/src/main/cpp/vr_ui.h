@@ -178,7 +178,7 @@ struct Renderer {
     int collageCount=0,collageActive=0;
     bool selectionMode=false;
     bool maskSubtract=false;
-    bool maskSmartFill=false; // default: literal brush, not flood fill
+    int maskToolMode=0; // 0 literal paint, 1 smart region, 2 isolate clicked selection
     float maskBrushRadius=28.f;
     std::vector<std::vector<uint8_t>> maskUndo,maskRedo;
     std::vector<uint8_t> maskStrokeBefore;
@@ -401,6 +401,55 @@ struct Renderer {
         if(winner.empty())return false;
         selectionMask.assign(count,0);
         for(int pixel:winner)selectionMask[size_t(pixel)]=255;
+        uploadMask();
+        return true;
+    }
+    // Keep one clicked region within an existing AI/manual selection.
+    // Connected depth-and-color guided isolation, not semantic classification.
+    bool isolateAt(float sx,float sy){
+        if(!hasSelection()||photoRgb.size()!=size_t(MASK_EDGE)*MASK_EDGE*3u)return false;
+        float u=0.f,v=0.f;
+        if(!hitPhoto(sx,sy,true,u,v))return false;
+        const int x=std::clamp(int(u*(MASK_EDGE-1)),0,MASK_EDGE-1);
+        const int y=std::clamp(int((1.f-v)*(MASK_EDGE-1)),0,MASK_EDGE-1);
+        const int start=y*MASK_EDGE+x;
+        if(!selectionMask[size_t(start)])return false;
+        const int seedColor=start*3;
+        const bool useDepth=hasDepthPixels();
+        const int baseDepth=useDepth?int(depthCpu[size_t(start)]):0;
+        std::vector<uint8_t> selected(selectionMask.size(),0);
+        std::vector<int> queue{start};
+        selected[size_t(start)]=255;
+        for(size_t i=0;i<queue.size();++i){
+            const int p=queue[i],px=p%MASK_EDGE,py=p/MASK_EDGE;
+            const int around[]={px>0?p-1:-1,px<MASK_EDGE-1?p+1:-1,
+                                py>0?p-MASK_EDGE:-1,py<MASK_EDGE-1?p+MASK_EDGE:-1};
+            for(int q:around){
+                if(q<0||selected[size_t(q)]||!selectionMask[size_t(q)])continue;
+                const int color=q*3,near=p*3;
+                int seedDistance=0,localDistance=0;
+                for(int c=0;c<3;++c){
+                    int sd=int(photoRgb[size_t(color+c)])-
+                           int(photoRgb[size_t(seedColor+c)]);
+                    int ld=int(photoRgb[size_t(color+c)])-
+                           int(photoRgb[size_t(near+c)]);
+                    seedDistance+=sd*sd;localDistance+=ld*ld;
+                }
+                const int threshold=std::max(25,maskTolerance);
+                if(seedDistance>threshold*threshold*2||
+                   localDistance>threshold*threshold/2)continue;
+                if(useDepth){
+                    const int d=int(depthCpu[size_t(q)]);
+                    if(std::abs(d-baseDepth)>maskDepthTolerance ||
+                       std::abs(d-int(depthCpu[size_t(p)]))>
+                           std::max(8,maskDepthTolerance/2))continue;
+                }
+                selected[size_t(q)]=255;
+                queue.push_back(q);
+            }
+        }
+        if(queue.size()<8 || queue.size()==selectionMask.size())return false;
+        selectionMask=std::move(selected);
         uploadMask();
         return true;
     }
@@ -1084,8 +1133,8 @@ struct Renderer {
                 box(v,399,720,210,40,hovered==118?purpleHover:button);
                 label(v,"MASK REDO",413,732,2,canRedoMask()?white:muted);
                 box(v,625,720,229,40,hovered==119?purpleHover:
-                    maskSmartFill?purple:button);
-                label(v,maskSmartFill?"SMART FILL ON":"DIRECT PAINT",636,732,2,white);
+                    maskToolMode!=0?purple:button);
+                label(v,maskToolMode==0?"DIRECT PAINT":maskToolMode==1?"SMART FILL":"ISOLATE TAP",636,732,2,white);
                 box(v,170,110,330,70,hovered==120?purpleHover:button);
                 label(v,"SMALLER BRUSH",190,133,2,white);
                 box(v,524,110,330,70,hovered==121?purpleHover:button);
@@ -1094,10 +1143,10 @@ struct Renderer {
                 label(v,brushInfo.c_str(),176,189,2,muted);
                 box(v,170,665,330,50,hovered==100?purpleHover:
                     !maskSubtract?purple:button);
-                label(v,maskSmartFill?"SMART ADD":"PAINT ADD",191,680,3,white);
+                label(v,maskToolMode==0?"PAINT ADD":maskToolMode==1?"SMART ADD":"ISOLATE KEEP",191,680,2,white);
                 box(v,524,665,330,50,hovered==101?purpleHover:
                     maskSubtract?purple:button);
-                label(v,maskSmartFill?"SMART REMOVE":"PAINT ERASE",543,680,3,white);
+                label(v,maskToolMode==0?"PAINT ERASE":maskToolMode==1?"SMART REMOVE":"ISOLATE KEEP",543,680,2,white);
                 const char* operations[]={"LESS COLOR","MORE COLOR","EXPAND","CONTRACT",
                     "SMOOTH","INVERT","CLEAR","SELECT ALL"};
                 for(int i=0;i<8;i++){
@@ -1122,9 +1171,9 @@ struct Renderer {
                 box(v,170,402,684,78,hovered==115?purpleHover:purple);
                 label(v,"AUTO FOREGROUND FROM DEPTH",190,428,2,white);
                 if(autoMaskStatus==1)
-                    label(v,"FOREGROUND MASK READY",183,494,2,muted);
+                    label(v,"FOREGROUND MASK READY",183,385,2,muted);
                 else if(autoMaskStatus==2)
-                    label(v,"NO DISTINCT FOREGROUND FOUND",183,494,2,muted);
+                    label(v,"NO DISTINCT FOREGROUND FOUND",183,385,2,muted);
                 box(v,170,310,330,50,hovered==112?purpleHover:
                     depthGuidedSelection?purple:button);
                 label(v,depthGuidedSelection?"DEPTH GUIDE ON":"DEPTH GUIDE OFF",
