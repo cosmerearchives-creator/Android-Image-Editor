@@ -151,6 +151,7 @@ public final class BatchStore {
             cancelled(cancel);
             final int current=i, size=total;
             File entry=list[i],depth=new File(entry,DEPTH),mask=new File(entry,MASK);
+            File maskAttempted=new File(entry,"mask_attempted");
             if(!depth.isFile()){
                 byte[] result=AiDepth.infer(ctx,cancel,p->
                     progress.accept((current*100+Math.min(79,p*80/100))/size),
@@ -159,7 +160,7 @@ public final class BatchStore {
                 saveGray(result,depth);
             }
             // Segmentation is optional; failures must not delete usable depth.
-            if(!mask.isFile()){
+            if(!mask.isFile()&&!maskAttempted.isFile()){
                 try{
                     byte[] subject=AiSegment.infer(ctx,cancel,p->
                         progress.accept((current*100+80+Math.min(19,p/5))/size),
@@ -174,6 +175,9 @@ public final class BatchStore {
                 }catch(Exception e){
                     if(cancel.get())throw e;
                 }
+                // Unsegmentable landscapes should not be rescanned on every
+                // batch request; model retry can be a separate future option.
+                if(!cancel.get())maskAttempted.createNewFile();
             }
             progress.accept((i+1)*100/total);
         }
@@ -211,11 +215,13 @@ public final class BatchStore {
         File[] list=entries(ctx);
         if(list.length==0)throw new IOException("Import images first");
         // Keep the VR wall/sphere atlases bounded even for large libraries.
-        final int width=spherical?(depths?2048:4096):depths?1024:4096;
-        final int height=spherical?(depths?1024:2048):depths?1024:4096;
-        Bitmap atlas=Bitmap.createBitmap(width,height,Bitmap.Config.ARGB_8888);
         int columns=spherical?Math.max(4,(int)Math.ceil(Math.sqrt(list.length*2.0))):
                               Math.max(1,(int)Math.ceil(Math.sqrt(list.length)));
+        // Keep small walls small instead of allocating 64 MiB for one image.
+        final int side=Math.min(4096,Math.max(1024,columns*512));
+        final int width=spherical?(depths?2048:4096):depths?1024:side;
+        final int height=spherical?(depths?1024:2048):depths?1024:side;
+        Bitmap atlas=Bitmap.createBitmap(width,height,Bitmap.Config.ARGB_8888);
         int rows=(list.length+columns-1)/columns;
         Canvas canvas=new Canvas(atlas);
         drawTiles(ctx,list,canvas,width,height,columns,rows,depths,progress);
@@ -257,6 +263,24 @@ public final class BatchStore {
         if(depth.isFile())replace(depth,depthTarget);else depthTarget.delete();
         ProjectStore.imported(ctx,"BULK IMAGE "+(index+1));
         CollageStore.reset(ctx);
+        ctx.getSharedPreferences("vr_batch",0).edit()
+            .putString("active_id",list[index].getName()).apply();
+        File aiMarker=new File(ctx.getFilesDir(),"vr_depth_ai_done.flag");
+        if(depth.isFile())aiMarker.createNewFile();else aiMarker.delete();
+    }
+    public static void clearActive(Context ctx){
+        ctx.getSharedPreferences("vr_batch",0).edit().remove("active_id").apply();
+    }
+    /** Sync a manually edited batch image back to its cached depth. */
+    public static synchronized void syncActive(Context ctx)throws IOException{
+        String id=ctx.getSharedPreferences("vr_batch",0).getString("active_id",null);
+        if(id==null)return;
+        File folder=new File(root(ctx),id);
+        if(!folder.isDirectory())return;
+        File active=new File(ctx.getFilesDir(),"vr_depth_quick.png");
+        if(active.isFile())replace(active,new File(folder,DEPTH));
+        wall(ctx).delete();wallDepth(ctx).delete();
+        sphere(ctx).delete();sphereDepth(ctx).delete();
     }
     private static void replace(File source,File dest)throws IOException{
         File stage=new File(dest.getParentFile(),dest.getName()+".bulk.partial");
