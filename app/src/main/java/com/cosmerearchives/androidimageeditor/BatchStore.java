@@ -39,8 +39,8 @@ public final class BatchStore {
     private static File cache(Context ctx,String name){return new File(root(ctx),name);}
     public static File wall(Context ctx){return cache(ctx,"wall.png");}
     public static File wallDepth(Context ctx){return cache(ctx,"wall_depth.png");}
-    public static File sphere(Context ctx){return cache(ctx,"cylinder_v2.png");}
-    public static File sphereDepth(Context ctx){return cache(ctx,"cylinder_depth_v2.png");}
+    public static File sphere(Context ctx){return cache(ctx,"cylinder_v3.png");}
+    public static File sphereDepth(Context ctx){return cache(ctx,"cylinder_depth_v3.png");}
     private static File[] entries(Context ctx){
         File[] items=root(ctx).listFiles(f->f.isDirectory()&&new File(f,PHOTO).isFile());
         if(items==null)return new File[0];
@@ -253,12 +253,15 @@ public final class BatchStore {
                 canvas.save();
                 canvas.translate(0,tops[surface]);
                 canvas.clipRect(0,0,width,heights[surface]);
-                int cols=surface==1?
-                    Math.max(1,(int)Math.ceil(Math.sqrt(section.length*4.0))):
-                    Math.max(1,(int)Math.ceil(Math.sqrt(section.length*4.0)));
+                // Floor/ceiling are planar circular surfaces, NOT a horizontal
+                // panorama. Each cap must use a square UV region: the old
+                // 4096x512 strip stretched pictures eight-fold horizontally.
+                int availableWidth=surface==1?width:heights[surface];
+                if(surface!=1)canvas.translate((width-availableWidth)*0.5f,0);
+                int cols=Math.max(1,(int)Math.ceil(Math.sqrt(section.length*4.0)));
                 int sectionRows=(section.length+cols-1)/cols;
                 final int part=surface;
-                drawTiles(ctx,section,canvas,width,heights[surface],cols,
+                drawTiles(ctx,section,canvas,availableWidth,heights[surface],cols,
                     sectionRows,depths,true,p->progress.accept((part*100+p)/3));
                 canvas.restore();
             }
