@@ -16,7 +16,7 @@ struct Color {float r,g,b;};
 constexpr Color white{0.96f,0.95f,1.0f}, muted{0.67f,0.63f,0.76f},
     purple{0.34f,0.22f,0.52f}, purpleHover{0.52f,0.36f,0.76f},
     panel{0.095f,0.075f,0.14f}, button{0.17f,0.14f,0.25f};
-enum class Page {Home, Open, Projects, Gallery, Immersive, AiDepth, Collage};
+enum class Page {Home, Open, Projects, Gallery, Immersive, AiDepth, Collage, Curves};
 inline void box(std::vector<float>& vertices,float x,float y,float w,float h,Color c) {
     float a[6][2]={{x,y},{x+w,y},{x,y+h},{x+w,y},{x+w,y+h},{x,y+h}};
     for(auto& p:a) {vertices.push_back(p[0]);vertices.push_back(p[1]);
@@ -87,7 +87,7 @@ inline int buttonAt(Page page,float x,float y) {
         if(y>=186&&y<=282)return 2;
         if(y>=58&&y<=154)return 11;
     } else if (page==Page::Open) {
-        if(y>=730&&y<=765)return 70;
+        if(y>=730&&y<=765)return x<512?70:90;
         if(y>=590&&y<=650)return x<390?60:x<610?61:62;
         if(y>=665&&y<=715) {
             if(x<=385)return 14;
@@ -107,6 +107,11 @@ inline int buttonAt(Page page,float x,float y) {
             if(x<=409)return 6;
             if(x>=420&&x<=639)return 7;
         }
+    } else if(page==Page::Curves){
+        if(y>=36&&y<=105)return 91;
+        const int rows[]={535,425,315,205};
+        for(int i=0;i<4;i++)if(y>=rows[i]&&y<=rows[i]+70)return 92+i*2+(x>=512?1:0);
+        return -1;
     } else if(page==Page::Collage){
         if(y>=720&&y<=762){if(x<342)return 83;if(x<512)return 84;if(x<682)return 85;return 86;}
         if(y>=665&&y<=715)return x<512?71:72;
@@ -214,6 +219,16 @@ struct Renderer {
         projectPage=std::clamp(projectPage,0,std::max(0,int((projectNames.size()+3)/4)-1));
     }
     float disparityStrength=0.8f;
+    float nearBoost=0.f,farPush=0.f,depthContrast=1.f,depthMidpoint=0.5f;
+    void adjustCurve(int button){
+        const float sign=button%2?1.f:-1.f;
+        switch((button-92)/2){
+            case 0:nearBoost=std::clamp(nearBoost+sign*.1f,0.f,2.f);break;
+            case 1:farPush=std::clamp(farPush+sign*.1f,0.f,2.f);break;
+            case 2:depthContrast=std::clamp(depthContrast+sign*.1f,0.4f,3.f);break;
+            case 3:depthMidpoint=std::clamp(depthMidpoint+sign*.025f,.2f,.8f);break;
+        }
+    }
     std::vector<float> photoLuminance;
     std::vector<uint8_t> photoRgb;
     // Immersive controls are rendered on a separate physical compositor quad.
@@ -478,6 +493,10 @@ struct Renderer {
             uniform int useQuickDepth;
             uniform float eyeSign;
             uniform float depthStrength;
+             uniform float nearBoost;
+             uniform float farPush;
+             uniform float depthContrast;
+             uniform float depthMidpoint;
             out vec4 frag;
             // Stable inverse stereo warp for strong depth settings.
             // Keep the true depth center neutral to minimize unwanted drift.
@@ -510,13 +529,18 @@ struct Renderer {
                 }
                 return sum/weight;
             }
+            float curveDepth(float d){
+                float delta=(d-depthMidpoint)*depthContrast;
+                delta=delta>=0.0?delta*(1.0+nearBoost):delta*(1.0+farPush);
+                return clamp(depthMidpoint+delta,0.0,1.0);
+            }
             void main() {
                 vec2 sampleUv=uv;
                 const float disparityUnit=0.035;
                 // Additional fixed-point passes improve convergence when
                 // disparity is much stronger than the previous default.
                 for(int i=0;i<5;i++){
-                    float depth=guidedDepth(sampleUv);
+                    float depth=curveDepth(guidedDepth(sampleUv));
                     float offset=eyeSign*depthStrength*(depth-0.5)*disparityUnit;
                     // Retain a narrow safe border to avoid black edge sampling.
                     vec2 target=vec2(uv.x+offset,uv.y);
@@ -524,11 +548,11 @@ struct Renderer {
                 }
                 // A final depth check preferentially chooses nearer surfaces
                 // when the inverse warp crosses a sharp foreground boundary.
-                float foreground=guidedDepth(sampleUv);
+                float foreground=curveDepth(guidedDepth(sampleUv));
                 vec2 next=clamp(vec2(uv.x+eyeSign*depthStrength*
                                     (foreground-0.5)*disparityUnit,uv.y),
                                 vec2(0.001),vec2(0.999));
-                float nextDepth=guidedDepth(next);
+                float nextDepth=curveDepth(guidedDepth(next));
                 if(nextDepth>foreground+0.12)sampleUv=next;
                 // Avoid repeated sampling outside the photograph.
                 sampleUv=clamp(sampleUv,vec2(0.001),vec2(0.999));
@@ -612,6 +636,10 @@ struct Renderer {
         glUniform1i(glGetUniformLocation(photoProgram,"useQuickDepth"),hasQuickDepth()?1:0);
         glUniform1f(glGetUniformLocation(photoProgram,"eyeSign"),eyeSign);
         glUniform1f(glGetUniformLocation(photoProgram,"depthStrength"),depthStrength());
+        glUniform1f(glGetUniformLocation(photoProgram,"nearBoost"),nearBoost);
+        glUniform1f(glGetUniformLocation(photoProgram,"farPush"),farPush);
+        glUniform1f(glGetUniformLocation(photoProgram,"depthContrast"),depthContrast);
+        glUniform1f(glGetUniformLocation(photoProgram,"depthMidpoint"),depthMidpoint);
         glActiveTexture(GL_TEXTURE0);
         glBindTexture(GL_TEXTURE_2D,photoTexture);
         glActiveTexture(GL_TEXTURE1);
@@ -667,7 +695,8 @@ struct Renderer {
             const char* title=page==Page::Open?"OPEN IMAGE":
                 page==Page::Projects?"MY PROJECTS":
                 page==Page::AiDepth?"AI DEPTH":
-                page==Page::Collage?"COLLAGE LAYERS":"VIEW GALLERY";
+                page==Page::Collage?"COLLAGE LAYERS":
+                page==Page::Curves?"DEPTH CURVES":"VIEW GALLERY";
             int n=static_cast<int>(std::strlen(title));
             label(v,title,512-n*15,(page==Page::Open||page==Page::Projects)?630:475,5,white);
             if(page==Page::Open) {
@@ -679,14 +708,18 @@ struct Renderer {
                 label(v,"UNDO",658,678,2,canUndo()?white:muted);
                 box(v,754,665,100,50,hovered==13&&canRedo()?purpleHover:button);
                 label(v,"REDO",765,678,2,canRedo()?white:muted);
-                box(v,170,730,684,36,hovered==70?purpleHover:purple);
-                label(v,"COLLAGE LAYERS",387,738,2,white);
+                box(v,170,730,336,36,hovered==70?purpleHover:purple);
+                label(v,"COLLAGE LAYERS",221,738,2,white);
+                box(v,518,730,336,36,hovered==90?purpleHover:purple);
+                label(v,"DEPTH CURVES",596,738,2,white);
                 box(v,170,590,210,58,hovered==60?purpleHover:(selectionMode?purple:button));
                 label(v,selectionMode?"PICK AREA":"SELECT AREA",184,610,2,white);
                 box(v,390,590,210,58,hovered==61?purpleHover:button);
                 label(v,"CLEAR MASK",404,610,2,hasSelection()?white:muted);
                 box(v,610,590,244,58,hovered==62?purpleHover:button);
                 label(v,"INVERT MASK",624,610,2,hasSelection()?white:muted);
+                if(brushMode && !hasDepthPixels())
+                    label(v,"CREATE QUICK DEPTH FIRST",190,568,2,{1.f,0.7f,0.2f});
                 if(brushMode && hasDepthPixels()) {
                     label(v,"L PUSH R PULL",700,574,2,muted);
                     const std::string brushText="LEFT "+std::to_string(int(leftRadius))+
@@ -712,6 +745,23 @@ struct Renderer {
                     label(v,hasQuickDepth()?"QUICK DEPTH MAP":quickConverting?"CONVERTING DEPTH":"HEURISTIC DEPTH",180,310,2,muted);
                     label(v,"BOTH GRIPS RESIZE ROTATE",204,304,2,muted);
                 }
+            } else if(page==Page::Curves){
+                box(v,170,36,684,69,hovered==91?purpleHover:purple);
+                label(v,"BACK TO EDITOR",303,57,3,white);
+                const char* names[]={"NEAR BOOST","FAR PUSH","CONTRAST","MIDPOINT"};
+                const float vals[]={nearBoost,farPush,depthContrast,depthMidpoint};
+                const int ys[]={535,425,315,205};
+                for(int i=0;i<4;i++){
+                    const int y=ys[i];
+                    box(v,170,float(y),330,70,hovered==92+i*2?purpleHover:button);
+                    box(v,524,float(y),330,70,hovered==93+i*2?purpleHover:button);
+                    label(v,"-",224,y+23,3,white);
+                    label(v,"+",577,y+23,3,white);
+                    label(v,names[i],340,y+79,2,muted);
+                    const std::string value=std::to_string(int(vals[i]*100.f))+" PCT";
+                    label(v,value.c_str(),648,y+80,2,white);
+                }
+                label(v,"DEPTH CURVES AFFECT PREVIEW ONLY",181,142,2,muted);
             } else if(page==Page::Collage){
                 const std::string count="LAYER "+std::to_string(collageCount?collageActive+1:0)+
                     " OF "+std::to_string(collageCount);
