@@ -1074,7 +1074,9 @@ void run(JNIEnv* env, jobject activity) {
                     menu.selectAt(pointerX,pointerY,!menu.maskSubtract,true);
                 else if(menu.maskToolMode==2)
                     menu.isolateAt(pointerX,pointerY);
-                else menu.objectTapAt(pointerX,pointerY,!menu.maskSubtract);
+                else if(menu.maskToolMode==3)
+                    menu.objectTapAt(pointerX,pointerY,!menu.maskSubtract);
+                else menu.splitSelectionAt(pointerX,pointerY);
                 menu.finishMaskEdit();
             }
             // Drag strength sliders while holding the right trigger.
@@ -1157,11 +1159,14 @@ void run(JNIEnv* env, jobject activity) {
                     }
                     if(maskChanges)menu.finishMaskEdit();
                 } else if(page==vrui::Page::Mask && hovered==117){
+                    menu.splitKeepSeed=-1;menu.splitStatus=0;
                     menu.undoMask();
                 } else if(page==vrui::Page::Mask && hovered==118){
+                    menu.splitKeepSeed=-1;menu.splitStatus=0;
                     menu.redoMask();
                 } else if(page==vrui::Page::Mask && hovered==119){
-                    menu.maskToolMode=(menu.maskToolMode+1)%4;
+                    menu.maskToolMode=(menu.maskToolMode+1)%5;
+                    menu.splitKeepSeed=-1;menu.splitStatus=0;
                 } else if(page==vrui::Page::Mask && hovered==120){
                     menu.maskBrushRadius=std::max(3.f,menu.maskBrushRadius-5.f);
                 } else if(page==vrui::Page::Mask && hovered==121){
