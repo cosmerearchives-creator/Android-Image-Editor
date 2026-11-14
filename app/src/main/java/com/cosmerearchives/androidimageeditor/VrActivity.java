@@ -58,69 +58,200 @@ public final class VrActivity extends Activity {
     private final AtomicBoolean batchCancel=new AtomicBoolean(false);
     private volatile int pendingBatchView=0;
 
-    private void openBatchDocumentPicker(){
-        Intent picker=new Intent(Intent.ACTION_OPEN_DOCUMENT)
-            .addCategory(Intent.CATEGORY_OPENABLE).setType("image/*")
-            .putExtra(Intent.EXTRA_ALLOW_MULTIPLE,true);
-        try{startActivityForResult(picker,BATCH_PICK);}
+    private static final int BATCH_FOLDER=13;
+    private static final String PICKER_PREFS="batch_file_picker";
+    private final java.util.LinkedHashSet<String> batchPicked=new java.util.LinkedHashSet<>();
+    private androidx.documentfile.provider.DocumentFile pickerRoot;
+    private androidx.documentfile.provider.DocumentFile pickerCurrent;
+    private android.app.AlertDialog pickerDialog;
+    private android.widget.LinearLayout pickerRows;
+    private android.widget.TextView pickerPath;
+    private android.widget.TextView pickerSelectionCount;
+    private final java.util.ArrayList<androidx.documentfile.provider.DocumentFile> pickerBack=
+        new java.util.ArrayList<>();
+
+    private void openBatchFolderGrant(){
+        Intent request=new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE);
+        try{startActivityForResult(request,BATCH_FOLDER);}
         catch(android.content.ActivityNotFoundException e){
-            Toast.makeText(this,"No image picker available",Toast.LENGTH_LONG).show();
+            Toast.makeText(this,"Folder browser unavailable on this device",
+                Toast.LENGTH_LONG).show();
         }
     }
-
-    /** Persistent imported thumbnails are shown before the Android system picker.
-     *  Android's external document picker does not support per-file imported badges.
+    private void openBatchCustomPicker(){
+        Uri saved=null;
+        String value=getSharedPreferences(PICKER_PREFS,MODE_PRIVATE)
+            .getString("tree",null);
+        if(value!=null)try{saved=Uri.parse(value);}catch(Exception ignored){}
+        if(saved==null){openBatchFolderGrant();return;}
+        try{
+            pickerRoot=androidx.documentfile.provider.DocumentFile.fromTreeUri(this,saved);
+            if(pickerRoot==null||!pickerRoot.canRead())throw new SecurityException("Folder access expired");
+            pickerCurrent=pickerRoot;
+            pickerBack.clear();
+            batchPicked.clear();
+            createBatchPickerDialog();
+        }catch(Exception ex){
+            getSharedPreferences(PICKER_PREFS,MODE_PRIVATE).edit().remove("tree").apply();
+            openBatchFolderGrant();
+        }
+    }
+    /** Own folder browser: persistent folder access, multiple selections and
+     * imported status. System UI is used only for the initial folder grant.
      */
     @SuppressWarnings("unused")
     public void requestBatchImport(){
-        runOnUiThread(()->{
-            File[] imported=BatchStore.importedImages(getApplicationContext());
-            if(imported.length==0){openBatchDocumentPicker();return;}
-            android.widget.LinearLayout list=new android.widget.LinearLayout(this);
-            list.setOrientation(android.widget.LinearLayout.VERTICAL);
-            int padding=(int)(12*getResources().getDisplayMetrics().density);
-            list.setPadding(padding,padding,padding,padding);
-            android.widget.TextView intro=new android.widget.TextView(this);
-            intro.setText(imported.length+" images already imported. Those images will be skipped if selected again.");
-            intro.setPadding(0,0,0,padding);
-            list.addView(intro);
-            // Bounded thumbnail decoding prevents large imported libraries from
-            // exhausting memory simply by opening the import chooser.
-            int shown=Math.min(imported.length,32);
-            for(int i=0;i<shown;i++){
-                File entry=imported[i];
-                android.widget.LinearLayout row=new android.widget.LinearLayout(this);
-                row.setOrientation(android.widget.LinearLayout.HORIZONTAL);
-                row.setPadding(0,4,0,4);
-                android.widget.ImageView thumbnail=new android.widget.ImageView(this);
-                android.graphics.BitmapFactory.Options options=new android.graphics.BitmapFactory.Options();
-                options.inSampleSize=8;
-                android.graphics.Bitmap preview=android.graphics.BitmapFactory.decodeFile(
-                    new File(entry,"source.png").getAbsolutePath(),options);
-                if(preview!=null)thumbnail.setImageBitmap(preview);
-                row.addView(thumbnail,new android.widget.LinearLayout.LayoutParams(
-                    (int)(72*getResources().getDisplayMetrics().density),
-                    (int)(72*getResources().getDisplayMetrics().density)));
-                android.widget.TextView label=new android.widget.TextView(this);
-                label.setText("  IMPORTED  -  "+BatchStore.importedName(entry));
-                label.setGravity(android.view.Gravity.CENTER_VERTICAL);
-                row.addView(label,new android.widget.LinearLayout.LayoutParams(
-                    0,(int)(72*getResources().getDisplayMetrics().density),1));
-                list.addView(row);
+        runOnUiThread(this::openBatchCustomPicker);
+    }
+    private void createBatchPickerDialog(){
+        android.widget.LinearLayout root=new android.widget.LinearLayout(this);
+        root.setOrientation(android.widget.LinearLayout.VERTICAL);
+        int pad=(int)(10*getResources().getDisplayMetrics().density);
+        root.setPadding(pad,pad,pad,pad);
+        android.widget.LinearLayout header=new android.widget.LinearLayout(this);
+        header.setOrientation(android.widget.LinearLayout.HORIZONTAL);
+        android.widget.Button back=new android.widget.Button(this);
+        back.setText("UP");
+        back.setOnClickListener(v->{
+            if(!pickerBack.isEmpty()){
+                pickerCurrent=pickerBack.remove(pickerBack.size()-1);
+                refreshBatchPicker();
             }
-            if(imported.length>shown){
-                android.widget.TextView more=new android.widget.TextView(this);
-                more.setText("And "+(imported.length-shown)+" more imported images");
-                list.addView(more);
+        });
+        header.addView(back);
+        android.widget.Button folder=new android.widget.Button(this);
+        folder.setText("CHANGE FOLDER");
+        folder.setOnClickListener(v->openBatchFolderGrant());
+        header.addView(folder);
+        root.addView(header);
+        pickerPath=new android.widget.TextView(this);
+        pickerPath.setTextSize(14);
+        root.addView(pickerPath);
+        pickerSelectionCount=new android.widget.TextView(this);
+        pickerSelectionCount.setTextSize(15);
+        pickerSelectionCount.setPadding(0,pad,0,pad);
+        root.addView(pickerSelectionCount);
+        android.widget.ScrollView scroll=new android.widget.ScrollView(this);
+        pickerRows=new android.widget.LinearLayout(this);
+        pickerRows.setOrientation(android.widget.LinearLayout.VERTICAL);
+        scroll.addView(pickerRows);
+        root.addView(scroll,new android.widget.LinearLayout.LayoutParams(-1,0,1));
+        pickerDialog=new android.app.AlertDialog.Builder(this)
+            .setTitle("Choose images")
+            .setView(root)
+            .setNegativeButton("CANCEL",null)
+            .setPositiveButton("IMPORT SELECTED",(dialog,which)->{
+                if(batchPicked.isEmpty())return;
+                java.util.ArrayList<Uri> selected=new java.util.ArrayList<>();
+                for(String name:batchPicked)selected.add(Uri.parse(name));
+                importPickedImages(selected);
+            })
+            .create();
+        pickerDialog.setOnDismissListener(d->pickerDialog=null);
+        pickerDialog.show();
+        refreshBatchPicker();
+    }
+    private void updatePickerCount(){
+        if(pickerSelectionCount!=null)
+            pickerSelectionCount.setText(batchPicked.size()+" images selected");
+        if(pickerDialog!=null && pickerDialog.getButton(
+                android.app.AlertDialog.BUTTON_POSITIVE)!=null)
+            pickerDialog.getButton(android.app.AlertDialog.BUTTON_POSITIVE)
+                .setEnabled(!batchPicked.isEmpty());
+    }
+    private void refreshBatchPicker(){
+        if(pickerRows==null||pickerCurrent==null)return;
+        final androidx.documentfile.provider.DocumentFile folder=pickerCurrent;
+        pickerPath.setText("Folder: "+(folder.getName()==null?"Images":folder.getName()));
+        pickerRows.removeAllViews();
+        android.widget.TextView loading=new android.widget.TextView(this);
+        loading.setText("Loading images...");
+        pickerRows.addView(loading);
+        updatePickerCount();
+        // SAF providers can be slow. Never query documents on the XR/UI thread.
+        new Thread(()->{
+            androidx.documentfile.provider.DocumentFile[] files;
+            try{files=folder.listFiles();}
+            catch(Exception ex){
+                Log.e(TAG,"Failed to browse folder",ex);
+                runOnUiThread(()->{
+                    if(pickerCurrent==folder && pickerRows!=null){
+                        pickerRows.removeAllViews();
+                        android.widget.TextView err=new android.widget.TextView(this);
+                        err.setText("Folder unavailable. Choose another folder.");
+                        pickerRows.addView(err);
+                    }
+                });
+                return;
             }
-            android.widget.ScrollView scroll=new android.widget.ScrollView(this);
-            scroll.addView(list);
-            new android.app.AlertDialog.Builder(this)
-                .setTitle("Already imported")
-                .setView(scroll)
-                .setPositiveButton("SELECT MORE IMAGES",(dialog,which)->openBatchDocumentPicker())
-                .setNegativeButton("CANCEL",null)
-                .show();
+            java.util.Arrays.sort(files,(a,b)->{
+                if(a.isDirectory()!=b.isDirectory())return a.isDirectory()?-1:1;
+                return String.CASE_INSENSITIVE_ORDER.compare(
+                    String.valueOf(a.getName()),String.valueOf(b.getName()));
+            });
+            runOnUiThread(()->{
+                if(pickerCurrent!=folder||pickerRows==null)return;
+                pickerRows.removeAllViews();
+                int shown=0;
+                for(androidx.documentfile.provider.DocumentFile item:files){
+                    if(item.isDirectory()){
+                        android.widget.Button go=new android.widget.Button(this);
+                        go.setText("[FOLDER] "+item.getName());
+                        go.setOnClickListener(v->{
+                            pickerBack.add(pickerCurrent);
+                            pickerCurrent=item;
+                            refreshBatchPicker();
+                        });
+                        pickerRows.addView(go);
+                    }else{
+                        String type=item.getType();
+                        String name=item.getName()==null?"Image":item.getName();
+                        if(type==null||!type.startsWith("image/"))continue;
+                        if(++shown>250)break; // Avoid huge layouts on Quest.
+                        final Uri uri=item.getUri();
+                        boolean imported=BatchStore.wasImported(getApplicationContext(),uri);
+                        android.widget.CheckBox check=new android.widget.CheckBox(this);
+                        check.setText((imported?"ALREADY IMPORTED  •  ":"")+name);
+                        check.setChecked(batchPicked.contains(uri.toString()));
+                        check.setOnCheckedChangeListener((button,checked)->{
+                            if(checked)batchPicked.add(uri.toString());
+                            else batchPicked.remove(uri.toString());
+                            updatePickerCount();
+                        });
+                        pickerRows.addView(check);
+                    }
+                }
+                if(shown==0){
+                    android.widget.TextView noImages=new android.widget.TextView(this);
+                    noImages.setText("No images in this folder. Open a subfolder.");
+                    pickerRows.addView(noImages);
+                }else if(shown>250){
+                    android.widget.TextView limit=new android.widget.TextView(this);
+                    limit.setText("Showing first 250 images in this folder.");
+                    pickerRows.addView(limit);
+                }
+                updatePickerCount();
+            });
+        },"batch-folder-browser").start();
+    }
+    private void importPickedImages(java.util.List<Uri> picked){
+        if(picked.isEmpty()||!batchBusy.compareAndSet(false,true))return;
+        batchCancel.set(false);
+        reportBatchStatus(1,0,picked.size());
+        batchWorker.execute(()->{
+            try{
+                int added=BatchStore.importImages(getApplicationContext(),picked,
+                    batchCancel,p->reportBatchStatus(1,p,picked.size()));
+                reportBatchStatus(8,100,BatchStore.count(getApplicationContext()));
+                runOnUiThread(()->Toast.makeText(this,
+                    added+" added, "+(picked.size()-added)+" already imported (skipped)",
+                    Toast.LENGTH_LONG).show());
+            }catch(Exception e){
+                Log.e(TAG,"Bulk import failed",e);
+                reportBatchStatus(6,0,BatchStore.count(getApplicationContext()));
+                runOnUiThread(()->Toast.makeText(this,
+                    "Bulk import stopped: "+e.getMessage(),Toast.LENGTH_LONG).show());
+            }finally{batchBusy.set(false);}
         });
     }
     @SuppressWarnings("unused")
@@ -732,6 +863,23 @@ public final class VrActivity extends Activity {
             });
             return;
         }
+        if(request==BATCH_FOLDER){
+            if(result!=RESULT_OK||data==null||data.getData()==null)return;
+            Uri tree=data.getData();
+            try{
+                getContentResolver().takePersistableUriPermission(tree,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                getSharedPreferences(PICKER_PREFS,MODE_PRIVATE).edit()
+                    .putString("tree",tree.toString()).apply();
+                if(pickerDialog!=null)pickerDialog.dismiss();
+                openBatchCustomPicker();
+            }catch(SecurityException e){
+                Log.e(TAG,"Folder access denied",e);
+                Toast.makeText(this,"Folder permission wasn't granted",
+                    Toast.LENGTH_LONG).show();
+            }
+            return;
+        }
         if(request==BATCH_PICK){
             if(result!=RESULT_OK||data==null)return;
             java.util.ArrayList<Uri> picked=new java.util.ArrayList<>();
@@ -741,22 +889,7 @@ public final class VrActivity extends Activity {
                     if(clip.getItemAt(i).getUri()!=null)
                         picked.add(clip.getItemAt(i).getUri());
             }else if(data.getData()!=null)picked.add(data.getData());
-            if(picked.isEmpty()||!batchBusy.compareAndSet(false,true))return;
-            batchCancel.set(false);
-            reportBatchStatus(1,0,picked.size());
-            batchWorker.execute(()->{
-                try{
-                    int added=BatchStore.importImages(getApplicationContext(),picked,
-                        batchCancel,p->reportBatchStatus(1,p,picked.size()));
-                    reportBatchStatus(8,100,BatchStore.count(getApplicationContext()));
-                    runOnUiThread(()->Toast.makeText(this,
-                        added+" added, "+(picked.size()-added)+" already imported (skipped)",
-                        Toast.LENGTH_LONG).show());
-                }catch(Exception e){
-                    Log.e(TAG,"Bulk import failed",e);
-                    reportBatchStatus(6,0,BatchStore.count(getApplicationContext()));
-                }finally{batchBusy.set(false);}
-            });
+            importPickedImages(picked);
             return;
         }
         if ((request != PICK_IMAGE && request != ADD_COLLAGE_IMAGE) || result != RESULT_OK || data == null || data.getData() == null)
