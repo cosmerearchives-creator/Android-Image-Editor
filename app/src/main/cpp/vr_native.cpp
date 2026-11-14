@@ -2,6 +2,7 @@
 #include <atomic>
 #include <chrono>
 #include <thread>
+#include <mutex>
 #include <vector>
 #include <cmath>
 #include "vr_ui.h"
@@ -17,6 +18,9 @@ std::atomic<bool> stopRequested{false};
 std::atomic<bool> imageNeedsReload{true};
 std::atomic<bool> depthNeedsReload{true};
 std::atomic<int> aiDepthState{0},aiDepthPercent{0};
+std::atomic<int> aiSegmentState{0},aiSegmentPercent{0};
+std::mutex aiMaskMutex;
+std::vector<uint8_t> pendingAiMask;
 void aiControl(JNIEnv* env,jobject activity,const char* methodName){
     jclass cls=env->GetObjectClass(activity);
     jmethodID method=env->GetMethodID(cls,methodName,"()V");
@@ -1117,6 +1121,9 @@ void run(JNIEnv* env, jobject activity) {
                         case 108:menu.clearMask();break;
                         case 109:menu.selectAllMask();break;
                     }
+                } else if(page==vrui::Page::Mask && hovered==116){
+                    if(aiSegmentState.load()!=1 && aiSegmentState.load()!=2)
+                        aiControl(env,activity,"requestAiSubjectSelection");
                 } else if(page==vrui::Page::Mask && hovered==115){
                     menu.autoMaskStatus=menu.autoForegroundMask()?1:2;
                 } else if(page==vrui::Page::Mask &&
@@ -1227,14 +1234,30 @@ void run(JNIEnv* env, jobject activity) {
             menu.aiState=aiDepthState.load();
             menu.aiPercent=aiDepthPercent.load();
             menu.aiPreview=menu.aiState==3;
+            menu.aiSegmentState=aiSegmentState.load();
+            menu.aiSegmentPercent=aiSegmentPercent.load();
             if(projectsNeedReload.exchange(false))refreshProjectList(env,activity,menu);
             if(imageNeedsReload.exchange(false)) {
+                {
+                    std::lock_guard<std::mutex> lock(aiMaskMutex);
+                    pendingAiMask.clear();
+                }
                 refreshImage(env,activity,menu);
                 refreshCollageStatus(env,activity,menu);
                 menu.brushMode=false;
                 depthNeedsReload.store(true);
             }
             if(depthNeedsReload.exchange(false))refreshDepth(env,activity,menu);
+            {
+                // JNI worker only publishes data. Texture upload stays on the
+                // OpenXR GL thread, where the GL context is current.
+                std::vector<uint8_t> mask;
+                {
+                    std::lock_guard<std::mutex> lock(aiMaskMutex);
+                    mask.swap(pendingAiMask);
+                }
+                if(!mask.empty())menu.applyAiMask(mask);
+            }
             glDisable(GL_DEPTH_TEST);
             glDisable(GL_BLEND);
             for(int eye=0;eye<2;++eye) {
