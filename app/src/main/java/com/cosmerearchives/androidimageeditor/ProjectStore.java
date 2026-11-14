@@ -19,6 +19,7 @@ public final class ProjectStore {
     private static final String ROOT = "vr_projects";
     private static final String PHOTO = "vr_import.png";
     private static final String DEPTH = "vr_depth_quick.png";
+    private static final String AI_MARKER="vr_depth_ai_done.flag";
     private static final String TITLE = "title.txt";
     private static final String PREF = "vr_project_library";
     private static final String SELECTED = "selected_project";
@@ -107,6 +108,10 @@ public final class ProjectStore {
         File depth = current(ctx, DEPTH);
         if(depth.isFile()) replace(depth,new File(directory,DEPTH));
         else new File(directory,DEPTH).delete();
+        File marker=current(ctx,AI_MARKER);
+        if(marker.isFile())replace(marker,new File(directory,AI_MARKER));
+        else new File(directory,AI_MARKER).delete();
+        BatchStore.syncActive(ctx);
         File title = new File(directory,TITLE);
         if(!title.exists()) {
             String display=p.getString(DRAFT,"UNTITLED");
@@ -131,6 +136,10 @@ public final class ProjectStore {
         File depth=new File(directory,DEPTH);
         if(depth.isFile()) replace(depth,current(ctx,DEPTH));
         else current(ctx,DEPTH).delete();
+        File marker=new File(directory,AI_MARKER);
+        if(marker.isFile())replace(marker,current(ctx,AI_MARKER));
+        else current(ctx,AI_MARKER).delete();
+        BatchStore.clearActive(ctx);
         prefs(ctx).edit().putString(SELECTED,directory.getName())
             .putString(DRAFT,name(directory)).apply();
     }
