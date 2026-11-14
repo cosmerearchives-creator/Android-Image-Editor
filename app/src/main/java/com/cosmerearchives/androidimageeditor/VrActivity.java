@@ -211,7 +211,7 @@ public final class VrActivity extends Activity {
                         if(type==null||!type.startsWith("image/"))continue;
                         if(++shown>250)break; // Avoid huge layouts on Quest.
                         final Uri uri=item.getUri();
-                        boolean alreadyImported=imported.contains(uri.toString());
+                        boolean alreadyImported=imported.contains(BatchStore.documentKey(uri));
                         android.widget.LinearLayout row=new android.widget.LinearLayout(this);
                         row.setOrientation(android.widget.LinearLayout.HORIZONTAL);
                         android.widget.ImageView thumb=new android.widget.ImageView(this);
