@@ -1248,7 +1248,16 @@ void main(){
         // Keep the regular VR home/editor operational if this optional renderer
         // fails to compile on a particular Quest graphics driver.
         GLuint sf=shader(GL_FRAGMENT_SHADER,sphereFs);
-        GLuint sv=shader(GL_VERTEX_SHADER,photoVs);
+        const char* galleryVs=R"(#version 300 es
+            layout(location=0) in vec2 pos;
+            layout(location=2) in vec2 texCoord;
+            out vec2 uv;
+            void main(){
+                gl_Position=vec4(pos.x/512.0-1.0,pos.y/384.0-1.0,0.0,1.0);
+                uv=texCoord;
+            }
+        )";
+        GLuint sv=shader(GL_VERTEX_SHADER,galleryVs);
         if(sf&&sv){
             sphereProgram=glCreateProgram();
             glAttachShader(sphereProgram,sv);
