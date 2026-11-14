@@ -1401,6 +1401,44 @@ struct Renderer {
         box(v,192,540,636.f*float(aiPercent)/100.f,8,purpleHover);
         submitUi(v);
     }
+    void drawSelectionCursor(float x,float y,bool valid,bool held){
+        if(!valid||!hasPhoto())return;
+        float u=0.f,vCoord=0.f;
+        if(!hitPhoto(x,y,true,u,vCoord))return;
+        const float aspect=float(photoWidth)/photoHeight;
+        float pw=1024.f,ph=768.f;
+        if(aspect>pw/ph)ph=pw/aspect;else pw=ph*aspect;
+        const float radius=maskToolMode==0?
+            std::clamp(maskBrushRadius*std::min(pw,ph)*zoom/MASK_EDGE,3.f,240.f):12.f;
+        const Color ink=maskSubtract?Color{1.f,.42f,.3f}:
+                         Color{.35f,1.f,.49f};
+        const Color halo{.015f,.012f,.025f};
+        std::vector<float> geometry;
+        constexpr int segments=48;
+        for(int pass=0;pass<2;++pass){
+            const float thickness=pass==0?6.f:3.f;
+            const Color color=pass==0?halo:ink;
+            for(int i=0;i<segments;++i){
+                const float a=6.283185307f*float(i)/segments;
+                const float b=6.283185307f*float(i+1)/segments;
+                const float ax=x+std::cos(a)*radius,ay=y+std::sin(a)*radius;
+                const float bx=x+std::cos(b)*radius,by=y+std::sin(b)*radius;
+                const float dx=bx-ax,dy=by-ay,len=std::hypot(dx,dy);
+                if(len<1.e-5f)continue;
+                const float nx=-dy/len*thickness*.5f,ny=dx/len*thickness*.5f;
+                const float vertices[6][2]={{ax+nx,ay+ny},{bx+nx,by+ny},
+                    {ax-nx,ay-ny},{bx+nx,by+ny},{bx-nx,by-ny},{ax-nx,ay-ny}};
+                for(const auto& pt:vertices){
+                    geometry.push_back(pt[0]);geometry.push_back(pt[1]);
+                    geometry.push_back(color.r);geometry.push_back(color.g);
+                    geometry.push_back(color.b);
+                }
+            }
+        }
+        box(geometry,x-8,y-2,16,4,ink);
+        if(!maskSubtract)box(geometry,x-2,y-8,4,16,ink);
+        submitUi(geometry);
+    }
     // Cursor outlines are always legible in Quest: strong dark halo, vivid
     // hand-specific stroke, and a visibly different color while sculpting.
     void drawHandCursor(float x,float y,bool valid,bool left,bool active,
