@@ -1028,9 +1028,11 @@ void run(JNIEnv* env, jobject activity) {
                     menu.stereoEnabled=!menu.stereoEnabled;
                 }
             }
-            if(page==vrui::Page::Open && menu.selectionMode && triggerDown &&
-               !wasPressed && pointer && hovered<0 && overlayHover<0)
-                menu.selectAt(pointerX,pointerY);
+            if(page==vrui::Page::Mask && triggerDown && !wasPressed &&
+               pointer && hovered<0 && overlayHover<0 &&
+               menu.hasPhoto() && !dragging) {
+                menu.selectAt(pointerX,pointerY,!menu.maskSubtract);
+            }
             // Drag strength sliders while holding the right trigger.
             const bool sliderAim=immersive?toolPointer:pointer;
             const float sliderX=immersive?toolPointerX:pointerX;
@@ -1084,8 +1086,24 @@ void run(JNIEnv* env, jobject activity) {
                         (menu.collageActive+1)%menu.collageCount:0;
                 }
                 else if(page==vrui::Page::Open && hovered==60 && menu.hasPhoto()) {
-                    menu.selectionMode=!menu.selectionMode;
-                    if(menu.selectionMode)menu.brushMode=false;
+                    menu.brushMode=false;
+                    menu.selectionMode=false;
+                    page=vrui::Page::Mask;
+                } else if(page==vrui::Page::Mask && hovered==110){
+                    page=vrui::Page::Open;
+                } else if(page==vrui::Page::Mask && hovered>=100 && hovered<=109){
+                    switch(hovered) {
+                        case 100:menu.maskSubtract=false;break;
+                        case 101:menu.maskSubtract=true;break;
+                        case 102:menu.adjustMaskTolerance(-10);break;
+                        case 103:menu.adjustMaskTolerance(10);break;
+                        case 104:menu.growOrShrinkMask(true);break;
+                        case 105:menu.growOrShrinkMask(false);break;
+                        case 106:menu.smoothMask();break;
+                        case 107:menu.invertMask();break;
+                        case 108:menu.clearMask();break;
+                        case 109:menu.selectAllMask();break;
+                    }
                 } else if(page==vrui::Page::Open && hovered==61) {
                     menu.clearMask();menu.selectionMode=false;
                 } else if(page==vrui::Page::Open && hovered==62) {
