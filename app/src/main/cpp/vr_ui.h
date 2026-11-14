@@ -228,10 +228,10 @@ struct Renderer {
         selectionMask=std::move(next);
         uploadMask();
     }
-    bool selectAt(float sx,float sy,bool additive=true){
+    bool selectAt(float sx,float sy,bool additive=true,bool fullPhoto=false){
         if(photoRgb.size()!=size_t(DEPTH_EDGE)*DEPTH_EDGE*3u)return false;
         float u=0.f,v=0.f;
-        if(!hitPhoto(sx,sy,false,u,v))return false;
+        if(!hitPhoto(sx,sy,fullPhoto,u,v))return false;
         int x=std::clamp(int(u*255),0,255),y=std::clamp(int((1.f-v)*255),0,255);
         int start=y*256+x;
         std::vector<uint8_t> chosen(65536u,0);
