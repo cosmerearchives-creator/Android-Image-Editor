@@ -108,6 +108,7 @@ inline int buttonAt(Page page,float x,float y) {
             if(x>=420&&x<=639)return 7;
         }
     } else if(page==Page::Collage){
+        if(y>=720&&y<=762){if(x<342)return 83;if(x<512)return 84;if(x<682)return 85;return 86;}
         if(y>=665&&y<=715)return x<512?71:72;
         if(y>=590&&y<=650){if(x<342)return 73;if(x<512)return 74;if(x<682)return 75;return 76;}
         if(y>=205&&y<=291){if(x<342)return 77;if(x<512)return 78;if(x<682)return 79;return 80;}
@@ -672,7 +673,13 @@ struct Renderer {
             } else if(page==Page::Collage){
                 const std::string count="LAYER "+std::to_string(collageCount?collageActive+1:0)+
                     " OF "+std::to_string(collageCount);
-                label(v,count.c_str(),182,590,3,white);
+                label(v,count.c_str(),182,549,3,white);
+                const char* more[]={"ROTATE -","ROTATE +","SEND BACK","BRING FRONT"};
+                for(int i=0;i<4;i++){
+                    const int x=170+i*172;
+                    box(v,float(x),720,164,42,hovered==83+i?purpleHover:button);
+                    label(v,more[i],x+8,733,2,white);
+                }
                 const char* top[]={"PREV LAYER","NEXT LAYER"};
                 for(int i=0;i<2;i++){
                     int x=170+i*344;
