@@ -1322,6 +1322,9 @@ void run(JNIEnv* env, jobject activity) {
                                     true,paintLeft,fullPhoto,pushDown);
                 menu.drawHandCursor(pointerX,pointerY,pointer,
                                     false,paintRight,fullPhoto,pullDown);
+                if(page==vrui::Page::Mask)
+                    menu.drawSelectionCursor(pointerX,pointerY,
+                                             pointer&&!toolPointer,maskPainting);
             }
             if(detachedTools){
                 // Dedicated world-space tool panel renders outside the photo's
