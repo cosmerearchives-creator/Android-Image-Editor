@@ -189,6 +189,7 @@ public final class VrActivity extends Activity {
      */
     @SuppressWarnings("unused")
     public void requestAutoConvert() {
+        if(aiRunning.get())return;
         // A completed AI scan is tied to the actual imported image. Keep it
         // through reopening projects and style changes; never infer twice
         // merely because the user selects Inverted or Exaggerated.
@@ -663,7 +664,9 @@ public final class VrActivity extends Activity {
             batchWorker.execute(()->{
                 try(java.io.OutputStream out=getContentResolver().openOutputStream(target)){
                     if(out==null)throw new IOException("Cannot write export");
-                    BatchStore.copyTo(getApplicationContext(),spherical,out);
+                    BatchStore.copyTo(getApplicationContext(),spherical,out,
+                        progress->reportBatchStatus(7,progress,
+                            BatchStore.count(getApplicationContext())));
                     reportBatchStatus(4,100,BatchStore.count(getApplicationContext()));
                     runOnUiThread(()->Toast.makeText(this,
                         "Gallery PNG exported",Toast.LENGTH_LONG).show());
