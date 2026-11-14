@@ -178,7 +178,7 @@ struct Renderer {
     int collageCount=0,collageActive=0;
     bool selectionMode=false;
     bool maskSubtract=false;
-    int maskToolMode=0; // 0 literal paint, 1 smart region, 2 isolate clicked selection
+    int maskToolMode=0; // 0 paint, 1 smart color/depth, 2 isolate, 3 object tap
     float maskBrushRadius=28.f;
     std::vector<std::vector<uint8_t>> maskUndo,maskRedo;
     std::vector<uint8_t> maskStrokeBefore;
@@ -406,6 +406,63 @@ struct Renderer {
     }
     // Keep one clicked region within an existing AI/manual selection.
     // Connected depth-and-color guided isolation, not semantic classification.
+    // Seeded subject selection: a local, bounded object proposal. Unlike
+    // the scene-level AI mask it only updates the clicked object's region.
+    // Uses 1024px source color plus an optional depth boundary constraint.
+    bool objectTapAt(float sx,float sy,bool additive){
+        if(photoRgb.size()!=size_t(MASK_EDGE)*MASK_EDGE*3u)return false;
+        float u=0.f,v=0.f;
+        if(!hitPhoto(sx,sy,true,u,v))return false;
+        const int x=std::clamp(int(u*(MASK_EDGE-1)),0,MASK_EDGE-1);
+        const int y=std::clamp(int((1.f-v)*(MASK_EDGE-1)),0,MASK_EDGE-1);
+        const int seed=y*MASK_EDGE+x;
+        const bool useDepth=depthGuidedSelection&&hasDepthPixels();
+        const int seedDepth=useDepth?int(depthCpu[size_t(seed)]):0;
+        const int range=std::clamp(maskTolerance,10,150);
+        const int localRange=std::max(15,range/2);
+        const int anchor=seed*3;
+        std::vector<uint8_t> visited(size_t(MASK_EDGE)*MASK_EDGE,0);
+        std::vector<int> queue{seed};
+        visited[size_t(seed)]=1;
+        const size_t maxRegion=size_t(MASK_EDGE)*MASK_EDGE/3;
+        for(size_t head=0;head<queue.size();++head){
+            if(queue.size()>maxRegion)return false;
+            const int p=queue[head],px=p%MASK_EDGE,py=p/MASK_EDGE;
+            const int neighbors[]={px>0?p-1:-1,px<MASK_EDGE-1?p+1:-1,
+                                   py>0?p-MASK_EDGE:-1,py<MASK_EDGE-1?p+MASK_EDGE:-1};
+            for(int q:neighbors){
+                if(q<0||visited[size_t(q)])continue;
+                // Keep the candidate bounded near the clicked subject's
+                // appearance; do not follow an unrestricted color gradient.
+                int seedDiff=0,localDiff=0;
+                for(int c=0;c<3;++c){
+                    const int sample=int(photoRgb[size_t(q)*3u+size_t(c)]);
+                    const int sd=sample-int(photoRgb[size_t(anchor+c)]);
+                    const int ld=sample-int(photoRgb[size_t(p)*3u+size_t(c)]);
+                    seedDiff+=sd*sd;localDiff+=ld*ld;
+                }
+                if(seedDiff>range*range||localDiff>localRange*localRange)continue;
+                if(useDepth){
+                    const int d=int(depthCpu[size_t(q)]);
+                    if(std::abs(d-seedDepth)>maskDepthTolerance ||
+                       std::abs(d-int(depthCpu[size_t(p)]))>
+                           std::max(8,maskDepthTolerance/2))continue;
+                }
+                visited[size_t(q)]=1;
+                queue.push_back(q);
+            }
+        }
+        if(queue.size()<12)return false;
+        if(!hasSelection())selectionMask.assign(size_t(MASK_EDGE)*MASK_EDGE,0);
+        bool changed=false;
+        const uint8_t desired=additive?255:0;
+        for(int q:queue){
+            uint8_t& pixel=selectionMask[size_t(q)];
+            if(pixel!=desired){pixel=desired;changed=true;}
+        }
+        if(changed)uploadMask();
+        return changed;
+    }
     bool isolateAt(float sx,float sy){
         if(!hasSelection()||photoRgb.size()!=size_t(MASK_EDGE)*MASK_EDGE*3u)return false;
         float u=0.f,v=0.f;
@@ -1136,7 +1193,7 @@ struct Renderer {
                 label(v,"MASK REDO",413,732,2,canRedoMask()?white:muted);
                 box(v,625,720,229,40,hovered==119?purpleHover:
                     maskToolMode!=0?purple:button);
-                label(v,maskToolMode==0?"DIRECT PAINT":maskToolMode==1?"SMART FILL":"ISOLATE TAP",636,732,2,white);
+                label(v,maskToolMode==0?"DIRECT PAINT":maskToolMode==1?"SMART FILL":maskToolMode==2?"ISOLATE TAP":"OBJECT TAP",636,732,2,white);
                 box(v,170,110,330,70,hovered==120?purpleHover:button);
                 label(v,"SMALLER BRUSH",190,133,2,white);
                 box(v,524,110,330,70,hovered==121?purpleHover:button);
@@ -1145,10 +1202,10 @@ struct Renderer {
                 label(v,brushInfo.c_str(),176,189,2,muted);
                 box(v,170,665,330,50,hovered==100?purpleHover:
                     !maskSubtract?purple:button);
-                label(v,maskToolMode==0?"PAINT ADD":maskToolMode==1?"SMART ADD":"ISOLATE KEEP",191,680,2,white);
+                label(v,maskToolMode==0?"PAINT ADD":maskToolMode==1?"SMART ADD":maskToolMode==2?"ISOLATE KEEP":"OBJECT ADD",191,680,2,white);
                 box(v,524,665,330,50,hovered==101?purpleHover:
                     maskSubtract?purple:button);
-                label(v,maskToolMode==0?"PAINT ERASE":maskToolMode==1?"SMART REMOVE":"ISOLATE KEEP",543,680,2,white);
+                label(v,maskToolMode==0?"PAINT ERASE":maskToolMode==1?"SMART REMOVE":maskToolMode==2?"ISOLATE KEEP":"OBJECT REMOVE",543,680,2,white);
                 const char* operations[]={"LESS COLOR","MORE COLOR","EXPAND","CONTRACT",
                     "SMOOTH","INVERT","CLEAR","SELECT ALL"};
                 for(int i=0;i<8;i++){
