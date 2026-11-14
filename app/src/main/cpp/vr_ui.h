@@ -986,8 +986,27 @@ struct Renderer {
                     }
                 }
                 frag=vec4(result,1.0);
-                if(hasSelection==1 && texture(selectionMask,sampleUv).r>0.5)
-                    frag.rgb=mix(frag.rgb,vec3(0.35,0.25,0.85),0.32);
+                if(hasSelection==1){
+                    // An explicit 1024px boundary makes thin included/missed
+                    // details visible while preserving the tinted interior.
+                    float value=texture(selectionMask,sampleUv).r;
+                    float px=1.7/float(textureSize(selectionMask,0).x);
+                    float py=1.7/float(textureSize(selectionMask,0).y);
+                    float neighborMin=min(min(
+                        texture(selectionMask,sampleUv+vec2(px,0.0)).r,
+                        texture(selectionMask,sampleUv-vec2(px,0.0)).r),
+                        min(texture(selectionMask,sampleUv+vec2(0.0,py)).r,
+                            texture(selectionMask,sampleUv-vec2(0.0,py)).r));
+                    float neighborMax=max(max(
+                        texture(selectionMask,sampleUv+vec2(px,0.0)).r,
+                        texture(selectionMask,sampleUv-vec2(px,0.0)).r),
+                        max(texture(selectionMask,sampleUv+vec2(0.0,py)).r,
+                            texture(selectionMask,sampleUv-vec2(0.0,py)).r));
+                    if(value>0.5)frag.rgb=mix(frag.rgb,vec3(0.35,0.25,0.85),0.23);
+                    if(value>0.5 && neighborMin<0.5 ||
+                       value<=0.5 && neighborMax>0.5)
+                        frag.rgb=vec3(0.38,0.96,0.84);
+                }
             }
         )";
         GLuint pv=shader(GL_VERTEX_SHADER,photoVs),pf=shader(GL_FRAGMENT_SHADER,photoFs);
