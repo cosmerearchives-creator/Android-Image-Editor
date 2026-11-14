@@ -679,6 +679,7 @@ void run(JNIEnv* env, jobject activity) {
     XrVector3f anchorWorld{0.f,0.f,-1.9f};
     XrVector3f anchorLocal{0.f,0.f,0.f};
     int batchStatsTick=44;
+    float galleryX=0.f,galleryZ=0.f,galleryY=0.f,galleryYaw=0.f,galleryTime=0.f;
     auto lastFrame=std::chrono::steady_clock::now();
     bool running = false;
     log("OpenXR compositor initialized");
@@ -1029,7 +1030,7 @@ void run(JNIEnv* env, jobject activity) {
                 menu.changeZoom(stick.currentState.y * dt * 1.5f,pointerX,pointerY,
                                 pointer,fullPhoto);
             } else if(page!=vrui::Page::Open && page!=vrui::Page::Immersive
-                     && stick.isActive && !dragging && std::abs(stick.currentState.y)>0.15f){
+                     && page!=vrui::Page::Sphere && stick.isActive && !dragging && std::abs(stick.currentState.y)>0.15f){
                 const float oldScale=panelScale;
                 panelScale=std::clamp(panelScale*std::exp(stick.currentState.y*dt),
                                       0.6f,4.f);
@@ -1275,8 +1276,11 @@ void run(JNIEnv* env, jobject activity) {
                     batchMethod(env,activity,"requestBatchConvert","()V");
                 else if(page==vrui::Page::Gallery && hovered==152)
                     batchMethod(env,activity,"requestBatchView","(IZ)V",1,false);
-                else if(page==vrui::Page::Gallery && hovered==153)
-                    batchMethod(env,activity,"requestBatchView","(IZ)V",2,false);
+                else if(page==vrui::Page::Gallery && hovered==153){
+                    if(menu.galleryAvailable())
+                        batchMethod(env,activity,"requestBatchView","(IZ)V",2,false);
+                    else menu.batchState=6;
+                }
                 else if(page==vrui::Page::Gallery && hovered==154)
                     batchMethod(env,activity,"requestBatchExport","(Z)V",0,false);
                 else if(page==vrui::Page::Gallery && hovered==155)
@@ -1284,6 +1288,8 @@ void run(JNIEnv* env, jobject activity) {
                 else if(page==vrui::Page::Gallery && hovered==156 &&
                         batchState.load()==5)
                     batchMethod(env,activity,"confirmLargeBatchView","()V");
+                else if(page==vrui::Page::Gallery && hovered==156)
+                    menu.galleryTheme=(menu.galleryTheme+1)%6;
                 else if(page==vrui::Page::Open && hovered>=132&&hovered<=134){
                     menu.depthStyle=hovered-132;
                     if(menu.hasPhoto()){
@@ -1492,14 +1498,23 @@ void run(JNIEnv* env, jobject activity) {
             }
             if(depthNeedsReload.exchange(false))refreshDepth(env,activity,menu);
             const int galleryReady=batchReadyMode.exchange(0);
-            if(galleryReady!=0 && loadBatchView(env,activity,menu,galleryReady)){
+            if(galleryReady!=0 && (galleryReady==1||menu.galleryAvailable()) &&
+               loadBatchView(env,activity,menu,galleryReady)){
                 page=galleryReady==1?vrui::Page::Wall:vrui::Page::Sphere;
                 panelPosition={0.f,0.f,-1.9f};
                 panelScale=galleryReady==1?3.7f:1.f;
                 panelAngle=0.f;
+                galleryX=galleryZ=galleryY=galleryYaw=galleryTime=0.f;
                 dragMode=DragMode::None;
                 menu.brushMode=false;
                 menu.selectionOverlayVisible=false;
+            }
+            if(galleryReady==2 && !menu.galleryAvailable()){
+                // A faulty optional gallery shader must not strand the user in
+                // a black VR layer. Return to the standard functional UI.
+                page=vrui::Page::Gallery;
+                menu.batchState=6;
+                log("Cylinder unavailable; staying in VR gallery menu");
             }
             {
                 // JNI worker only publishes data. Texture upload stays on the
@@ -1521,6 +1536,26 @@ void run(JNIEnv* env, jobject activity) {
                 sphereFrame=XR_SUCCEEDED(xrLocateViews(r.session,&locate,&state,
                              2,&viewCount,sceneViews)) && viewCount==2 &&
                             (state.viewStateFlags & XR_VIEW_STATE_ORIENTATION_VALID_BIT);
+            }
+            if(page==vrui::Page::Sphere && sphereFrame){
+                galleryTime+=dt;
+                if(brushSizeStick.isActive){
+                    const float x=brushSizeStick.currentState.x;
+                    const float y=brushSizeStick.currentState.y;
+                    if(std::abs(x)>.15f)galleryYaw=std::remainder(galleryYaw+x*dt*.9f,6.28318530718f);
+                    if(std::abs(y)>.15f)galleryY=std::clamp(galleryY+y*dt*1.6f,-2.2f,2.2f);
+                }
+                if(stick.isActive && std::abs(stick.currentState.y)>.15f){
+                    const auto &q=sceneViews[0].pose.orientation;
+                    const float fx=-2.f*(q.x*q.z+q.w*q.y);
+                    const float fz=-1.f+2.f*(q.x*q.x+q.y*q.y);
+                    const float inv=1.f/std::max(.0001f,std::hypot(fx,fz));
+                    float nx=galleryX+fx*inv*stick.currentState.y*dt*1.6f;
+                    float nz=galleryZ+fz*inv*stick.currentState.y*dt*1.6f;
+                    const float radius=std::hypot(nx,nz);
+                    if(radius>2.45f){nx*=2.45f/radius;nz*=2.45f/radius;}
+                    galleryX=nx;galleryZ=nz;
+                }
             }
             menu.selectionOverlayVisible=page==vrui::Page::Mask ||
                 (page==vrui::Page::Open&&menu.advancedVisible) ||
@@ -1544,7 +1579,11 @@ void run(JNIEnv* env, jobject activity) {
                     const float tangents[]={std::tan(view.fov.angleLeft),
                         std::tan(view.fov.angleRight),std::tan(view.fov.angleDown),
                         std::tan(view.fov.angleUp)};
-                    menu.drawSphere(quaternion,tangents,eyeSign);
+                    const float camera[]={
+                        std::clamp(view.pose.position.x+galleryX,-2.45f,2.45f),
+                        std::clamp(view.pose.position.y+galleryY,-2.35f,2.35f),
+                        std::clamp(view.pose.position.z+galleryZ,-2.45f,2.45f)};
+                    menu.drawSphere(quaternion,tangents,eyeSign,camera,galleryYaw,galleryTime);
                 }else{
                     menu.draw((page==vrui::Page::Wall||detachedEditor)?
                                   vrui::Page::Immersive:page,
