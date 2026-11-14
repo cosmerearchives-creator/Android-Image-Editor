@@ -818,6 +818,7 @@ public final class VrActivity extends Activity {
         segmentWorker.shutdownNow();
         batchCancel.set(true);
         batchWorker.shutdownNow();
+        pickerThumbnails.shutdownNow();
         super.onDestroy();
     }
 
