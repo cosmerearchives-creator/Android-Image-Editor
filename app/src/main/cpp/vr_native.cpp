@@ -48,6 +48,15 @@ void batchMethod(JNIEnv* env,jobject activity,const char* name,
     if(env->ExceptionCheck()){env->ExceptionDescribe();env->ExceptionClear();}
     env->DeleteLocalRef(cls);
 }
+int galleryThemeFromJava(JNIEnv* env,jobject activity,const char* name){
+    jclass cls=env->GetObjectClass(activity);
+    jmethodID method=env->GetMethodID(cls,name,"()I");
+    int result=0;
+    if(method)result=env->CallIntMethod(activity,method);
+    if(env->ExceptionCheck()){env->ExceptionDescribe();env->ExceptionClear();result=0;}
+    env->DeleteLocalRef(cls);
+    return std::clamp(result,0,5);
+}
 void refreshBatchStats(JNIEnv* env,jobject activity,vrui::Renderer& menu){
     jclass cls=env->GetObjectClass(activity);
     jmethodID method=env->GetMethodID(cls,"batchStats","()[I");
@@ -98,7 +107,7 @@ bool batchPixels(JNIEnv* env,jobject activity,bool spherical,bool depth,
 }
 bool loadBatchView(JNIEnv* env,jobject activity,vrui::Renderer& renderer,
                    int mode){
-    const bool spherical=mode==2;
+    const bool spherical=mode==2||mode==3;
     std::vector<uint8_t> color,depth;
     int width=0,height=0,dw=0,dh=0;
     if(!batchPixels(env,activity,spherical,false,color,width,height))return false;
@@ -643,6 +652,7 @@ void run(JNIEnv* env, jobject activity) {
     glGenFramebuffers(1, &r.fbo);
     vrui::Renderer menu;
     if (!menu.initialize()) throw "VR menu shader initialization";
+    menu.galleryTheme=galleryThemeFromJava(env,activity,"loadGalleryTheme");
     vrui::Page page = resumeImagePage.exchange(false) ? vrui::Page::Open : vrui::Page::Home;
     bool wasPressed = false;
     bool maskWasPainting=false;
@@ -1290,8 +1300,14 @@ void run(JNIEnv* env, jobject activity) {
                 else if(page==vrui::Page::Gallery && hovered==156 &&
                         batchState.load()==5)
                     batchMethod(env,activity,"confirmLargeBatchView","()V");
-                else if(page==vrui::Page::Gallery && hovered==156)
+                else if(page==vrui::Page::Gallery && hovered==156){
                     menu.galleryTheme=(menu.galleryTheme+1)%6;
+                    batchMethod(env,activity,"saveGalleryTheme","(I)V",menu.galleryTheme);
+                }
+                else if(page==vrui::Page::Gallery && hovered==157)
+                    batchMethod(env,activity,"requestSaveCylinder","(I)V",menu.galleryTheme);
+                else if(page==vrui::Page::Gallery && hovered==158)
+                    batchMethod(env,activity,"requestSavedCylinders","()V");
                 else if(page==vrui::Page::Open && hovered>=132&&hovered<=134){
                     menu.depthStyle=hovered-132;
                     if(menu.hasPhoto()){
@@ -1500,8 +1516,14 @@ void run(JNIEnv* env, jobject activity) {
             }
             if(depthNeedsReload.exchange(false))refreshDepth(env,activity,menu);
             const int galleryReady=batchReadyMode.exchange(0);
+            if(galleryReady==3 && !menu.galleryAvailable())
+                menu.initializeGallery();
             if(galleryReady!=0 && (galleryReady==1||menu.galleryAvailable()) &&
                loadBatchView(env,activity,menu,galleryReady)){
+                if(galleryReady==3)
+                    menu.galleryTheme=galleryThemeFromJava(env,activity,"activeCylinderTheme");
+                else if(galleryReady==2)
+                    menu.galleryTheme=galleryThemeFromJava(env,activity,"loadGalleryTheme");
                 page=galleryReady==1?vrui::Page::Wall:vrui::Page::Sphere;
                 panelPosition={0.f,0.f,-1.9f};
                 panelScale=galleryReady==1?3.7f:1.f;
@@ -1511,7 +1533,7 @@ void run(JNIEnv* env, jobject activity) {
                 menu.brushMode=false;
                 menu.selectionOverlayVisible=false;
             }
-            if(galleryReady==2 && !menu.galleryAvailable()){
+            if(galleryReady>=2 && !menu.galleryAvailable()){
                 // A faulty optional gallery shader must not strand the user in
                 // a black VR layer. Return to the standard functional UI.
                 page=vrui::Page::Gallery;
@@ -1756,7 +1778,7 @@ Java_com_cosmerearchives_androidimageeditor_VrActivity_reportBatchStatus(
 extern "C" JNIEXPORT void JNICALL
 Java_com_cosmerearchives_androidimageeditor_VrActivity_notifyBatchGalleryReady(
         JNIEnv*,jobject,jint mode){
-    if(mode==1||mode==2)batchReadyMode.store(static_cast<int>(mode));
+    if(mode>=1&&mode<=3)batchReadyMode.store(static_cast<int>(mode));
 }
 
 extern "C" JNIEXPORT void JNICALL
