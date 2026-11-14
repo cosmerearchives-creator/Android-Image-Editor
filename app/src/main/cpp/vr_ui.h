@@ -1219,8 +1219,8 @@ void main(){
  if(t>=1e8){frag=vec4(material(eye+ray*3.,0),1.);return;}
  vec3 hit=eye+ray*t;
  vec2 texcoord;
- if(face==0)texcoord=vec2(fract(.5+atan(hit.x,-hit.z)/6.2831853),.25+.5*(hit.y+h)/(2.*h));
- else {vec2 flat=clamp(hit.xz/(2.*r)+.5,.001,.999);texcoord=vec2(flat.x,face==1?.75+.25*flat.y:.25*flat.y);}
+ if(face==0)texcoord=vec2(fract(.5+atan(hit.x,-hit.z)/6.2831853),.25+.5*(h-hit.y)/(2.*h));
+ else {vec2 flat=clamp(hit.xz/(2.*r)+.5,.001,.999);texcoord=vec2(flat.x,face==1?.25*flat.y:.75+.25*flat.y);}
  float depth=texture(panoDepth,texcoord).r;
  if(styleInverted==1)depth=1.-depth;
  texcoord.x=clamp(texcoord.x+eyeSign*styleScale*(depth-.5)*.0025,.0005,.9995);
