@@ -919,7 +919,7 @@ void run(JNIEnv* env, jobject activity) {
                 menu.brushMode && menu.hasDepthPixels()
                 && brushSizeStick.isActive && std::abs(brushSizeStick.currentState.y)>0.15f) {
                 menu.leftRadius=std::clamp(menu.leftRadius+
-                    brushSizeStick.currentState.y*dt*23.f,3.f,60.f);
+                    brushSizeStick.currentState.y*dt*46.f,6.f,120.f);
             }
             const bool pushDown=push.isActive && push.currentState>=0.5f;
             const bool pullDown=pressed.isActive && pressed.currentState>=0.5f;
@@ -1167,9 +1167,9 @@ void run(JNIEnv* env, jobject activity) {
                 if(page==vrui::Page::AiDepth)menu.drawAiOverlay();
                 if(!immersive)menu.drawTools(page,overlayHover);
                 menu.drawHandCursor(leftPointerX,leftPointerY,leftPointer,
-                                    true,paintLeft,immersive);
+                                    true,paintLeft,immersive,pushDown);
                 menu.drawHandCursor(pointerX,pointerY,pointer,
-                                    false,paintRight,immersive);
+                                    false,paintRight,immersive,pullDown);
             }
             if(immersive){
                 // Dedicated world-space tool panel renders outside the photo's
