@@ -227,6 +227,7 @@ struct Renderer {
     bool applyAiMask(const std::vector<uint8_t>& mask){
         if(mask.size()!=size_t(MASK_EDGE)*MASK_EDGE||!hasPhoto())return false;
         beginMaskEdit();
+        splitKeepSeed=-1;splitStatus=0;
         selectionMask=mask;
         uploadMask();
         autoMaskStatus=0;
@@ -1144,6 +1145,7 @@ struct Renderer {
     void uploadPhoto(const std::vector<uint8_t>& rgba,int width,int height){
         if(photoTexture){glDeleteTextures(1,&photoTexture);photoTexture=0;}
         clearMask();selectionMode=false;
+        splitKeepSeed=-1;splitStatus=0;
         maskUndo.clear();maskRedo.clear();maskStrokeBefore.clear();
         maskStrokeActive=false;
         photoWidth=0;photoHeight=0;
@@ -1335,7 +1337,7 @@ struct Renderer {
                     label(v,splitHelp,176,194,2,muted);
                 }
                 const std::string brushInfo="MASK BRUSH "+std::to_string(int(maskBrushRadius))+" PX";
-                label(v,brushInfo.c_str(),176,189,2,muted);
+                if(maskToolMode!=4)label(v,brushInfo.c_str(),176,189,2,muted);
                 box(v,170,665,330,50,hovered==100?purpleHover:
                     !maskSubtract?purple:button);
                 label(v,maskToolMode==0?"PAINT ADD":maskToolMode==1?"SMART ADD":maskToolMode==2?"ISOLATE KEEP":maskToolMode==3?"OBJECT ADD":"KEEP FIRST",191,680,2,white);
