@@ -61,6 +61,7 @@ public final class VrActivity extends Activity {
     private static final int BATCH_FOLDER=13;
     private static final String PICKER_PREFS="batch_file_picker";
     private final java.util.LinkedHashSet<String> batchPicked=new java.util.LinkedHashSet<>();
+    private final ExecutorService pickerThumbnails=Executors.newSingleThreadExecutor();
     private androidx.documentfile.provider.DocumentFile pickerRoot;
     private androidx.documentfile.provider.DocumentFile pickerCurrent;
     private android.app.AlertDialog pickerDialog;
@@ -184,6 +185,7 @@ public final class VrActivity extends Activity {
                 });
                 return;
             }
+            final java.util.Set<String> imported=BatchStore.importedUris(getApplicationContext());
             java.util.Arrays.sort(files,(a,b)->{
                 if(a.isDirectory()!=b.isDirectory())return a.isDirectory()?-1:1;
                 return String.CASE_INSENSITIVE_ORDER.compare(
@@ -209,16 +211,44 @@ public final class VrActivity extends Activity {
                         if(type==null||!type.startsWith("image/"))continue;
                         if(++shown>250)break; // Avoid huge layouts on Quest.
                         final Uri uri=item.getUri();
-                        boolean imported=BatchStore.wasImported(getApplicationContext(),uri);
+                        boolean alreadyImported=imported.contains(uri.toString());
+                        android.widget.LinearLayout row=new android.widget.LinearLayout(this);
+                        row.setOrientation(android.widget.LinearLayout.HORIZONTAL);
+                        android.widget.ImageView thumb=new android.widget.ImageView(this);
+                        thumb.setScaleType(android.widget.ImageView.ScaleType.CENTER_CROP);
+                        int edge=(int)(64*getResources().getDisplayMetrics().density);
+                        row.addView(thumb,new android.widget.LinearLayout.LayoutParams(edge,edge));
                         android.widget.CheckBox check=new android.widget.CheckBox(this);
-                        check.setText((imported?"ALREADY IMPORTED  •  ":"")+name);
+                        check.setText((alreadyImported?"ALREADY IMPORTED  -  ":"")+name);
                         check.setChecked(batchPicked.contains(uri.toString()));
                         check.setOnCheckedChangeListener((button,checked)->{
                             if(checked)batchPicked.add(uri.toString());
                             else batchPicked.remove(uri.toString());
                             updatePickerCount();
                         });
-                        pickerRows.addView(check);
+                        row.addView(check,new android.widget.LinearLayout.LayoutParams(
+                            0,edge,1));
+                        row.setOnClickListener(v->check.setChecked(!check.isChecked()));
+                        pickerRows.addView(row);
+                        // Thumbnail decode stays off the UI thread and is capped
+                        // to avoid a giant memory spike on Quest 2.
+                        if(shown<=80)pickerThumbnails.execute(()->{
+                            try(java.io.InputStream in=getContentResolver().openInputStream(uri)){
+                                if(in==null)return;
+                                android.graphics.BitmapFactory.Options opt=
+                                    new android.graphics.BitmapFactory.Options();
+                                opt.inSampleSize=16;
+                                opt.inPreferredConfig=android.graphics.Bitmap.Config.RGB_565;
+                                android.graphics.Bitmap bitmap=
+                                    android.graphics.BitmapFactory.decodeStream(in,null,opt);
+                                if(bitmap==null)return;
+                                runOnUiThread(()->{
+                                    if(pickerDialog!=null && pickerCurrent==folder)
+                                        thumb.setImageBitmap(bitmap);
+                                    else bitmap.recycle();
+                                });
+                            }catch(Exception ignored){}
+                        });
                     }
                 }
                 if(shown==0){
