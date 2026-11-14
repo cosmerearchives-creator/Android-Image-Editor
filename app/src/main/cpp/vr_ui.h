@@ -1570,6 +1570,10 @@ struct Renderer {
         if(!immersiveToolsVisible){
             box(v,860,660,148,92,hover==34?purpleHover:purple);
             label(v,"TOOLS +",878,695,2,white);
+            if(pointer){
+                box(v,pointerX-7,pointerY-1,14,2,white);
+                box(v,pointerX-1,pointerY-7,2,14,white);
+            }
             submitUi(v);
             return;
         }
