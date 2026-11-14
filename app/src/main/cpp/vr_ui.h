@@ -206,6 +206,20 @@ struct Renderer {
     bool painting=false;
     bool paintingLeft=false;
     bool paintingRight=false;
+    int brushBlockReason=0;
+    const char* brushFeedback() const {
+        switch(brushBlockReason) {
+            case 1:return "BRUSH OFF - ENABLE BRUSH";
+            case 2:return "NO DEPTH - PRESS QUICK";
+            case 3:return "DEPTH STILL PROCESSING";
+            case 4:return "SELECT AREA ACTIVE";
+            case 5:return "FINISH AI PREVIEW";
+            case 6:return "RELEASE GRIP TO SCULPT";
+            case 7:return "AIM AT THE PHOTO";
+            case 8:return "MOVE AWAY FROM CONTROLS";
+            default:return nullptr;
+        }
+    }
     bool brushSoft=true;
     bool edgeAware=true;
     float brushStrength=1.0f;
@@ -723,7 +737,9 @@ struct Renderer {
                     quickConverting?"CREATING DEPTH...":
                     !hasDepthPixels()?"QUICK DEPTH REQUIRED":
                     brushMode?"BRUSH READY":"DEPTH READY";
-                label(v,state,176,567,2,quickConverting?purpleHover:muted);
+                const char* feedback=brushFeedback();
+                label(v,feedback?feedback:state,176,567,2,
+                      feedback?Color{1.f,.73f,.22f}:quickConverting?purpleHover:muted);
                 if(brushMode && hasDepthPixels()){
                     const std::string sizes="L "+std::to_string(int(leftRadius))+
                         "  R "+std::to_string(int(rightRadius));
