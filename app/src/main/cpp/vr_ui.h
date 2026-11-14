@@ -88,7 +88,8 @@ inline int buttonAt(Page page,float x,float y,bool advancedVisible=true) {
         if(y>=580&&y<=660)return x<512?150:151;
         if(y>=470&&y<=550)return x<512?152:153;
         if(y>=360&&y<=440)return x<512?154:155;
-        if(y>=208&&y<=262)return 156;
+        if(y>=265&&y<=340)return x<512?157:158;
+        if(y>=200&&y<=250)return 156;
         if(y>=92&&y<=190)return 3;
         return -1;
     }
@@ -1201,20 +1202,55 @@ out vec4 frag;
 vec3 quat(vec3 v,vec4 q){vec3 t=2.0*cross(q.xyz,v);return v+q.w*t+cross(q.xyz,t);}
 vec3 spin(vec3 v,float a){float c=cos(a),s=sin(a);return vec3(c*v.x-s*v.z,v.y,s*v.x+c*v.z);}
 vec3 material(vec3 p,int face){
- vec3 c=vec3(.17,.16,.17);
- if(galleryTheme==1)c=vec3(.07,.04,.16);
- if(galleryTheme==2)c=vec3(.31,.19,.07);
- if(galleryTheme==3)c=vec3(.19,.045,.055);
- if(galleryTheme==4)c=vec3(.14,.15,.16);
- if(galleryTheme==5)c=vec3(.065,.16,.08);
- c+=.012*sin(p.x*12.+p.z*8.)*sin(p.y*11.);
- if(galleryTheme==1)c+=vec3(.16,.035,.27)*pow(max(0.,sin(p.y*5.+p.x*2.)),24.);
- if(galleryTheme==2)c+=vec3(.10,.055,.01)*pow(abs(sin(p.x*9.+p.z*9.)),22.);
- if(galleryTheme==3)c+=vec3(.45,.15,.01)*pow(max(0.,sin(p.x*5.+p.z*2.+galleryTime*1.6+sin(p.y*3.))),8.);
- if(galleryTheme==4)c-=vec3(.05)*step(.96,fract(p.y*3.+floor(p.x*3.)*.5));
- if(galleryTheme==5)c+=vec3(.07,.04,.015)*pow(abs(sin((p.x+p.z)*10.)),26.);
- if(face!=0)c*=face==1?.8:.7;
- return max(c,vec3(.015));
+    // Deliberately different architectural surfaces instead of faint tints.
+    // face: wall=0, ceiling=1, floor=2.
+    float stripe=abs(sin(p.x*7.0+p.z*3.0));
+    float seamX=step(.94,fract((p.x+p.z)*1.4));
+    float seamY=step(.94,fract(p.y*1.4));
+    float grid=clamp(seamX+seamY,0.0,1.0);
+    if(galleryTheme==0){
+        // Museum: cream stone gallery, patterned floor, coffered ceiling.
+        if(face==0)return mix(vec3(.52,.46,.38),vec3(.32,.28,.22),grid*.55);
+        if(face==1)return vec3(.40,.34,.25)+vec3(.12)*pow(stripe,22.0);
+        float tile=step(.94,fract(p.x*1.4))+step(.94,fract(p.z*1.4));
+        return mix(vec3(.45,.41,.34),vec3(.19,.16,.14),clamp(tile,0.0,1.0));
+    }
+    if(galleryTheme==1){
+        // Nightclub: dark surfaces, vivid violet and cyan light tracks.
+        float neon=pow(max(0.,sin(p.x*8.0+p.z*4.0)),42.0);
+        vec3 lighting=vec3(.04,.7,.83)*neon+vec3(.65,.05,.78)*
+            pow(max(0.,sin(p.y*5.0+galleryTime*.45)),30.0);
+        return (face==2?vec3(.012,.02,.045):vec3(.035,.018,.075))+lighting;
+    }
+    if(galleryTheme==2){
+        // Tiki: warm woven reeds and bamboo.
+        float reed=pow(stripe,24.0);
+        float weave=pow(abs(sin(p.y*11.0+p.z*2.0)),26.0);
+        return vec3(.28,.14,.055)+vec3(.18,.12,.045)*reed+
+            vec3(.07,.055,.02)*weave;
+    }
+    if(galleryTheme==3){
+        // Fantastical fire-lit chamber: animated molten highlights.
+        float ember=pow(max(0.,sin(p.x*6.0+p.z*5.0+
+            galleryTime*1.7+sin(p.y*4.0))),12.0);
+        return vec3(.12,.025,.065)+vec3(.88,.23,.012)*ember+
+            vec3(.14,.02,.1)*pow(stripe,14.0);
+    }
+    if(galleryTheme==4){
+        // Dungeon: mossy, large stone blocks with deep mortar.
+        float masonry=step(.91,fract(p.x*1.8+p.z*.9+
+            floor(p.y*1.5)*.5))+step(.92,fract(p.y*1.5));
+        float moss=pow(max(0.,sin(p.x*6.2+p.z*3.8)),18.0);
+        return max(vec3(.035),vec3(.22,.24,.24)-
+            vec3(.15)*clamp(masonry,0.0,1.0)+vec3(.01,.07,.018)*moss);
+    }
+    // Woodland: green canopy overhead, earthy floor, tree-bark wall.
+    if(face==1){
+        float leaves=sin(p.x*8.0)*sin(p.z*7.0);
+        return vec3(.035,.20,.055)+vec3(.04,.17,.015)*max(0.0,leaves);
+    }
+    if(face==2)return vec3(.15,.105,.045)+vec3(.02,.05,.012)*stripe;
+    return vec3(.15,.095,.04)+vec3(.11,.07,.02)*pow(stripe,25.0);
 }
 void main(){
  vec3 ray=normalize(vec3(mix(fovTangent.x,fovTangent.y,uv.x),mix(fovTangent.z,fovTangent.w,uv.y),-1.));
@@ -1700,17 +1736,18 @@ void main(){
                 label(v,aiState==1||aiState==2?"CANCEL":"DISCARD",646,234,2,white);
             } else if(page==Page::Gallery){
                 const char* actions[]={"BULK IMPORT","CONVERT MISSING",
-                    "VIEW WALL","VIEW SPHERE","EXPORT WALL","EXPORT SPHERE"};
-                const int ids[]={150,151,152,153,154,155};
-                for(int i=0;i<6;i++){
+                    "VIEW WALL","VIEW SPHERE","EXPORT WALL","EXPORT SPHERE",
+                    "SAVE CYLINDER","SAVED CYLINDERS"};
+                const int ids[]={150,151,152,153,154,155,157,158};
+                for(int i=0;i<8;i++){
                     const int x=i%2==0?170:524;
-                    const int y=i<2?580:i<4?470:360;
-                    box(v,float(x),float(y),330,80,hovered==ids[i]?purpleHover:button);
-                    label(v,actions[i],x+18,y+26,2,white);
+                    const int y=i<2?580:i<4?470:i<6?360:265;
+                    box(v,float(x),float(y),330,i<6?80:75,hovered==ids[i]?purpleHover:button);
+                    label(v,actions[i],x+18,y+25,2,white);
                 }
                 const std::string countText="IMAGES "+std::to_string(batchCount)+
                      "   CACHED "+std::to_string(batchConverted);
-                label(v,countText.c_str(),180,682,3,muted);
+                label(v,countText.c_str(),180,736,2,muted);
                 const char* state=batchState==1?"IMPORTING IMAGES":
                     batchState==2?"AI CONVERTING IMAGES":
                     batchState==3?"BUILDING GALLERY":
@@ -1720,21 +1757,21 @@ void main(){
                     batchState==7?"EXPORT - CHOOSE A DESTINATION":
                     batchState==8?"IMAGES IMPORTED":
                     batchState==9?"GALLERY RENDERER UNAVAILABLE":"READY";
-                label(v,state,180,305,2,white);
+                label(v,state,180,704,2,white);
                 if(batchState==1||batchState==2||batchState==3||batchState==7){
-                    box(v,180,276,655,12,{0.24f,0.20f,0.32f});
-                    box(v,180,276,655.f*batchProgress/100.f,12,purpleHover);
+                    box(v,180,674,655,12,{0.24f,0.20f,0.32f});
+                    box(v,180,674,655.f*batchProgress/100.f,12,purpleHover);
                     const std::string percent=std::to_string(batchProgress)+"%";
-                    label(v,percent.c_str(),782,296,2,muted);
+                    label(v,percent.c_str(),782,689,2,muted);
                 }
-                box(v,170,208,684,54,hovered==156?purpleHover:
+                box(v,170,200,684,50,hovered==156?purpleHover:
                     batchState==5?purple:button);
                 const char* themes[]={"MUSEUM","CLUB","TIKI PARTY",
                     "FANTASY FIRE","DUNGEON","HANGING ON TREES"};
                 std::string themeLabel="GALLERY THEME: ";
                 themeLabel+=themes[galleryTheme%6];
                 label(v,batchState==5?"CONFIRM VIEW OVER 16 IMAGES":
-                     themeLabel.c_str(),192,223,2,white);
+                     themeLabel.c_str(),192,213,2,white);
             } else if(page==Page::Projects) {
                 const int ys[]={495,405,315,225};
                 for(int i=0;i<4;i++){
