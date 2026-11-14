@@ -733,7 +733,7 @@ struct Renderer {
         glActiveTexture(GL_TEXTURE0);
         glBindTexture(GL_TEXTURE_2D,0);
     }
-    void draw(Page page,int hovered,float cursorX,float cursorY,bool pointer,float eyeSign=0.f){
+    void draw(Page page,int hovered,float cursorX,float cursorY,bool pointer,float eyeSign=0.f,bool showPhoto=true){
         if(page==Page::Immersive) {
             // Full photo only, letterboxed according to aspect ratio, no editor UI.
             if(hasPhoto()) drawPhoto(eyeSign,true);
@@ -942,7 +942,7 @@ struct Renderer {
         glBufferData(GL_ARRAY_BUFFER,v.size()*sizeof(float),v.data(),GL_STREAM_DRAW);
         glDrawArrays(GL_TRIANGLES,0,static_cast<GLsizei>(v.size()/5));
         glBindVertexArray(0);
-        if((page==Page::Open||page==Page::AiDepth||page==Page::Collage||page==Page::Mask) && hasPhoto()) drawPhoto(eyeSign);
+        if(showPhoto && (page==Page::Open||page==Page::AiDepth||page==Page::Collage||page==Page::Mask) && hasPhoto()) drawPhoto(eyeSign);
     }
     void submitUi(const std::vector<float>& triangles) {
         if(triangles.empty())return;
@@ -967,6 +967,18 @@ struct Renderer {
         box(v,bl,y,br-bl,7,{0.25f,0.20f,0.32f});
         box(v,bl,y,(br-bl)*(rightStrength-0.1f)/2.9f,7,purpleHover);
         box(v,bl+(br-bl)*(rightStrength-0.1f)/2.9f-5,y-6,10,19,white);
+        submitUi(v);
+    }
+    // Tool controls are rendered into their own compositor quad.
+    // This handle is outside every page's existing hitboxes.
+    void drawFloatingHandle(bool hovered,float x,float y,bool pointer) {
+        std::vector<float> v;
+        box(v,16,710,145,51,hovered?purpleHover:purple);
+        label(v,"MOVE",39,729,2,white);
+        if(pointer){
+            box(v,x-12,y-3,24,6,white);
+            box(v,x-3,y-12,6,24,white);
+        }
         submitUi(v);
     }
     void drawFloatingTools(int hover,float pointerX,float pointerY,bool pointer) {
