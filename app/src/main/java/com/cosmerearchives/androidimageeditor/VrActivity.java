@@ -21,6 +21,9 @@ public final class VrActivity extends Activity {
     private static final String TAG = "ImageEditorXR";
     private static final int PICK_IMAGE = 7;
     private static final int ADD_COLLAGE_IMAGE = 9;
+    private static final int BATCH_PICK = 10;
+    private static final int EXPORT_WALL = 11;
+    private static final int EXPORT_SPHERE = 12;
     private static final int INSTALL_PERMISSION = 8;
     static { System.loadLibrary("image_editor_xr"); }
     private Thread xrThread;
@@ -33,6 +36,8 @@ public final class VrActivity extends Activity {
     private native void notifyDepthChanged();
     private native void reportAiDepthStatus(int state,int progress);
     private native void reportAiSegmentStatus(int state,int progress);
+    private native void reportBatchStatus(int state,int progress,int count);
+    private native void notifyBatchGalleryReady(int mode);
     private native void submitAiSelectionMask(byte[] mask);
     private final java.util.concurrent.atomic.AtomicBoolean aiCancel =
         new java.util.concurrent.atomic.AtomicBoolean(false);
@@ -48,6 +53,134 @@ public final class VrActivity extends Activity {
         java.util.concurrent.Executors.newSingleThreadExecutor();
     private final java.util.concurrent.atomic.AtomicLong imageGeneration =
         new java.util.concurrent.atomic.AtomicLong();
+    private final ExecutorService batchWorker=Executors.newSingleThreadExecutor();
+    private final AtomicBoolean batchBusy=new AtomicBoolean(false);
+    private final AtomicBoolean batchCancel=new AtomicBoolean(false);
+    private volatile int pendingBatchView=0;
+
+    /** Bulk processing never changes the current editor image. */
+    @SuppressWarnings("unused")
+    public void requestBatchImport(){
+        runOnUiThread(()->{
+            Intent picker=new Intent(Intent.ACTION_OPEN_DOCUMENT)
+                .addCategory(Intent.CATEGORY_OPENABLE).setType("image/*")
+                .putExtra(Intent.EXTRA_ALLOW_MULTIPLE,true);
+            startActivityForResult(picker,BATCH_PICK);
+        });
+    }
+    @SuppressWarnings("unused")
+    public void requestBatchConvert(){
+        if(!batchBusy.compareAndSet(false,true))return;
+        batchCancel.set(false);
+        reportBatchStatus(2,0,BatchStore.count(getApplicationContext()));
+        batchWorker.execute(()->{
+            try{
+                BatchStore.convertMissing(getApplicationContext(),batchCancel,
+                    p->reportBatchStatus(2,p,BatchStore.count(getApplicationContext())));
+                reportBatchStatus(4,100,BatchStore.count(getApplicationContext()));
+                runOnUiThread(()->Toast.makeText(this,
+                    "Bulk AI conversion cached",Toast.LENGTH_LONG).show());
+            }catch(Exception e){
+                Log.e(TAG,"Bulk AI conversion failed",e);
+                reportBatchStatus(6,0,BatchStore.count(getApplicationContext()));
+                runOnUiThread(()->Toast.makeText(this,
+                    "Bulk conversion stopped: "+e.getMessage(),Toast.LENGTH_LONG).show());
+            }finally{batchBusy.set(false);}
+        });
+    }
+    /** Mode 1: zoomable wall; mode 2: viewer-centered panorama. */
+    @SuppressWarnings("unused")
+    public void requestBatchView(int mode,boolean confirmed){
+        if(mode!=1&&mode!=2)return;
+        int count=BatchStore.count(getApplicationContext());
+        if(count==0){
+            reportBatchStatus(6,0,0);return;
+        }
+        if(count>BatchStore.WARN_COUNT&&!confirmed){
+            pendingBatchView=mode;
+            reportBatchStatus(5,0,count);
+            return;
+        }
+        pendingBatchView=0;
+        if(!batchBusy.compareAndSet(false,true))return;
+        reportBatchStatus(3,0,count);
+        batchWorker.execute(()->{
+            try{
+                BatchStore.build(getApplicationContext(),mode==2,
+                    p->reportBatchStatus(3,p,count));
+                reportBatchStatus(4,100,count);
+                notifyBatchGalleryReady(mode);
+            }catch(Exception e){
+                Log.e(TAG,"Gallery preparation failed",e);
+                reportBatchStatus(6,0,count);
+            }finally{batchBusy.set(false);}
+        });
+    }
+    @SuppressWarnings("unused")
+    public void confirmLargeBatchView(){
+        int mode=pendingBatchView;
+        if(mode!=0)requestBatchView(mode,true);
+    }
+    @SuppressWarnings("unused")
+    public void requestBatchExport(boolean spherical){
+        if(!batchBusy.compareAndSet(false,true))return;
+        int count=BatchStore.count(getApplicationContext());
+        if(count==0){batchBusy.set(false);reportBatchStatus(6,0,0);return;}
+        reportBatchStatus(3,0,count);
+        batchWorker.execute(()->{
+            try{
+                File output=spherical?BatchStore.sphere(getApplicationContext()):
+                                      BatchStore.wall(getApplicationContext());
+                if(!output.isFile())
+                    BatchStore.build(getApplicationContext(),spherical,
+                        p->reportBatchStatus(3,p,count));
+                reportBatchStatus(7,100,count);
+                runOnUiThread(()->{
+                    try{
+                        Intent save=new Intent(Intent.ACTION_CREATE_DOCUMENT)
+                            .addCategory(Intent.CATEGORY_OPENABLE)
+                            .setType("image/png")
+                            .putExtra(Intent.EXTRA_TITLE,
+                                spherical?"vr_sphere_gallery.png":"vr_wall_gallery.png");
+                        startActivityForResult(save,spherical?EXPORT_SPHERE:EXPORT_WALL);
+                    }catch(RuntimeException e){
+                        reportBatchStatus(6,0,count);
+                        batchBusy.set(false);
+                    }
+                });
+            }catch(Exception e){
+                Log.e(TAG,"Export preparation failed",e);
+                reportBatchStatus(6,0,count);
+                batchBusy.set(false);
+            }
+        });
+    }
+    @SuppressWarnings("unused")
+    public int[] batchStats(){
+        return new int[]{BatchStore.count(getApplicationContext()),
+                         BatchStore.converted(getApplicationContext())};
+    }
+    @SuppressWarnings("unused")
+    public int[] batchPixels(boolean spherical,boolean depth){
+        return BatchStore.loadPixels(getApplicationContext(),spherical,depth);
+    }
+    @SuppressWarnings("unused")
+    public void requestOpenBatchImage(int index){
+        if(!batchBusy.compareAndSet(false,true))return;
+        batchWorker.execute(()->{
+            try{
+                aiCancel.set(true);segmentCancel.set(true);
+                imageGeneration.incrementAndGet();depthGeneration.incrementAndGet();
+                BatchStore.openImage(getApplicationContext(),index);
+                reportAiDepthStatus(0,0);
+                notifyImageChanged();notifyDepthChanged();notifyProjectListChanged();
+            }catch(Exception e){
+                Log.e(TAG,"Open batch image failed",e);
+                runOnUiThread(()->Toast.makeText(this,
+                    "Could not open batch image",Toast.LENGTH_LONG).show());
+            }finally{batchBusy.set(false);}
+        });
+    }
 
     /**
      * Primary one-click workflow: verified on-device depth model, automatic
@@ -454,6 +587,8 @@ public final class VrActivity extends Activity {
         aiWorker.shutdownNow();
         segmentCancel.set(true);
         segmentWorker.shutdownNow();
+        batchCancel.set(true);
+        batchWorker.shutdownNow();
         super.onDestroy();
     }
 
@@ -503,6 +638,55 @@ public final class VrActivity extends Activity {
         if(request==INSTALL_PERMISSION){
             if(getPackageManager().canRequestPackageInstalls())openVerifiedInstaller();
             else reportVrUpdateStatus(6,0);
+            return;
+        }
+        if(request==EXPORT_WALL||request==EXPORT_SPHERE){
+            if(result!=RESULT_OK||data==null||data.getData()==null){
+                batchBusy.set(false);
+                reportBatchStatus(0,0,BatchStore.count(getApplicationContext()));
+                return;
+            }
+            final Uri target=data.getData();
+            final boolean spherical=request==EXPORT_SPHERE;
+            batchWorker.execute(()->{
+                try(java.io.OutputStream out=getContentResolver().openOutputStream(target)){
+                    if(out==null)throw new IOException("Cannot write export");
+                    BatchStore.copyTo(getApplicationContext(),spherical,out);
+                    reportBatchStatus(4,100,BatchStore.count(getApplicationContext()));
+                    runOnUiThread(()->Toast.makeText(this,
+                        "Gallery PNG exported",Toast.LENGTH_LONG).show());
+                }catch(Exception e){
+                    Log.e(TAG,"Bulk export failed",e);
+                    reportBatchStatus(6,0,BatchStore.count(getApplicationContext()));
+                }finally{batchBusy.set(false);}
+            });
+            return;
+        }
+        if(request==BATCH_PICK){
+            if(result!=RESULT_OK||data==null)return;
+            java.util.ArrayList<Uri> picked=new java.util.ArrayList<>();
+            if(data.getClipData()!=null){
+                android.content.ClipData clip=data.getClipData();
+                for(int i=0;i<clip.getItemCount();++i)
+                    if(clip.getItemAt(i).getUri()!=null)
+                        picked.add(clip.getItemAt(i).getUri());
+            }else if(data.getData()!=null)picked.add(data.getData());
+            if(picked.isEmpty()||!batchBusy.compareAndSet(false,true))return;
+            batchCancel.set(false);
+            reportBatchStatus(1,0,picked.size());
+            batchWorker.execute(()->{
+                try{
+                    int added=BatchStore.importImages(getApplicationContext(),picked,
+                        batchCancel,p->reportBatchStatus(1,p,picked.size()));
+                    reportBatchStatus(8,100,BatchStore.count(getApplicationContext()));
+                    runOnUiThread(()->Toast.makeText(this,
+                        added+" new images imported into batch",
+                        Toast.LENGTH_LONG).show());
+                }catch(Exception e){
+                    Log.e(TAG,"Bulk import failed",e);
+                    reportBatchStatus(6,0,BatchStore.count(getApplicationContext()));
+                }finally{batchBusy.set(false);}
+            });
             return;
         }
         if ((request != PICK_IMAGE && request != ADD_COLLAGE_IMAGE) || result != RESULT_OK || data == null || data.getData() == null)
