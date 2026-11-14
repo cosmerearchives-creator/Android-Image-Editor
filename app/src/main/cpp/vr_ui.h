@@ -121,6 +121,7 @@ inline int buttonAt(Page page,float x,float y) {
             if(x<684)return 108;
             return 109;
         }
+        if(y>=490&&y<=550)return 116;
         if(y>=402&&y<=480)return 115;
         if(y>=310&&y<=360){
             if(x<512)return 112;
@@ -175,6 +176,16 @@ struct Renderer {
     bool depthGuidedSelection=true;
     int maskDepthTolerance=30;
     int autoMaskStatus=0; // 0 idle, 1 generated, 2 no reliable region
+    int aiSegmentState=0, aiSegmentPercent=0;
+    // Loading a new AI mask replaces the current selection, but does not
+    // modify the depth map or remove manual refinement capability.
+    bool applyAiMask(const std::vector<uint8_t>& mask){
+        if(mask.size()!=size_t(MASK_EDGE)*MASK_EDGE||!hasPhoto())return false;
+        selectionMask=mask;
+        uploadMask();
+        autoMaskStatus=0;
+        return true;
+    }
     std::vector<uint8_t> selectionMask;
     GLuint selectionTexture=0;
     static constexpr int MASK_EDGE=1024;
@@ -1004,6 +1015,18 @@ struct Renderer {
                         hovered==102+i?purpleHover:button);
                     label(v,operations[i],x+8,y+(i<4?20:35),2,white);
                 }
+                box(v,170,490,684,60,hovered==116?purpleHover:button);
+                const char* aiText=aiSegmentState==1?"DOWNLOADING AI MASK MODEL":
+                    aiSegmentState==2?"AI SELECTING SUBJECT":
+                    aiSegmentState==3?"AI MASK READY - TAP TO RERUN":
+                    "AI SELECT SUBJECT";
+                label(v,aiText,184,512,2,white);
+                if(aiSegmentState==1||aiSegmentState==2){
+                    const std::string progress="AI "+std::to_string(aiSegmentPercent)+"%";
+                    label(v,progress.c_str(),685,512,2,muted);
+                }
+                if(aiSegmentState==4)
+                    label(v,"AI SELECTION FAILED - RETRY",180,554,2,muted);
                 box(v,170,402,684,78,hovered==115?purpleHover:purple);
                 label(v,"AUTO FOREGROUND FROM DEPTH",190,428,2,white);
                 if(autoMaskStatus==1)
