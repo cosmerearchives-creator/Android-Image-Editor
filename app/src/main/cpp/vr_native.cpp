@@ -555,6 +555,8 @@ void run(JNIEnv* env, jobject activity) {
     if (!menu.initialize()) throw "VR menu shader initialization";
     vrui::Page page = resumeImagePage.exchange(false) ? vrui::Page::Open : vrui::Page::Home;
     bool wasPressed = false;
+    bool maskWasPainting=false;
+    float maskLastX=0.f,maskLastY=0.f;
     bool wasPainting=false,strokeEdited=false;
     float leftPointerX=0.f,leftPointerY=0.f;
     bool leftPointer=false;
@@ -1041,10 +1043,35 @@ void run(JNIEnv* env, jobject activity) {
                     menu.stereoEnabled=!menu.stereoEnabled;
                 }
             }
-            if(page==vrui::Page::Mask && triggerDown && !wasPressed &&
-               pointer && !toolPointer &&
-               menu.hasPhoto() && !dragging) {
+            // Direct selection painting follows the controller continuously.
+            // Smart Fill remains available only by explicitly toggling it.
+            const bool onMaskImage=page==vrui::Page::Mask &&
+                pointer && !toolPointer && !dragging && !toolDragging &&
+                menu.hasPhoto();
+            float maskU=0.f,maskV=0.f;
+            const bool maskPainting=onMaskImage && !menu.maskSmartFill &&
+                triggerDown && menu.hitPhoto(pointerX,pointerY,true,maskU,maskV);
+            if(maskPainting && !maskWasPainting){
+                menu.beginMaskEdit();
+                maskLastX=pointerX;maskLastY=pointerY;
+            }
+            if(maskPainting){
+                const float dx=pointerX-maskLastX,dy=pointerY-maskLastY;
+                const int steps=std::clamp(int(std::ceil(std::hypot(dx,dy)/5.f)),1,32);
+                for(int k=1;k<=steps;++k){
+                    const float t=float(k)/steps;
+                    menu.paintMaskAt(maskLastX+dx*t,maskLastY+dy*t,
+                                     !menu.maskSubtract,true);
+                }
+                maskLastX=pointerX;maskLastY=pointerY;
+            }
+            if(maskWasPainting&&!maskPainting)menu.finishMaskEdit();
+            maskWasPainting=maskPainting;
+            if(onMaskImage && menu.maskSmartFill &&
+               triggerDown && !wasPressed){
+                menu.beginMaskEdit();
                 menu.selectAt(pointerX,pointerY,!menu.maskSubtract,true);
+                menu.finishMaskEdit();
             }
             // Drag strength sliders while holding the right trigger.
             const bool sliderAim=detachedTools?toolPointer:pointer;
@@ -1107,8 +1134,11 @@ void run(JNIEnv* env, jobject activity) {
                     menu.selectionMode=false;
                     page=vrui::Page::Mask;
                 } else if(page==vrui::Page::Mask && hovered==110){
+                    if(menu.maskStrokeActive)menu.finishMaskEdit();
                     page=vrui::Page::Open;
                 } else if(page==vrui::Page::Mask && hovered>=100 && hovered<=109){
+                    const bool maskChanges=hovered>=104&&hovered<=109;
+                    if(maskChanges)menu.beginMaskEdit();
                     switch(hovered) {
                         case 100:menu.maskSubtract=false;break;
                         case 101:menu.maskSubtract=true;break;
@@ -1121,11 +1151,24 @@ void run(JNIEnv* env, jobject activity) {
                         case 108:menu.clearMask();break;
                         case 109:menu.selectAllMask();break;
                     }
+                    if(maskChanges)menu.finishMaskEdit();
+                } else if(page==vrui::Page::Mask && hovered==117){
+                    menu.undoMask();
+                } else if(page==vrui::Page::Mask && hovered==118){
+                    menu.redoMask();
+                } else if(page==vrui::Page::Mask && hovered==119){
+                    menu.maskSmartFill=!menu.maskSmartFill;
+                } else if(page==vrui::Page::Mask && hovered==120){
+                    menu.maskBrushRadius=std::max(3.f,menu.maskBrushRadius-5.f);
+                } else if(page==vrui::Page::Mask && hovered==121){
+                    menu.maskBrushRadius=std::min(180.f,menu.maskBrushRadius+5.f);
                 } else if(page==vrui::Page::Mask && hovered==116){
                     if(aiSegmentState.load()!=1 && aiSegmentState.load()!=2)
                         aiControl(env,activity,"requestAiSubjectSelection");
                 } else if(page==vrui::Page::Mask && hovered==115){
+                    menu.beginMaskEdit();
                     menu.autoMaskStatus=menu.autoForegroundMask()?1:2;
+                    menu.finishMaskEdit();
                 } else if(page==vrui::Page::Mask &&
                     (hovered==112||hovered==113||hovered==114)){
                     if(hovered==112)menu.depthGuidedSelection=!menu.depthGuidedSelection;
@@ -1340,6 +1383,7 @@ void run(JNIEnv* env, jobject activity) {
         end.layers = layerCount ? layers : nullptr;
         check(xrEndFrame(r.session, &end), "xrEndFrame");
     }
+    if(menu.maskStrokeActive)menu.finishMaskEdit();
     if(menu.strokeActive && menu.hasDepthPixels()) {
         if(menu.finishStroke()) saveEditedDepth(env,activity,menu.depthCpu);
     }
