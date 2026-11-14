@@ -121,6 +121,11 @@ inline int buttonAt(Page page,float x,float y) {
             if(x<684)return 108;
             return 109;
         }
+        if(y>=310&&y<=360){
+            if(x<512)return 112;
+            if(x<684)return 113;
+            return 114;
+        }
         if(y>=36&&y<=88)return 110;
         return -1;
     } else if(page==Page::Curves){
@@ -166,6 +171,8 @@ struct Renderer {
     bool selectionMode=false;
     bool maskSubtract=false;
     int maskTolerance=65;
+    bool depthGuidedSelection=true;
+    int maskDepthTolerance=30;
     std::vector<uint8_t> selectionMask;
     GLuint selectionTexture=0;
     static constexpr int MASK_EDGE=1024;
@@ -241,6 +248,8 @@ struct Renderer {
         chosen[start]=255;
         const int seed=(y*DEPTH_EDGE+x)*3;
         const int red=photoRgb[seed],green=photoRgb[seed+1],blue=photoRgb[seed+2];
+        const bool useDepth=depthGuidedSelection&&hasDepthPixels();
+        const int seedDepth=useDepth?int(depthCpu[size_t(start)]):0;
         for(size_t i=0;i<pending.size();i++){
             int p=pending[i],px=p%MASK_EDGE,py=p/MASK_EDGE;
             const int around[]={px? p-1:-1,px<MASK_EDGE-1?p+1:-1,py?p-MASK_EDGE:-1,py<MASK_EDGE-1?p+MASK_EDGE:-1};
@@ -259,6 +268,15 @@ struct Renderer {
                 const int fb=int(photoRgb[colorIndex+2])-int(photoRgb[frontierIndex+2]);
                 const int localThreshold=std::max(12,maskTolerance/2);
                 if(fr*fr+fg*fg+fb*fb>localThreshold*localThreshold)continue;
+                if(useDepth){
+                    const int sampleDepth=int(depthCpu[size_t(q)]);
+                    const int frontierDepth=int(depthCpu[size_t(p)]);
+                    // Reject abrupt depth jumps and distant depth layers,
+                    // even when a subject and its background share a color.
+                    if(std::abs(sampleDepth-seedDepth)>maskDepthTolerance ||
+                       std::abs(sampleDepth-frontierDepth)>
+                           std::max(8,maskDepthTolerance/2))continue;
+                }
                 chosen[q]=255;pending.push_back(q);
             }
         }
@@ -909,6 +927,16 @@ struct Renderer {
                         hovered==102+i?purpleHover:button);
                     label(v,operations[i],x+8,y+(i<4?20:35),2,white);
                 }
+                box(v,170,310,330,50,hovered==112?purpleHover:
+                    depthGuidedSelection?purple:button);
+                label(v,depthGuidedSelection?"DEPTH GUIDE ON":"DEPTH GUIDE OFF",
+                      186,326,2,white);
+                box(v,524,310,153,50,hovered==113?purpleHover:button);
+                label(v,"DEPTH -",538,326,2,white);
+                box(v,689,310,165,50,hovered==114?purpleHover:button);
+                label(v,"DEPTH +",704,326,2,white);
+                const std::string depthInfo="DEPTH TOLERANCE "+std::to_string(maskDepthTolerance);
+                label(v,depthInfo.c_str(),176,373,2,muted);
                 box(v,170,36,684,52,hovered==110?purpleHover:purple);
                 label(v,"DONE - RETURN TO EDITOR",270,53,2,white);
             } else if(page==Page::Curves){
