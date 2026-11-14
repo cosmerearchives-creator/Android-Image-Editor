@@ -189,6 +189,14 @@ public final class VrActivity extends Activity {
      */
     @SuppressWarnings("unused")
     public void requestAutoConvert() {
+        // A completed AI scan is tied to the actual imported image. Keep it
+        // through reopening projects and style changes; never infer twice
+        // merely because the user selects Inverted or Exaggerated.
+        if(new File(getFilesDir(),"vr_depth_ai_done.flag").isFile()
+           && QuickDepth.available(getApplicationContext())){
+            reportAiDepthStatus(6,100);
+            return;
+        }
         if(!aiRunning.compareAndSet(false,true))return;
         aiCancel.set(false);
         final long depthEpoch=depthGeneration.get();
@@ -208,6 +216,7 @@ public final class VrActivity extends Activity {
                 QuickDepth.saveCandidate(getApplicationContext(),estimated);
                 if(!QuickDepth.applyCandidate(getApplicationContext()))
                     throw new IOException("Could not apply AI depth map");
+                new File(getFilesDir(),"vr_depth_ai_done.flag").createNewFile();
                 notifyDepthChanged();
                 reportAiDepthStatus(2,80);
                 // A depth result is valuable even if this second model can't
@@ -337,6 +346,7 @@ public final class VrActivity extends Activity {
         try{depthSaver.execute(() -> {
             try{
                 if(QuickDepth.applyCandidate(getApplicationContext())){
+                    new File(getFilesDir(),"vr_depth_ai_done.flag").createNewFile();
                     reportAiDepthStatus(0,0);
                     notifyDepthChanged();
                     runOnUiThread(() -> Toast.makeText(this,
@@ -503,6 +513,7 @@ public final class VrActivity extends Activity {
                 if(expectedGeneration!=depthGeneration.get())return;
                 try {
                     QuickDepth.saveEdited(getApplicationContext(),snapshot);
+                    BatchStore.syncActive(getApplicationContext());
                 } catch (IOException | RuntimeException e) {
                     Log.e(TAG,"Saving corrected depth failed",e);
                     runOnUiThread(() -> Toast.makeText(this,
@@ -524,6 +535,7 @@ public final class VrActivity extends Activity {
         aiCancel.set(true);
         depthGeneration.incrementAndGet();
         QuickDepth.discardCandidate(getApplicationContext());
+        new File(getFilesDir(),"vr_depth_ai_done.flag").delete();
         reportAiDepthStatus(0,0);
         new Thread(() -> {
             try {
