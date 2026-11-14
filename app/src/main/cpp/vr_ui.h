@@ -205,11 +205,11 @@ struct Renderer {
             for(int oy=-1;oy<=1;++oy)for(int ox=-1;ox<=1;++ox){
                 const int sx=x+ox,sy=y+oy;
                 const bool chosen=sx>=0&&sx<MASK_EDGE&&sy>=0&&sy<MASK_EDGE
-                    &&selectionMask[size_t(sy)*MASK_EDGEu+size_t(sx)]!=0;
+                    &&selectionMask[size_t(sy)*size_t(MASK_EDGE)+size_t(sx)]!=0;
                 if(grow)result=result||chosen;
                 else result=result&&chosen;
             }
-            next[size_t(y)*MASK_EDGEu+size_t(x)]=result?255:0;
+            next[size_t(y)*size_t(MASK_EDGE)+size_t(x)]=result?255:0;
         }
         selectionMask=std::move(next);
         uploadMask();
@@ -223,9 +223,9 @@ struct Renderer {
             for(int oy=-1;oy<=1;++oy)for(int ox=-1;ox<=1;++ox){
                 const int sx=x+ox,sy=y+oy;
                 if(sx>=0&&sx<MASK_EDGE&&sy>=0&&sy<MASK_EDGE&&
-                   selectionMask[size_t(sy)*MASK_EDGEu+size_t(sx)])++count;
+                   selectionMask[size_t(sy)*size_t(MASK_EDGE)+size_t(sx)])++count;
             }
-            next[size_t(y)*MASK_EDGEu+size_t(x)]=count>=5?255:0;
+            next[size_t(y)*size_t(MASK_EDGE)+size_t(x)]=count>=5?255:0;
         }
         selectionMask=std::move(next);
         uploadMask();
@@ -234,7 +234,7 @@ struct Renderer {
         if(photoRgb.size()!=size_t(DEPTH_EDGE)*DEPTH_EDGE*3u)return false;
         float u=0.f,v=0.f;
         if(!hitPhoto(sx,sy,fullPhoto,u,v))return false;
-        int x=std::clamp(int(u*MASK_EDGE-1),0,MASK_EDGE-1),y=std::clamp(int((1.f-v)*MASK_EDGE-1),0,MASK_EDGE-1);
+        int x=std::clamp(int(u*(MASK_EDGE-1)),0,MASK_EDGE-1),y=std::clamp(int((1.f-v)*(MASK_EDGE-1)),0,MASK_EDGE-1);
         int start=y*MASK_EDGE+x;
         std::vector<uint8_t> chosen(size_t(MASK_EDGE)*MASK_EDGE,0);
         std::vector<int> pending{start};
@@ -243,7 +243,7 @@ struct Renderer {
         const int red=photoRgb[seed],green=photoRgb[seed+1],blue=photoRgb[seed+2];
         for(size_t i=0;i<pending.size();i++){
             int p=pending[i],px=p%MASK_EDGE,py=p/MASK_EDGE;
-            const int around[]={px? p-1:-1,px<255?p+1:-1,py?p-MASK_EDGE:-1,py<255?p+MASK_EDGE:-1};
+            const int around[]={px? p-1:-1,px<MASK_EDGE-1?p+1:-1,py?p-MASK_EDGE:-1,py<MASK_EDGE-1?p+MASK_EDGE:-1};
             for(int q:around){
                 if(q<0||chosen[q])continue;
                 const int colorIndex=q*3;
