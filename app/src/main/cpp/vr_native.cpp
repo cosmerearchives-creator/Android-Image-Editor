@@ -927,7 +927,7 @@ void run(JNIEnv* env, jobject activity) {
                 menu.brushMode && menu.hasDepthPixels()
                 && brushSizeStick.isActive && std::abs(brushSizeStick.currentState.y)>0.15f) {
                 menu.leftRadius=std::clamp(menu.leftRadius+
-                    brushSizeStick.currentState.y*dt*46.f,6.f,120.f);
+                    brushSizeStick.currentState.y*dt*92.f,12.f,240.f);
             }
             const bool pushDown=push.isActive && push.currentState>=0.5f;
             const bool pullDown=pressed.isActive && pressed.currentState>=0.5f;
