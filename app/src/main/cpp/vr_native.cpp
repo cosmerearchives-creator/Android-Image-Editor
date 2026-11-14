@@ -1049,7 +1049,7 @@ void run(JNIEnv* env, jobject activity) {
                 pointer && !toolPointer && !dragging && !toolDragging &&
                 menu.hasPhoto();
             float maskU=0.f,maskV=0.f;
-            const bool maskPainting=onMaskImage && !menu.maskSmartFill &&
+            const bool maskPainting=onMaskImage && menu.maskToolMode==0 &&
                 triggerDown && menu.hitPhoto(pointerX,pointerY,true,maskU,maskV);
             if(maskPainting && !maskWasPainting){
                 menu.beginMaskEdit();
@@ -1067,10 +1067,12 @@ void run(JNIEnv* env, jobject activity) {
             }
             if(maskWasPainting&&!maskPainting)menu.finishMaskEdit();
             maskWasPainting=maskPainting;
-            if(onMaskImage && menu.maskSmartFill &&
+            if(onMaskImage && menu.maskToolMode!=0 &&
                triggerDown && !wasPressed){
                 menu.beginMaskEdit();
-                menu.selectAt(pointerX,pointerY,!menu.maskSubtract,true);
+                if(menu.maskToolMode==1)
+                    menu.selectAt(pointerX,pointerY,!menu.maskSubtract,true);
+                else menu.isolateAt(pointerX,pointerY);
                 menu.finishMaskEdit();
             }
             // Drag strength sliders while holding the right trigger.
@@ -1157,7 +1159,7 @@ void run(JNIEnv* env, jobject activity) {
                 } else if(page==vrui::Page::Mask && hovered==118){
                     menu.redoMask();
                 } else if(page==vrui::Page::Mask && hovered==119){
-                    menu.maskSmartFill=!menu.maskSmartFill;
+                    menu.maskToolMode=(menu.maskToolMode+1)%3;
                 } else if(page==vrui::Page::Mask && hovered==120){
                     menu.maskBrushRadius=std::max(3.f,menu.maskBrushRadius-5.f);
                 } else if(page==vrui::Page::Mask && hovered==121){
