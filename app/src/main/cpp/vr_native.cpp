@@ -19,6 +19,8 @@ std::atomic<bool> imageNeedsReload{true};
 std::atomic<bool> depthNeedsReload{true};
 std::atomic<int> aiDepthState{0},aiDepthPercent{0};
 std::atomic<bool> auto3dReady{false};
+std::atomic<int> batchState{0},batchPercent{0},batchCount{0};
+std::atomic<int> batchReadyMode{0};
 std::atomic<int> aiSegmentState{0},aiSegmentPercent{0};
 std::mutex aiMaskMutex;
 std::vector<uint8_t> pendingAiMask;
@@ -28,6 +30,71 @@ void aiControl(JNIEnv* env,jobject activity,const char* methodName){
     if(method)env->CallVoidMethod(activity,method);
     if(env->ExceptionCheck()){env->ExceptionDescribe();env->ExceptionClear();}
     env->DeleteLocalRef(cls);
+}
+void batchMethod(JNIEnv* env,jobject activity,const char* name,
+                 const char* signature,int number=0,bool flag=false){
+    jclass cls=env->GetObjectClass(activity);
+    jmethodID method=env->GetMethodID(cls,name,signature);
+    if(method){
+        if(std::strcmp(signature,"(IZ)V")==0)
+            env->CallVoidMethod(activity,method,static_cast<jint>(number),
+                                static_cast<jboolean>(flag));
+        else if(std::strcmp(signature,"(Z)V")==0)
+            env->CallVoidMethod(activity,method,static_cast<jboolean>(flag));
+        else if(std::strcmp(signature,"(I)V")==0)
+            env->CallVoidMethod(activity,method,static_cast<jint>(number));
+        else env->CallVoidMethod(activity,method);
+    }
+    if(env->ExceptionCheck()){env->ExceptionDescribe();env->ExceptionClear();}
+    env->DeleteLocalRef(cls);
+}
+void refreshBatchStats(JNIEnv* env,jobject activity,vrui::Renderer& menu){
+    jclass cls=env->GetObjectClass(activity);
+    jmethodID method=env->GetMethodID(cls,"batchStats","()[I");
+    if(method){
+        jintArray data=static_cast<jintArray>(env->CallObjectMethod(activity,method));
+        if(data&&env->GetArrayLength(data)>=2){
+            jint values[2]{};
+            env->GetIntArrayRegion(data,0,2,values);
+            menu.batchCount=values[0];
+            menu.batchConverted=values[1];
+            env->DeleteLocalRef(data);
+        }else if(data)env->DeleteLocalRef(data);
+    }
+    if(env->ExceptionCheck()){env->ExceptionDescribe();env->ExceptionClear();}
+    env->DeleteLocalRef(cls);
+}
+bool batchPixels(JNIEnv* env,jobject activity,bool spherical,bool depth,
+                 std::vector<uint8_t>& rgba,int& width,int& height){
+    jclass cls=env->GetObjectClass(activity);
+    jmethodID method=env->GetMethodID(cls,"batchPixels","(ZZ)[I");
+    if(!method){env->DeleteLocalRef(cls);return false;}
+    jintArray pixels=static_cast<jintArray>(env->CallObjectMethod(activity,method,
+                     static_cast<jboolean>(spherical),static_cast<jboolean>(depth)));
+    if(env->ExceptionCheck()){
+        env->ExceptionDescribe();env->ExceptionClear();
+        env->DeleteLocalRef(cls);return false;
+    }
+    env->DeleteLocalRef(cls);
+    if(!pixels)return false;
+    const jsize size=env->GetArrayLength(pixels);
+    jint dims[2]{};
+    if(size>=3)env->GetIntArrayRegion(pixels,0,2,dims);
+    width=dims[0];height=dims[1];
+    if(width<=0||height<=0||width>4096||height>4096||
+       int64_t(width)*height+2!=size){
+        env->DeleteLocalRef(pixels);return false;
+    }
+    std::vector<jint> argb(size_t(width)*height);
+    env->GetIntArrayRegion(pixels,2,width*height,argb.data());
+    env->DeleteLocalRef(pixels);
+    rgba.resize(argb.size()*4u);
+    for(size_t i=0;i<argb.size();++i){
+        const uint32_t p=static_cast<uint32_t>(argb[i]);
+        rgba[i*4]=uint8_t(p>>16);rgba[i*4+1]=uint8_t(p>>8);
+        rgba[i*4+2]=uint8_t(p);rgba[i*4+3]=255;
+    }
+    return true;
 }
 std::atomic<bool> projectsNeedReload{true};
 void loadPanelLayout(JNIEnv* env,jobject activity,XrVector3f& pos,float& scale){
@@ -1144,7 +1211,24 @@ void run(JNIEnv* env, jobject activity) {
                 menu.brushMode=false;
             } else if(triggerDown&&!wasPressed && !dragging && activeSlider<0 &&
                        page!=vrui::Page::Immersive && hovered>=0 && overlayHover<0) {
-                if(page==vrui::Page::Open && hovered==131){
+                if(page==vrui::Page::Gallery && hovered==150)
+                    batchMethod(env,activity,"requestBatchImport","()V");
+                else if(page==vrui::Page::Gallery && hovered==151)
+                    batchMethod(env,activity,"requestBatchConvert","()V");
+                else if(page==vrui::Page::Gallery && hovered==152)
+                    batchMethod(env,activity,"requestBatchView","(IZ)V",1,false);
+                else if(page==vrui::Page::Gallery && hovered==153)
+                    batchMethod(env,activity,"requestBatchView","(IZ)V",2,false);
+                else if(page==vrui::Page::Gallery && hovered==154)
+                    batchMethod(env,activity,"requestBatchExport","(Z)V",0,false);
+                else if(page==vrui::Page::Gallery && hovered==155)
+                    batchMethod(env,activity,"requestBatchExport","(Z)V",0,true);
+                else if(page==vrui::Page::Gallery && hovered==156 &&
+                        batchState.load()==5)
+                    batchMethod(env,activity,"confirmLargeBatchView","()V");
+                else if(page==vrui::Page::Open && hovered>=132&&hovered<=134)
+                    menu.depthStyle=hovered-132;
+                else if(page==vrui::Page::Open && hovered==131){
                     menu.advancedVisible=!menu.advancedVisible;
                     menu.brushMode=false;
                 } else if(page==vrui::Page::Open && hovered==130){
@@ -1313,6 +1397,10 @@ void run(JNIEnv* env, jobject activity) {
             glBindFramebuffer(GL_FRAMEBUFFER, r.fbo);
             glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D,
                                    images[index].image, 0);
+            menu.batchState=batchState.load();
+            menu.batchProgress=batchPercent.load();
+            menu.batchCount=batchCount.load();
+            if(page==vrui::Page::Gallery)refreshBatchStats(env,activity,menu);
             menu.updateState=vrUpdateState.load();
             menu.updatePercent=vrUpdatePercent.load();
             menu.aiState=aiDepthState.load();
@@ -1499,6 +1587,19 @@ Java_com_cosmerearchives_androidimageeditor_VrActivity_reportAiSegmentStatus(
         JNIEnv*,jobject,jint state,jint progress){
     aiSegmentState.store(static_cast<int>(state));
     aiSegmentPercent.store(std::clamp(static_cast<int>(progress),0,100));
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_cosmerearchives_androidimageeditor_VrActivity_reportBatchStatus(
+        JNIEnv*,jobject,jint state,jint progress,jint count){
+    batchState.store(static_cast<int>(state));
+    batchPercent.store(std::clamp(static_cast<int>(progress),0,100));
+    batchCount.store(std::max(0,static_cast<int>(count)));
+}
+extern "C" JNIEXPORT void JNICALL
+Java_com_cosmerearchives_androidimageeditor_VrActivity_notifyBatchGalleryReady(
+        JNIEnv*,jobject,jint mode){
+    if(mode==1||mode==2)batchReadyMode.store(static_cast<int>(mode));
 }
 
 extern "C" JNIEXPORT void JNICALL
