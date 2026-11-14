@@ -957,6 +957,8 @@ struct Renderer {
     void uploadPhoto(const std::vector<uint8_t>& rgba,int width,int height){
         if(photoTexture){glDeleteTextures(1,&photoTexture);photoTexture=0;}
         clearMask();selectionMode=false;
+        maskUndo.clear();maskRedo.clear();maskStrokeBefore.clear();
+        maskStrokeActive=false;
         photoWidth=0;photoHeight=0;
         if(width<=0||height<=0||rgba.size()!=size_t(width)*size_t(height)*4)return;
         glGenTextures(1,&photoTexture);
