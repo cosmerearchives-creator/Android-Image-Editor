@@ -134,14 +134,26 @@ public final class BatchStore {
         return added;
     }
     private static void saveGray(byte[] pixels,File out)throws IOException{
-        if(pixels.length!=DEPTH_EDGE*DEPTH_EDGE)throw new IOException("Invalid depth dimensions");
+        // Depth Anything V2 returns 256x256; our editable depth cache is 1024x1024.
+        // Resample at save time, preserving the existing editor/brush contract.
+        final int edge=(int)Math.sqrt(pixels.length);
+        if((edge!=256&&edge!=DEPTH_EDGE)||edge*edge!=pixels.length)
+            throw new IOException("Unsupported AI depth dimensions: "+pixels.length);
         int[] argb=new int[pixels.length];
         for(int i=0;i<argb.length;i++){
             int gray=pixels[i]&255;
             argb[i]=Color.argb(255,gray,gray,gray);
         }
-        Bitmap map=Bitmap.createBitmap(argb,DEPTH_EDGE,DEPTH_EDGE,Bitmap.Config.ARGB_8888);
-        try{savePng(map,out);}finally{map.recycle();}
+        Bitmap source=Bitmap.createBitmap(argb,edge,edge,Bitmap.Config.ARGB_8888);
+        Bitmap scaled=source;
+        try{
+            if(edge!=DEPTH_EDGE)
+                scaled=Bitmap.createScaledBitmap(source,DEPTH_EDGE,DEPTH_EDGE,true);
+            savePng(scaled,out);
+        }finally{
+            if(scaled!=source)scaled.recycle();
+            source.recycle();
+        }
     }
     /** Process only missing cached results. Never touches the current editor image. */
     public static void convertMissing(Context ctx,AtomicBoolean cancel,IntConsumer progress)
