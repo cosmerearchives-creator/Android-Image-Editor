@@ -87,7 +87,7 @@ inline int buttonAt(Page page,float x,float y,bool advancedVisible=true) {
         if(y>=580&&y<=660)return x<512?150:151;
         if(y>=470&&y<=550)return x<512?152:153;
         if(y>=360&&y<=440)return x<512?154:155;
-        if(y>=208&&y<=262)return 156;
+        if(y>=240&&y<=330)return 156;
         if(y>=92&&y<=190)return 3;
         return -1;
     }
@@ -697,7 +697,6 @@ struct Renderer {
     }
     int depthStyle=0; // 0 natural, 1 exaggerated, 2 inverted - display transform only
     int batchState=0,batchProgress=0,batchCount=0,batchConverted=0;
-    int galleryTheme=0; // 0 museum, 1 club, 2 tiki, 3 fire, 4 dungeon, 5 trees
     bool advancedVisible=false;
     bool immersiveToolsVisible=false;
     bool selectionOverlayVisible=false;
@@ -1171,63 +1170,40 @@ struct Renderer {
         glVertexAttribPointer(2,2,GL_FLOAT,GL_FALSE,4*sizeof(float),
             reinterpret_cast<const void*>(2*sizeof(float)));
         glBindVertexArray(0);
-        // Bounded cylindrical gallery: azimuth walls, planar ceiling/floor.
+        // Render the exported equirectangular contact sheet as a true
+        // head-tracked OpenXR projection, not as a flat quad in front of the user.
         const char* sphereFs=R"(#version 300 es
-precision highp float;
-in vec2 uv;
-uniform sampler2D panorama,panoDepth;
-uniform vec4 orientation,fovTangent;
-uniform vec3 cameraPosition;
-uniform float galleryYaw,eyeSign,styleScale,galleryTime;
-uniform int styleInverted,galleryTheme;
-out vec4 frag;
-vec3 quat(vec3 v,vec4 q){vec3 t=2.0*cross(q.xyz,v);return v+q.w*t+cross(q.xyz,t);}
-vec3 spin(vec3 v,float a){float c=cos(a),s=sin(a);return vec3(c*v.x-s*v.z,v.y,s*v.x+c*v.z);}
-vec3 material(vec3 p,int face){
- vec3 c=vec3(.17,.16,.17);
- if(galleryTheme==1)c=vec3(.07,.04,.16);
- if(galleryTheme==2)c=vec3(.31,.19,.07);
- if(galleryTheme==3)c=vec3(.19,.045,.055);
- if(galleryTheme==4)c=vec3(.14,.15,.16);
- if(galleryTheme==5)c=vec3(.065,.16,.08);
- c+=.012*sin(p.x*12.+p.z*8.)*sin(p.y*11.);
- if(galleryTheme==1)c+=vec3(.16,.035,.27)*pow(max(0.,sin(p.y*5.+p.x*2.)),24.);
- if(galleryTheme==2)c+=vec3(.10,.055,.01)*pow(abs(sin(p.x*9.+p.z*9.)),22.);
- if(galleryTheme==3)c+=vec3(.45,.15,.01)*pow(max(0.,sin(p.x*5.+p.z*2.+galleryTime*1.6+sin(p.y*3.))),8.);
- if(galleryTheme==4)c-=vec3(.05)*step(.96,fract(p.y*3.+floor(p.x*3.)*.5));
- if(galleryTheme==5)c+=vec3(.07,.04,.015)*pow(abs(sin((p.x+p.z)*10.)),26.);
- if(face!=0)c*=face==1?.8:.7;
- return max(c,vec3(.015));
-}
-void main(){
- vec3 ray=normalize(vec3(mix(fovTangent.x,fovTangent.y,uv.x),mix(fovTangent.z,fovTangent.w,uv.y),-1.));
- ray=spin(normalize(quat(ray,orientation)),galleryYaw);
- vec3 eye=spin(cameraPosition,galleryYaw);
- float r=3.,h=2.7,t=1e8;
- int face=0;
- float a=dot(ray.xz,ray.xz),b=2.*dot(eye.xz,ray.xz),c=dot(eye.xz,eye.xz)-r*r;
- float discriminant=b*b-4.*a*c;
- if(a>1e-6&&discriminant>=0.){
-   float side=(-b+sqrt(discriminant))/(2.*a);
-   if(side>0.&&abs(eye.y+side*ray.y)<=h)t=side;
- }
- if(abs(ray.y)>1e-6){
-  float y=ray.y>0.?h:-h,cap=(y-eye.y)/ray.y;
-  vec3 point=eye+ray*cap;
-  if(cap>0.&&cap<t&&dot(point.xz,point.xz)<=r*r){t=cap;face=ray.y>0.?1:2;}
- }
- if(t>=1e8){frag=vec4(material(eye+ray*3.,0),1.);return;}
- vec3 hit=eye+ray*t;
- vec2 texcoord;
- if(face==0)texcoord=vec2(fract(.5+atan(hit.x,-hit.z)/6.2831853),.25+.5*(h-hit.y)/(2.*h));
- else {vec2 flat=clamp(hit.xz/(2.*r)+.5,.001,.999);texcoord=vec2(flat.x,face==1?.25*flat.y:.75+.25*flat.y);}
- float depth=texture(panoDepth,texcoord).r;
- if(styleInverted==1)depth=1.-depth;
- texcoord.x=clamp(texcoord.x+eyeSign*styleScale*(depth-.5)*.0025,.0005,.9995);
- vec4 photo=texture(panorama,texcoord);
- frag=vec4(mix(material(hit,face),photo.rgb,photo.a),1.);
-}
-)";
+            precision highp float;
+            in vec2 uv;
+            uniform sampler2D panorama;
+            uniform sampler2D panoDepth;
+            uniform vec4 orientation;
+            uniform vec4 fovTangent;
+            uniform float eyeSign;
+            uniform float styleScale;
+            uniform int styleInverted;
+            out vec4 frag;
+            vec3 rotateByQuat(vec3 v,vec4 q){
+                vec3 t=2.0*cross(q.xyz,v);
+                return v+q.w*t+cross(q.xyz,t);
+            }
+            void main(){
+                vec3 direction=normalize(vec3(
+                    mix(fovTangent.x,fovTangent.y,uv.x),
+                    mix(fovTangent.z,fovTangent.w,uv.y),-1.0));
+                direction=normalize(rotateByQuat(direction,orientation));
+                float longitude=atan(direction.x,-direction.z);
+                float latitude=asin(clamp(direction.y,-1.0,1.0));
+                vec2 panoUv=vec2(fract(0.5+longitude/6.28318530718),
+                                 clamp(0.5-latitude/3.14159265359,0.001,0.999));
+                // The entire panorama is painted at a fixed radius around the
+                // viewer. Per-photo depth provides subtle optional eye parallax.
+                float d=texture(panoDepth,panoUv).r;
+                if(styleInverted==1)d=1.0-d;
+                panoUv.x=fract(panoUv.x+eyeSign*styleScale*(d-0.5)*0.006);
+                frag=vec4(texture(panorama,panoUv).rgb,1.0);
+            }
+        )";
         GLuint sf=shader(GL_FRAGMENT_SHADER,sphereFs);
         GLuint sv=shader(GL_VERTEX_SHADER,photoVs);
         if(!sf||!sv)return false;
@@ -1275,8 +1251,7 @@ void main(){
         glBindTexture(GL_TEXTURE_2D,0);
         glActiveTexture(GL_TEXTURE0);
     }
-    void drawSphere(const float* quaternion,const float* tanFov,float eyeSign,
-                    const float* cameraPosition,float galleryYaw,float elapsed){
+    void drawSphere(const float* quaternion,const float* tanFov,float eyeSign){
         if(!sphereTexture||!sphereProgram)return;
         const float vertices[]={
             0.f,0.f,0.f,0.f,1024.f,0.f,1.f,0.f,0.f,768.f,0.f,1.f,
@@ -1288,10 +1263,6 @@ void main(){
         glUniform4fv(glGetUniformLocation(sphereProgram,"orientation"),1,quaternion);
         glUniform4fv(glGetUniformLocation(sphereProgram,"fovTangent"),1,tanFov);
         glUniform1f(glGetUniformLocation(sphereProgram,"eyeSign"),eyeSign);
-        glUniform3fv(glGetUniformLocation(sphereProgram,"cameraPosition"),1,cameraPosition);
-        glUniform1f(glGetUniformLocation(sphereProgram,"galleryYaw"),galleryYaw);
-        glUniform1i(glGetUniformLocation(sphereProgram,"galleryTheme"),galleryTheme);
-        glUniform1f(glGetUniformLocation(sphereProgram,"galleryTime"),elapsed);
         glUniform1f(glGetUniformLocation(sphereProgram,"styleScale"),
                     depthStyle==1?1.65f:1.f);
         glUniform1i(glGetUniformLocation(sphereProgram,"styleInverted"),
@@ -1684,12 +1655,8 @@ void main(){
                 }
                 box(v,170,208,684,54,hovered==156?purpleHover:
                     batchState==5?purple:button);
-                const char* themes[]={"MUSEUM","CLUB","TIKI PARTY",
-                    "FANTASY FIRE","DUNGEON","HANGING ON TREES"};
-                std::string themeLabel="GALLERY THEME: ";
-                themeLabel+=themes[galleryTheme%6];
                 label(v,batchState==5?"CONFIRM VIEW OVER 16 IMAGES":
-                     themeLabel.c_str(),192,223,2,white);
+                    "WARN ABOVE 16 IMAGES",192,223,2,white);
             } else if(page==Page::Projects) {
                 const int ys[]={495,405,315,225};
                 for(int i=0;i<4;i++){
