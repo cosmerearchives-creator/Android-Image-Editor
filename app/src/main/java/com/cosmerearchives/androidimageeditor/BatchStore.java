@@ -49,6 +49,15 @@ public final class BatchStore {
     }
     private static final String DISPLAY_NAME="import_name.txt";
     private static final String SOURCE_URI="import_uri.txt";
+    public static String documentKey(Uri uri){
+        // The same image can be returned as /document/ID or /tree/.../document/ID.
+        // Normalize both so previously selected images retain their badge.
+        try{
+            String id=android.provider.DocumentsContract.getDocumentId(uri);
+            if(id!=null)return uri.getAuthority()+":"+id;
+        }catch(Exception ignored){}
+        return uri.toString();
+    }
     public static java.util.Set<String> importedUris(Context ctx){
         java.util.HashSet<String> ids=new java.util.HashSet<>();
         for(File entry:entries(ctx)){
@@ -68,7 +77,7 @@ public final class BatchStore {
     }
     private static void saveSourceUri(Uri source,File entry){
         File record=new File(entry,SOURCE_URI);
-        String value=source.toString();
+        String value=documentKey(source);
         try{
             String existing="";
             if(record.isFile()){
