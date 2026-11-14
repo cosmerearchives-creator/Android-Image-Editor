@@ -249,7 +249,16 @@ struct Renderer {
                 const int colorIndex=q*3;
                 int dr=int(photoRgb[colorIndex])-red,dg=int(photoRgb[colorIndex+1])-green,
                     db=int(photoRgb[colorIndex+2])-blue;
+                // Require similarity both to the seed and to the advancing
+                // selection frontier. This avoids crossing sharp color edges
+                // through a single gradual chain of superficially similar pixels.
                 if(dr*dr+dg*dg+db*db>maskTolerance*maskTolerance)continue;
+                const int frontierIndex=p*3;
+                const int fr=int(photoRgb[colorIndex])-int(photoRgb[frontierIndex]);
+                const int fg=int(photoRgb[colorIndex+1])-int(photoRgb[frontierIndex+1]);
+                const int fb=int(photoRgb[colorIndex+2])-int(photoRgb[frontierIndex+2]);
+                const int localThreshold=std::max(12,maskTolerance/2);
+                if(fr*fr+fg*fg+fb*fb>localThreshold*localThreshold)continue;
                 chosen[q]=255;pending.push_back(q);
             }
         }
