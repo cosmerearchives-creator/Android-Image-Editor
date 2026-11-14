@@ -21,7 +21,8 @@ public final class CollageStore {
     private static final String DIR="vr_collage";
     private static final String MANIFEST="layers.json";
     private static final int MAX_LAYERS=12;
-    private static final int SIZE=1024;
+    // Preserve detail at strong zoom and large depth displacement.
+    private static final int SIZE=2048;
     private CollageStore(){}
 
     private static File dir(Context ctx){return new File(ctx.getFilesDir(),DIR);}
@@ -199,9 +200,9 @@ public final class CollageStore {
                 // A layer's alpha defines the area where its independent depth applies.
                 Bitmap coverage=Bitmap.createBitmap(256,256,Bitmap.Config.ARGB_8888);
                 Canvas mask=new Canvas(coverage);
-                RectF db=new RectF(bounds.left/4,bounds.top/4,bounds.right/4,bounds.bottom/4);
+                RectF db=new RectF(bounds.left/8,bounds.top/8,bounds.right/8,bounds.bottom/8);
                 mask.save();
-                mask.rotate(angle,cx/4,cy/4);
+                mask.rotate(angle,cx/8,cy/8);
                 mask.drawBitmap(src,null,db,paint);
                 mask.restore();
                 int[] pixels=new int[65536];coverage.getPixels(pixels,0,256,0,0,256,256);
