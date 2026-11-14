@@ -246,6 +246,30 @@ public final class BatchStore {
             return out;
         }finally{image.recycle();}
     }
+    public static synchronized void openImage(Context ctx,int index)throws IOException{
+        File[] list=entries(ctx);
+        if(index<0||index>=list.length)throw new IOException("Batch image not found");
+        File source=new File(list[index],PHOTO);
+        File depth=new File(list[index],DEPTH);
+        File target=new File(ctx.getFilesDir(),"vr_import.png");
+        File depthTarget=new File(ctx.getFilesDir(),"vr_depth_quick.png");
+        replace(source,target);
+        if(depth.isFile())replace(depth,depthTarget);else depthTarget.delete();
+        ProjectStore.imported(ctx,"BULK IMAGE "+(index+1));
+        CollageStore.reset(ctx);
+    }
+    private static void replace(File source,File dest)throws IOException{
+        File stage=new File(dest.getParentFile(),dest.getName()+".bulk.partial");
+        try(InputStream in=new FileInputStream(source);
+            FileOutputStream out=new FileOutputStream(stage)){
+            byte[] buffer=new byte[65536];int n;
+            while((n=in.read(buffer))!=-1)out.write(buffer,0,n);
+            out.getFD().sync();
+        }
+        if(!stage.renameTo(dest)){
+            stage.delete();throw new IOException("Failed to open cached image");
+        }
+    }
     public static void copyTo(Context ctx,boolean spherical,OutputStream stream)
         throws IOException{
         File file=spherical?sphere(ctx):wall(ctx);
