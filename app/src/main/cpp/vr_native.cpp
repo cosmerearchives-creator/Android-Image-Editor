@@ -930,14 +930,39 @@ void run(JNIEnv* env, jobject activity) {
             float brushU=0.f,brushV=0.f;
             const bool paintLeft=canPaint && pushDown && leftPointer &&
                 (immersive || menu.toolbarAt(leftPointerX,leftPointerY,false)<0) &&
-                !(immersive && leftToolPointer) &&
+                !(immersive && leftToolPointer &&
+                  menu.toolbarAt(leftToolX,leftToolY,true)>=0) &&
                 menu.hitPhoto(leftPointerX,leftPointerY,immersive,brushU,brushV);
             // Trigger presses on Undo, Redo, Back or any other menu item
             // must not start a brush stroke or block Undo/Redo.
             const bool paintRight=canPaint && pullDown && pointer &&
                 (immersive || menu.toolbarAt(pointerX,pointerY,false)<0) &&
-                !(immersive && toolPointer) &&
+                !(immersive && toolPointer &&
+                  menu.toolbarAt(toolPointerX,toolPointerY,true)>=0) &&
                 menu.hitPhoto(pointerX,pointerY,immersive,brushU,brushV);
+            // The brush reason is evaluated for the currently pressed hand.
+            // A trigger can work while the other controller adjusts the view.
+            menu.brushBlockReason=0;
+            if(pushDown||pullDown){
+                const bool left=pushDown;
+                const bool aim=left?leftPointer:pointer;
+                const float ax=left?leftPointerX:pointerX;
+                const float ay=left?leftPointerY:pointerY;
+                const bool panelHit=immersive
+                    ?(left?leftToolPointer&&menu.toolbarAt(leftToolX,leftToolY,true)>=0
+                           :toolPointer&&menu.toolbarAt(toolPointerX,toolPointerY,true)>=0)
+                    :menu.toolbarAt(ax,ay,false)>=0;
+                float hu=0.f,hv=0.f;
+                if(!menu.brushMode)menu.brushBlockReason=1;
+                else if(menu.quickConverting)menu.brushBlockReason=3;
+                else if(!menu.hasDepthPixels())menu.brushBlockReason=2;
+                else if(menu.selectionMode)menu.brushBlockReason=4;
+                else if(aiDepthState.load()==3)menu.brushBlockReason=5;
+                else if(dragging||toolDragging)menu.brushBlockReason=6;
+                else if(!aim)menu.brushBlockReason=7;
+                else if(panelHit)menu.brushBlockReason=8;
+                else if(!menu.hitPhoto(ax,ay,immersive,hu,hv))menu.brushBlockReason=7;
+            }
             menu.painting=paintLeft||paintRight;
             menu.paintingLeft=paintLeft;
             menu.paintingRight=paintRight;
@@ -1020,7 +1045,13 @@ void run(JNIEnv* env, jobject activity) {
             if(triggerDown&&!wasPressed && !dragging && activeSlider<0 && hit>=20) {
                 switch(hit) {
                     case 20: menu.stereoEnabled=!menu.stereoEnabled;break;
-                    case 21: menu.brushMode=!menu.brushMode;break;
+                    case 21:
+                        menu.brushMode=!menu.brushMode;
+                        if(menu.brushMode&&!menu.hasDepthPixels()&&!menu.quickConverting){
+                            menu.quickConverting=true;
+                            callQuickConvert(env,activity);
+                        }
+                        break;
                     case 22:
                         menu.brushSoft=!menu.brushSoft;
                         menu.leftHardness=menu.brushSoft?0.f:1.f;
@@ -1105,7 +1136,13 @@ void run(JNIEnv* env, jobject activity) {
                     callQuickConvert(env,activity);
                 } else if(page==vrui::Page::Open && hovered==10) {
                     menu.brushMode=!menu.brushMode;
-                    if(menu.brushMode)menu.selectionMode=false;
+                    if(menu.brushMode) {
+                        menu.selectionMode=false;
+                        if(!menu.hasDepthPixels()&&!menu.quickConverting){
+                            menu.quickConverting=true;
+                            callQuickConvert(env,activity);
+                        }
+                    }
                 } else if(page==vrui::Page::Open && hovered==6 && menu.hasPhoto()) {
                     menu.stereoEnabled=!menu.stereoEnabled;
                 } else if(page==vrui::Page::Open && hovered==7 && menu.hasPhoto()) {
