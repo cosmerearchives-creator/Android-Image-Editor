@@ -71,6 +71,8 @@ public final class ImageStorage {
             }
             // A depth map belongs to exactly one imported image.
             QuickDepth.discard(context);
+            new File(context.getFilesDir(),"vr_depth_ai_done.flag").delete();
+            BatchStore.clearActive(context);
         } finally {
             if (output != image) output.recycle();
             image.recycle();
