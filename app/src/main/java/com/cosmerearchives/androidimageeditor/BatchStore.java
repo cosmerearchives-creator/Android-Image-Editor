@@ -360,6 +360,80 @@ public final class BatchStore {
         try{savePng(depth,outputDepth);}finally{depth.recycle();}
         progress.accept(100);
     }
+    private static File savedRoot(Context ctx){
+        File directory=new File(ctx.getFilesDir(),"vr_saved_cylinders");
+        if(!directory.isDirectory()&&!directory.mkdirs())
+            throw new IllegalStateException("Cannot create saved cylinder library");
+        return directory;
+    }
+    public static synchronized String saveCylinder(Context ctx,int theme)throws IOException{
+        if(!sphere(ctx).isFile()||!sphereDepth(ctx).isFile())
+            throw new IOException("Build the cylinder before saving");
+        File folder=new File(savedRoot(ctx),
+            "room_"+new java.text.SimpleDateFormat("yyyyMMdd_HHmmss_SSS",
+                Locale.ROOT).format(new java.util.Date()));
+        if(!folder.mkdirs())throw new IOException("Cannot create cylinder");
+        try{
+            java.nio.file.Files.copy(sphere(ctx).toPath(),
+                new File(folder,"wall.png").toPath());
+            java.nio.file.Files.copy(sphereDepth(ctx).toPath(),
+                new File(folder,"depth.png").toPath());
+            try(FileOutputStream stream=new FileOutputStream(new File(folder,"theme.txt"))){
+                stream.write(Integer.toString(Math.max(0,Math.min(5,theme)))
+                    .getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                stream.getFD().sync();
+            }
+            return folder.getName();
+        }catch(IOException e){
+            for(File item:folder.listFiles()==null?new File[0]:folder.listFiles())
+                item.delete();
+            folder.delete();
+            throw e;
+        }
+    }
+    private static File[] savedEntries(Context ctx){
+        File[] list=savedRoot(ctx).listFiles(f->f.isDirectory()&&
+            new File(f,"wall.png").isFile()&&new File(f,"depth.png").isFile());
+        if(list==null)return new File[0];
+        Arrays.sort(list,(a,b)->b.getName().compareTo(a.getName()));
+        return list;
+    }
+    public static String[] savedCylinderNames(Context ctx){
+        File[] list=savedEntries(ctx);
+        String[] names=new String[list.length];
+        String[] themes={"Museum","Club","Tiki Party","Fantasy Fire",
+            "Dungeon","Hanging on Trees"};
+        for(int i=0;i<list.length;i++){
+            String stamp=list[i].getName().replace("room_","").replace('_',' ');
+            names[i]=stamp+"  -  "+themes[savedCylinderTheme(ctx,i)];
+        }
+        return names;
+    }
+    public static int savedCylinderTheme(Context ctx,int index){
+        File[] items=savedEntries(ctx);
+        if(index<0||index>=items.length)return 0;
+        try(InputStream in=new FileInputStream(new File(items[index],"theme.txt"))){
+            byte[] data=new byte[8];
+            int length=in.read(data);
+            if(length>0)return Math.max(0,Math.min(5,Integer.parseInt(
+                new String(data,0,length,java.nio.charset.StandardCharsets.UTF_8).trim())));
+        }catch(Exception ignored){}
+        return 0;
+    }
+    public static int[] loadSavedPixels(Context ctx,int index,boolean depth){
+        File[] items=savedEntries(ctx);
+        if(index<0||index>=items.length)return null;
+        File file=new File(items[index],depth?"depth.png":"wall.png");
+        Bitmap image=decode(file);
+        if(image==null)return null;
+        try{
+            int w=image.getWidth(),h=image.getHeight();
+            int[] result=new int[w*h+2];
+            result[0]=w;result[1]=h;
+            image.getPixels(result,2,w,0,0,w,h);
+            return result;
+        }finally{image.recycle();}
+    }
     public static int[] loadPixels(Context ctx,boolean spherical,boolean depth){
         File file=spherical?(depth?sphereDepth(ctx):sphere(ctx)):
                              (depth?wallDepth(ctx):wall(ctx));
