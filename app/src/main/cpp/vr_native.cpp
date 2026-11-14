@@ -722,6 +722,13 @@ void run(JNIEnv* env, jobject activity) {
             reinterpret_cast<const XrCompositionLayerBaseHeader*>(&quads[2]),
             reinterpret_cast<const XrCompositionLayerBaseHeader*>(&quads[3])
         };
+        XrCompositionLayerProjection projection{XR_TYPE_COMPOSITION_LAYER_PROJECTION};
+        XrCompositionLayerProjectionView projectionViews[2]{
+            {XR_TYPE_COMPOSITION_LAYER_PROJECTION_VIEW},
+            {XR_TYPE_COMPOSITION_LAYER_PROJECTION_VIEW}
+        };
+        XrView sceneViews[2]{{XR_TYPE_VIEW},{XR_TYPE_VIEW}};
+        bool sphereFrame=false;
         uint32_t layerCount = 0;
         if (frameState.shouldRender) {
             XrActiveActionSet active{r.actionSet, XR_NULL_PATH};
@@ -1126,7 +1133,8 @@ void run(JNIEnv* env, jobject activity) {
                 :(page==vrui::Page::Open && menu.advancedVisible &&
                   detachedEditor && toolPointer&&!toolDragging?
                   menu.toolbarAt(toolPointerX,toolPointerY,false):-1);
-            const int hovered=detachedEditor
+            const int hovered=(page==vrui::Page::Wall||page==vrui::Page::Sphere)?
+                -1:detachedEditor
                 ?(toolPointer&&!toolDragging?vrui::buttonAt(page,toolPointerX,toolPointerY,
                                                              menu.advancedVisible):-1)
                 :(pointer&&!dragging&&!immersive?vrui::buttonAt(page,pointerX,pointerY,
@@ -1461,16 +1469,6 @@ void run(JNIEnv* env, jobject activity) {
             menu.aiSegmentState=aiSegmentState.load();
             menu.aiSegmentPercent=aiSegmentPercent.load();
             if(projectsNeedReload.exchange(false))refreshProjectList(env,activity,menu);
-            const int galleryReady=batchReadyMode.exchange(0);
-            if(galleryReady!=0 && loadBatchView(env,activity,menu,galleryReady)){
-                page=galleryReady==1?vrui::Page::Wall:vrui::Page::Sphere;
-                panelPosition={0.f,0.f,-1.9f};
-                panelScale=galleryReady==1?3.7f:1.f;
-                panelAngle=0.f;
-                dragMode=DragMode::None;
-                menu.brushMode=false;
-                menu.selectionOverlayVisible=false;
-            }
             if(imageNeedsReload.exchange(false)) {
                 {
                     std::lock_guard<std::mutex> lock(aiMaskMutex);
@@ -1482,6 +1480,16 @@ void run(JNIEnv* env, jobject activity) {
                 depthNeedsReload.store(true);
             }
             if(depthNeedsReload.exchange(false))refreshDepth(env,activity,menu);
+            const int galleryReady=batchReadyMode.exchange(0);
+            if(galleryReady!=0 && loadBatchView(env,activity,menu,galleryReady)){
+                page=galleryReady==1?vrui::Page::Wall:vrui::Page::Sphere;
+                panelPosition={0.f,0.f,-1.9f};
+                panelScale=galleryReady==1?3.7f:1.f;
+                panelAngle=0.f;
+                dragMode=DragMode::None;
+                menu.brushMode=false;
+                menu.selectionOverlayVisible=false;
+            }
             {
                 // JNI worker only publishes data. Texture upload stays on the
                 // OpenXR GL thread, where the GL context is current.
@@ -1491,6 +1499,17 @@ void run(JNIEnv* env, jobject activity) {
                     mask.swap(pendingAiMask);
                 }
                 if(!mask.empty())menu.applyAiMask(mask);
+            }
+            if(page==vrui::Page::Sphere){
+                XrViewLocateInfo locate{XR_TYPE_VIEW_LOCATE_INFO};
+                locate.viewConfigurationType=XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO;
+                locate.displayTime=frameState.predictedDisplayTime;
+                locate.space=r.space;
+                XrViewState state{XR_TYPE_VIEW_STATE};
+                uint32_t viewCount=0;
+                sphereFrame=XR_SUCCEEDED(xrLocateViews(r.session,&locate,&state,
+                             2,&viewCount,sceneViews)) && viewCount==2 &&
+                            (state.viewStateFlags & XR_VIEW_STATE_ORIENTATION_VALID_BIT);
             }
             menu.selectionOverlayVisible=page==vrui::Page::Mask ||
                 (page==vrui::Page::Open&&menu.advancedVisible) ||
@@ -1506,9 +1525,20 @@ void run(JNIEnv* env, jobject activity) {
                 glDisable(GL_SCISSOR_TEST);
                 const float eyeSign=eye==0?-1.f:1.f;
                 // Both controllers have independent visible pointers.
-                menu.draw((page==vrui::Page::Wall||detachedEditor)?
-                              vrui::Page::Immersive:page,
-                          detachedEditor?-1:hovered,pointerX,pointerY,false,eyeSign);
+                if(page==vrui::Page::Sphere && sphereFrame){
+                    const auto& view=sceneViews[eye];
+                    const float quaternion[]={view.pose.orientation.x,
+                        view.pose.orientation.y,view.pose.orientation.z,
+                        view.pose.orientation.w};
+                    const float tangents[]={std::tan(view.fov.angleLeft),
+                        std::tan(view.fov.angleRight),std::tan(view.fov.angleDown),
+                        std::tan(view.fov.angleUp)};
+                    menu.drawSphere(quaternion,tangents,eyeSign);
+                }else{
+                    menu.draw((page==vrui::Page::Wall||detachedEditor)?
+                                  vrui::Page::Immersive:page,
+                              detachedEditor?-1:hovered,pointerX,pointerY,false,eyeSign);
+                }
                 if(!detachedTools && page==vrui::Page::AiDepth)menu.drawAiOverlay();
                 if(!detachedTools && !immersive && menu.advancedVisible)
                     menu.drawTools(page,overlayHover);
@@ -1563,6 +1593,21 @@ void run(JNIEnv* env, jobject activity) {
                 quad.subImage.imageRect.extent={1024,768};
             }
             layerCount=2;
+            if(page==vrui::Page::Sphere&&sphereFrame){
+                projection.space=r.space;
+                projection.viewCount=2;
+                projection.views=projectionViews;
+                for(int eye=0;eye<2;++eye){
+                    projectionViews[eye].pose=sceneViews[eye].pose;
+                    projectionViews[eye].fov=sceneViews[eye].fov;
+                    projectionViews[eye].subImage.swapchain=r.swapchain;
+                    projectionViews[eye].subImage.imageRect.offset={eye*1024,0};
+                    projectionViews[eye].subImage.imageRect.extent={1024,768};
+                }
+                layers[0]=reinterpret_cast<const XrCompositionLayerBaseHeader*>(
+                    &projection);
+                layerCount=1;
+            }
             if(detachedTools) {
                 for(int eye=0;eye<2;eye++){
                     auto& quad=quads[eye+2];
