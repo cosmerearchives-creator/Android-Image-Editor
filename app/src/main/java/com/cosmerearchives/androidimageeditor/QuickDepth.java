@@ -16,6 +16,7 @@ import java.io.IOException;
 public final class QuickDepth {
     private static final int W = 256;
     private static final int H = 256;
+    private static final int EDIT_EDGE=512;
     private static final String DEPTH_FILE = "vr_depth_quick.png";
     private static final String CANDIDATE = "vr_depth_ai_candidate.png";
     private QuickDepth() {}
@@ -67,20 +68,31 @@ public final class QuickDepth {
                 throw new IOException("Depth preview could not be saved");
         }finally{bitmap.recycle();stage.delete();}
     }
+    // Normalize old 256x256 and newer 512x512 depth PNGs to the 512px
+    // editor grid. Preserve existing projects and the 256px AI model output.
+    private static int[] normalizedPixels(File source) {
+        Bitmap bitmap=BitmapFactory.decodeFile(source.getAbsolutePath());
+        if(bitmap==null)return null;
+        Bitmap resized=bitmap;
+        try {
+            if(!((bitmap.getWidth()==W && bitmap.getHeight()==H) ||
+                 (bitmap.getWidth()==EDIT_EDGE && bitmap.getHeight()==EDIT_EDGE)))return null;
+            if(bitmap.getWidth()!=EDIT_EDGE)
+                resized=Bitmap.createScaledBitmap(bitmap,EDIT_EDGE,EDIT_EDGE,true);
+            int[] result=new int[EDIT_EDGE*EDIT_EDGE+2];
+            result[0]=EDIT_EDGE;result[1]=EDIT_EDGE;
+            resized.getPixels(result,2,EDIT_EDGE,0,0,EDIT_EDGE,EDIT_EDGE);
+            return result;
+        }finally{
+            if(resized!=bitmap)resized.recycle();
+            bitmap.recycle();
+        }
+    }
     public static synchronized int[] loadPreviewPixels(Context ctx) {
         File candidate=new File(ctx.getFilesDir(),CANDIDATE);
         if(candidate.isFile()){
-            Bitmap bitmap=BitmapFactory.decodeFile(candidate.getAbsolutePath());
-            if(bitmap!=null){
-                try{
-                    if(bitmap.getWidth()==W && bitmap.getHeight()==H){
-                        int[] result=new int[W*H+2];
-                        result[0]=W;result[1]=H;
-                        bitmap.getPixels(result,2,W,0,0,W,H);
-                        return result;
-                    }
-                }finally{bitmap.recycle();}
-            }
+            int[] preview=normalizedPixels(candidate);
+            if(preview!=null)return preview;
         }
         return loadPixels(ctx);
     }
@@ -94,28 +106,19 @@ public final class QuickDepth {
     }
 
     public static int[] loadPixels(Context ctx) {
-        Bitmap bitmap = BitmapFactory.decodeFile(path(ctx).getAbsolutePath());
-        if (bitmap == null) return null;
-        try {
-            if (bitmap.getWidth() != W || bitmap.getHeight() != H) return null;
-            int[] result = new int[W*H+2];
-            result[0]=W;
-            result[1]=H;
-            bitmap.getPixels(result, 2, W, 0, 0, W, H);
-            return result;
-        } finally { bitmap.recycle(); }
+        return normalizedPixels(path(ctx));
     }
 
-    /** Persist an edited 256x256 depth map atomically. Existing photo stays untouched. */
+    /** Persist a 512x512 corrected depth map, retaining legacy 256px compatibility. */
     public static synchronized void saveEdited(Context ctx, byte[] gray) throws IOException {
-        if(gray==null || gray.length!=W*H)
+        if(gray==null || gray.length!=EDIT_EDGE*EDIT_EDGE)
             throw new IOException("Invalid depth-map dimensions");
-        int[] argb=new int[W*H];
+        int[] argb=new int[EDIT_EDGE*EDIT_EDGE];
         for(int i=0;i<argb.length;i++){
             int value=gray[i] & 0xff;
             argb[i]=Color.argb(255,value,value,value);
         }
-        Bitmap bitmap=Bitmap.createBitmap(argb,W,H,Bitmap.Config.ARGB_8888);
+        Bitmap bitmap=Bitmap.createBitmap(argb,EDIT_EDGE,EDIT_EDGE,Bitmap.Config.ARGB_8888);
         File staging=new File(ctx.getFilesDir(),DEPTH_FILE+".edited.partial");
         try {
             try(FileOutputStream stream=new FileOutputStream(staging)){
