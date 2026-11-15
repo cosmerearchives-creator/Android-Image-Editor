@@ -53,6 +53,86 @@ public final class GltfMesh {
             return pixels;
         }finally{bitmap.recycle();}
     }
+    // glTF column-major scene transforms are baked into the bounded GPU
+    // vertex stream. This supports multiple meshes, nested nodes, and reuse.
+    private static final class Instance {
+        final int mesh;
+        final float[] matrix;
+        Instance(int mesh,float[] matrix){this.mesh=mesh;this.matrix=matrix;}
+    }
+    private static float[] identity(){
+        return new float[]{1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1};
+    }
+    private static float[] multiply(float[] a,float[] b){
+        float[] c=new float[16];
+        for(int col=0;col<4;col++)
+            for(int row=0;row<4;row++)
+                for(int k=0;k<4;k++)
+                    c[col*4+row]+=a[k*4+row]*b[col*4+k];
+        return c;
+    }
+    private static float[] localTransform(JSONObject node)throws Exception{
+        JSONArray matrix=node.optJSONArray("matrix");
+        if(matrix!=null){
+            if(matrix.length()!=16)throw new IllegalArgumentException("Invalid matrix");
+            float[] values=new float[16];
+            for(int i=0;i<16;i++)values[i]=(float)matrix.getDouble(i);
+            return values;
+        }
+        JSONArray t=node.optJSONArray("translation"),q=node.optJSONArray("rotation");
+        JSONArray scale=node.optJSONArray("scale");
+        float tx=t==null?0:(float)t.getDouble(0);
+        float ty=t==null?0:(float)t.getDouble(1);
+        float tz=t==null?0:(float)t.getDouble(2);
+        float x=q==null?0:(float)q.getDouble(0);
+        float y=q==null?0:(float)q.getDouble(1);
+        float z=q==null?0:(float)q.getDouble(2);
+        float w=q==null?1:(float)q.getDouble(3);
+        float norm=x*x+y*y+z*z+w*w;
+        if(norm<.0001f)throw new IllegalArgumentException("Zero rotation");
+        float inv=1f/(float)Math.sqrt(norm);
+        x*=inv;y*=inv;z*=inv;w*=inv;
+        float sx=scale==null?1:(float)scale.getDouble(0);
+        float sy=scale==null?1:(float)scale.getDouble(1);
+        float sz=scale==null?1:(float)scale.getDouble(2);
+        return new float[]{
+            (1-2*(y*y+z*z))*sx,(2*(x*y+z*w))*sx,(2*(x*z-y*w))*sx,0,
+            (2*(x*y-z*w))*sy,(1-2*(x*x+z*z))*sy,(2*(y*z+x*w))*sy,0,
+            (2*(x*z+y*w))*sz,(2*(y*z-x*w))*sz,(1-2*(x*x+y*y))*sz,0,
+            tx,ty,tz,1
+        };
+    }
+    private static void visitNode(JSONArray nodes,int index,float[] parent,
+            boolean[] active,java.util.ArrayList<Instance> output,int depth)
+            throws Exception{
+        if(index<0||index>=nodes.length()||depth>12||active[index])
+            throw new IllegalArgumentException("Invalid/cyclic scene graph");
+        if(output.size()>96)throw new IllegalArgumentException("Scene instance budget");
+        active[index]=true;
+        JSONObject node=nodes.getJSONObject(index);
+        float[] matrix=multiply(parent,localTransform(node));
+        if(node.has("mesh"))output.add(new Instance(node.getInt("mesh"),matrix));
+        JSONArray children=node.optJSONArray("children");
+        if(children!=null)for(int i=0;i<children.length();i++)
+            visitNode(nodes,children.getInt(i),matrix,active,output,depth+1);
+        active[index]=false;
+    }
+    private static java.util.ArrayList<Instance> sceneInstances(JSONObject doc)
+            throws Exception{
+        java.util.ArrayList<Instance> output=new java.util.ArrayList<>();
+        JSONArray nodes=doc.optJSONArray("nodes");
+        JSONArray scenes=doc.optJSONArray("scenes");
+        if(nodes==null||scenes==null||scenes.length()==0)
+            throw new IllegalArgumentException("Missing glTF scene");
+        int current=doc.optInt("scene",0);
+        JSONArray roots=scenes.getJSONObject(current).getJSONArray("nodes");
+        boolean[] active=new boolean[nodes.length()];
+        for(int i=0;i<roots.length();i++)
+            visitNode(nodes,roots.getInt(i),identity(),active,output,0);
+        if(output.isEmpty()||output.size()>96)
+            throw new IllegalArgumentException("Invalid scene size");
+        return output;
+    }
     public static float[] loadMuseum(Context context) throws Exception {
         JSONObject doc=readMuseum(context);
         JSONArray buffers=doc.getJSONArray("buffers");
@@ -68,7 +148,9 @@ public final class GltfMesh {
         JSONArray views=doc.getJSONArray("bufferViews");
         JSONArray materials=doc.optJSONArray("materials");
         java.util.ArrayList<Float> output=new java.util.ArrayList<>();
-        for(int meshId=0;meshId<meshes.length();meshId++){
+        for(Instance instance:sceneInstances(doc)){
+            int meshId=instance.mesh;
+            if(meshId<0||meshId>=meshes.length())throw new IllegalArgumentException("Invalid mesh ref");
             JSONArray primitives=meshes.getJSONObject(meshId).getJSONArray("primitives");
             for(int k=0;k<primitives.length();k++){
                 JSONObject primitive=primitives.getJSONObject(k);
@@ -134,9 +216,18 @@ public final class GltfMesh {
                 for(int i=0;i<indexCount;i++){
                     int index=binary.getShort(base+i*2)&65535;
                     if(index>=vertexCount)throw new IllegalArgumentException("Index out of bounds");
-                    for(int axis=0;axis<3;axis++)output.add(positions[index*3+axis]);
+                    float px=positions[index*3],py=positions[index*3+1],
+                        pz=positions[index*3+2];
+                    float[] m=instance.matrix;
+                    float wx=m[0]*px+m[4]*py+m[8]*pz+m[12];
+                    float wy=m[1]*px+m[5]*py+m[9]*pz+m[13];
+                    float wz=m[2]*px+m[6]*py+m[10]*pz+m[14];
+                    if(!Float.isFinite(wx)||!Float.isFinite(wy)||!Float.isFinite(wz))
+                        throw new IllegalArgumentException("Nonfinite model geometry");
+                    output.add(wx);output.add(wy);output.add(wz);
                     output.add(red);output.add(green);output.add(blue);
                     output.add(uv[index*2]);output.add(uv[index*2+1]);
+                    if(output.size()>1440000)throw new IllegalArgumentException("Scene triangle budget");
                 }
             }
         }
