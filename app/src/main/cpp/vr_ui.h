@@ -1422,69 +1422,69 @@ float themedArchitecture(vec3 eye,vec3 ray,float boundary,inout vec3 color){
         vec3 facing=vec3(outward.x,0.,outward.y);
         vec3 localEye=vec3(dot(eye,along),eye.y,dot(eye,facing));
         vec3 localRay=vec3(dot(ray,along),ray.y,dot(ray,facing));
-        float distance=1e8;
+        float hitDistance=1e8;
         vec3 tint=vec3(.2);
         if(galleryTheme==1){
             // Club: suspended stage truss, LED ceiling rails, floor risers.
-            distance=museumBox(localEye,localRay,vec3(0.,2.42,radius-.48),
+            hitDistance=museumBox(localEye,localRay,vec3(0.,2.42,radius-.48),
                 vec3(.68,.065,.065));
             tint=vec3(.09,.11,.17);
-            if(distance<closest){closest=distance;color=tint;}
-            distance=museumBox(localEye,localRay,vec3(0.,2.57,radius*.50),
+            if(hitDistance<closest){closest=hitDistance;color=tint;}
+            hitDistance=museumBox(localEye,localRay,vec3(0.,2.57,radius*.50),
                 vec3(.045,.045,radius*.38));
             tint=vec3(.12,.56,.85)*(.75+.25*sin(galleryTime*1.8+angle));
-            if(distance<closest){closest=distance;color=tint;}
-            distance=museumBox(localEye,localRay,vec3(0.,-2.62,radius-.52),
+            if(hitDistance<closest){closest=hitDistance;color=tint;}
+            hitDistance=museumBox(localEye,localRay,vec3(0.,-2.62,radius-.52),
                 vec3(.66,.075,.35));
-            if(distance<closest){closest=distance;color=vec3(.11,.07,.20);}
+            if(hitDistance<closest){closest=hitDistance;color=vec3(.11,.07,.20);}
         }else if(galleryTheme==2){
             // Tiki: chunky wooden beams, ceiling rafters, suspended eaves.
-            distance=museumBox(localEye,localRay,vec3(0.,2.43,radius-.40),
+            hitDistance=museumBox(localEye,localRay,vec3(0.,2.43,radius-.40),
                 vec3(.78,.11,.13));
-            if(distance<closest){closest=distance;color=vec3(.42,.23,.07);}
-            distance=museumBox(localEye,localRay,vec3(0.,2.59,radius*.50),
+            if(hitDistance<closest){closest=hitDistance;color=vec3(.42,.23,.07);}
+            hitDistance=museumBox(localEye,localRay,vec3(0.,2.59,radius*.50),
                 vec3(.085,.065,radius*.40));
-            if(distance<closest){closest=distance;color=vec3(.52,.33,.11);}
-            distance=museumBox(localEye,localRay,vec3(0.,-2.58,radius-.45),
+            if(hitDistance<closest){closest=hitDistance;color=vec3(.52,.33,.11);}
+            hitDistance=museumBox(localEye,localRay,vec3(0.,-2.58,radius-.45),
                 vec3(.58,.09,.24));
-            if(distance<closest){closest=distance;color=vec3(.30,.17,.075);}
+            if(hitDistance<closest){closest=hitDistance;color=vec3(.30,.17,.075);}
         }else if(galleryTheme==3){
             // Fantasy fire: volcanic cornices, raised altar and iron brackets.
-            distance=museumBox(localEye,localRay,vec3(0.,2.41,radius-.33),
+            hitDistance=museumBox(localEye,localRay,vec3(0.,2.41,radius-.33),
                 vec3(.73,.13,.25));
-            if(distance<closest){closest=distance;color=vec3(.20,.12,.17);}
-            distance=museumBox(localEye,localRay,vec3(0.,-2.48,radius-.55),
+            if(hitDistance<closest){closest=hitDistance;color=vec3(.20,.12,.17);}
+            hitDistance=museumBox(localEye,localRay,vec3(0.,-2.48,radius-.55),
                 vec3(.43,.22,.39));
-            if(distance<closest){closest=distance;color=vec3(.25,.13,.16);}
-            distance=museumBox(localEye,localRay,vec3(0.,1.73,radius-.41),
+            if(hitDistance<closest){closest=hitDistance;color=vec3(.25,.13,.16);}
+            hitDistance=museumBox(localEye,localRay,vec3(0.,1.73,radius-.41),
                 vec3(.18,.055,.22));
-            if(distance<closest){
-                closest=distance;
+            if(hitDistance<closest){
+                closest=hitDistance;
                 color=vec3(.48,.19,.07)+vec3(.25,.13,.01)*
                     (.5+.5*sin(galleryTime*3.+angle));
             }
         }else if(galleryTheme==4){
             // Dungeon: stone arch imposts, heavy lintels and iron brackets.
-            distance=museumBox(localEye,localRay,vec3(0.,2.16,radius-.32),
+            hitDistance=museumBox(localEye,localRay,vec3(0.,2.16,radius-.32),
                 vec3(.71,.18,.20));
-            if(distance<closest){closest=distance;color=vec3(.31,.32,.31);}
-            distance=museumBox(localEye,localRay,vec3(0.,-2.46,radius-.44),
+            if(hitDistance<closest){closest=hitDistance;color=vec3(.31,.32,.31);}
+            hitDistance=museumBox(localEye,localRay,vec3(0.,-2.46,radius-.44),
                 vec3(.65,.20,.28));
-            if(distance<closest){closest=distance;color=vec3(.24,.26,.25);}
-            distance=museumBox(localEye,localRay,vec3(0.,1.62,radius-.40),
+            if(hitDistance<closest){closest=hitDistance;color=vec3(.24,.26,.25);}
+            hitDistance=museumBox(localEye,localRay,vec3(0.,1.62,radius-.40),
                 vec3(.20,.05,.20));
-            if(distance<closest){closest=distance;color=vec3(.16,.15,.14);}
+            if(hitDistance<closest){closest=hitDistance;color=vec3(.16,.15,.14);}
         }else if(galleryTheme==5){
             // Woodland: raised root beds, a connecting branch, overhead bough.
-            distance=museumBox(localEye,localRay,vec3(0.,-2.54,radius-.43),
+            hitDistance=museumBox(localEye,localRay,vec3(0.,-2.54,radius-.43),
                 vec3(.62,.13,.31));
-            if(distance<closest){closest=distance;color=vec3(.15,.14,.065);}
-            distance=museumBox(localEye,localRay,vec3(0.,2.20,radius-.46),
+            if(hitDistance<closest){closest=hitDistance;color=vec3(.15,.14,.065);}
+            hitDistance=museumBox(localEye,localRay,vec3(0.,2.20,radius-.46),
                 vec3(.63,.085,.12));
-            if(distance<closest){closest=distance;color=vec3(.30,.19,.085);}
-            distance=museumBox(localEye,localRay,vec3(0.,2.55,radius*.54),
+            if(hitDistance<closest){closest=hitDistance;color=vec3(.30,.19,.085);}
+            hitDistance=museumBox(localEye,localRay,vec3(0.,2.55,radius*.54),
                 vec3(.12,.075,radius*.34));
-            if(distance<closest){closest=distance;color=vec3(.26,.20,.075);}
+            if(hitDistance<closest){closest=hitDistance;color=vec3(.26,.20,.075);}
         }
     }
     return closest;
