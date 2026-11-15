@@ -691,17 +691,6 @@ void run(JNIEnv* env, jobject activity) {
     check(xrEnumerateSwapchainImages(r.swapchain, imagesCount, &imagesCount,
           reinterpret_cast<XrSwapchainImageBaseHeader*>(images.data())), "swapchain images");
     glGenFramebuffers(1, &r.fbo);
-    // The OpenXR swapchain contains only color; a local depth renderbuffer
-    // lets actual glTF triangles occlude one another. It is never submitted
-    // separately to the compositor.
-    glGenRenderbuffers(1,&r.depthBuffer);
-    glBindRenderbuffer(GL_RENDERBUFFER,r.depthBuffer);
-    glRenderbufferStorage(GL_RENDERBUFFER,GL_DEPTH_COMPONENT16,2048,1536);
-    glBindRenderbuffer(GL_RENDERBUFFER,0);
-    glBindFramebuffer(GL_FRAMEBUFFER,r.fbo);
-    glFramebufferRenderbuffer(GL_FRAMEBUFFER,GL_DEPTH_ATTACHMENT,
-        GL_RENDERBUFFER,r.depthBuffer);
-    glBindFramebuffer(GL_FRAMEBUFFER,0);
     vrui::Renderer menu;
     if (!menu.initialize()) throw "VR menu shader initialization";
     menu.galleryTheme=galleryThemeFromJava(env,activity,"loadGalleryTheme");
@@ -1572,8 +1561,27 @@ void run(JNIEnv* env, jobject activity) {
             }
             if(depthNeedsReload.exchange(false))refreshDepth(env,activity,menu);
             const int galleryReady=batchReadyMode.exchange(0);
-            if(galleryReady>=2 && menu.galleryDetail)
-                tryLoadMuseumAsset(env,activity,menu);
+            if(galleryReady>=2 && menu.galleryDetail &&
+               tryLoadMuseumAsset(env,activity,menu) && !r.depthBuffer){
+                // Only now allocate a local depth attachment. VR startup and
+                // ordinary gallery rendering remain independent of 3D assets.
+                GLuint candidate=0;
+                glGenRenderbuffers(1,&candidate);
+                glBindRenderbuffer(GL_RENDERBUFFER,candidate);
+                glRenderbufferStorage(GL_RENDERBUFFER,GL_DEPTH_COMPONENT16,2048,1536);
+                glBindRenderbuffer(GL_RENDERBUFFER,0);
+                glFramebufferRenderbuffer(GL_FRAMEBUFFER,GL_DEPTH_ATTACHMENT,
+                    GL_RENDERBUFFER,candidate);
+                if(glCheckFramebufferStatus(GL_FRAMEBUFFER)==GL_FRAMEBUFFER_COMPLETE){
+                    r.depthBuffer=candidate;
+                }else{
+                    glFramebufferRenderbuffer(GL_FRAMEBUFFER,GL_DEPTH_ATTACHMENT,
+                        GL_RENDERBUFFER,0);
+                    if(candidate)glDeleteRenderbuffers(1,&candidate);
+                    menu.environmentVertices=0; // Model disabled; cylinder still works.
+                    log("Optional museum depth buffer unavailable; shader fallback active");
+                }
+            }
             if(galleryReady==3 && !menu.galleryAvailable())
                 menu.initializeGallery();
             if(galleryReady!=0 && (galleryReady==1||menu.galleryAvailable()) &&
@@ -1674,7 +1682,8 @@ void run(JNIEnv* env, jobject activity) {
                     const float camera[]={
                         cx,std::clamp(view.pose.position.y+galleryY,-2.35f,2.35f),cz};
                     menu.drawSphere(quaternion,tangents,eyeSign,camera,galleryYaw,galleryTime);
-                    menu.drawMuseumMesh(quaternion,tangents,camera,galleryYaw);
+                    if(r.depthBuffer)
+                        menu.drawMuseumMesh(quaternion,tangents,camera,galleryYaw);
                 }else{
                     menu.draw((page==vrui::Page::Wall||detachedEditor)?
                                   vrui::Page::Immersive:page,
