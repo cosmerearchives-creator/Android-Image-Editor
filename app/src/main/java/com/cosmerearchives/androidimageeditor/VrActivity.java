@@ -86,18 +86,18 @@ public final class VrActivity extends Activity {
      * asset simply falls back to the existing fully functional VR gallery.
      */
     @SuppressWarnings("unused")
-    public float[] loadMuseumMesh(){
-        try{return GltfMesh.loadMuseum(getApplicationContext());}
+    public float[] loadEnvironmentMesh(int theme){
+        try{return GltfMesh.loadEnvironment(getApplicationContext(),theme);}
         catch(Exception error){
-            Log.e(TAG,"Museum glTF load failed (falling back to shader)",error);
+            Log.e(TAG,"Gallery theme "+theme+" glTF load failed; using shader fallback",error);
             return null;
         }
     }
     @SuppressWarnings("unused")
-    public int[] loadMuseumTexture(){
-        try{return GltfMesh.loadMuseumTexture(getApplicationContext());}
+    public int[] loadEnvironmentTexture(int theme){
+        try{return GltfMesh.loadEnvironmentTexture(getApplicationContext(),theme);}
         catch(Exception error){
-            Log.e(TAG,"Museum embedded texture failed (using material color)",error);
+            Log.e(TAG,"Gallery theme "+theme+" texture unavailable; using vertex colors",error);
             return null;
         }
     }
