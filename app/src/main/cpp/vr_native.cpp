@@ -70,7 +70,7 @@ void refreshBatchStats(JNIEnv* env,jobject activity,vrui::Renderer& menu){
     jclass cls=env->GetObjectClass(activity);
     jmethodID method=env->GetMethodID(cls,"batchStats","()[I");
     if(method){
-        jintArray data=static_cast<jintArray>(env->CallObjectMethod(activity,method));
+        jintArray data=static_cast<jintArray>(env->CallObjectMethod(activity,method,static_cast<jint>(theme)));
         if(data&&env->GetArrayLength(data)>=2){
             jint values[2]{};
             env->GetIntArrayRegion(data,0,2,values);
@@ -114,11 +114,13 @@ bool batchPixels(JNIEnv* env,jobject activity,bool spherical,bool depth,
     }
     return true;
 }
-bool tryLoadMuseumAsset(JNIEnv* env,jobject activity,vrui::Renderer& renderer){
+bool tryLoadEnvironmentAsset(JNIEnv* env,jobject activity,vrui::Renderer& renderer){
+    const int theme=renderer.galleryTheme;
+    renderer.resetEnvironmentScene(theme);
     if(renderer.environmentAttempted)return renderer.environmentVertices>0;
     renderer.environmentAttempted=true;
     jclass cls=env->GetObjectClass(activity);
-    jmethodID method=env->GetMethodID(cls,"loadMuseumMesh","()[F");
+    jmethodID method=env->GetMethodID(cls,"loadEnvironmentMesh","(I)[F");
     if(!method){
         if(env->ExceptionCheck())env->ExceptionClear();
         env->DeleteLocalRef(cls);return false;
@@ -140,14 +142,14 @@ bool tryLoadMuseumAsset(JNIEnv* env,jobject activity,vrui::Renderer& renderer){
     if(env->ExceptionCheck()){
         env->ExceptionDescribe();env->ExceptionClear();return false;
     }
-    bool success=renderer.uploadMuseumMesh(vertices);
+    bool success=renderer.uploadEnvironmentMesh(vertices);
     if(success){
         jclass textureCls=env->GetObjectClass(activity);
         jmethodID textureMethod=env->GetMethodID(textureCls,
-            "loadMuseumTexture","()[I");
+            "loadEnvironmentTexture","(I)[I");
         if(textureMethod){
             jintArray texture=static_cast<jintArray>(
-                env->CallObjectMethod(activity,textureMethod));
+                env->CallObjectMethod(activity,textureMethod,static_cast<jint>(theme)));
             if(env->ExceptionCheck()){
                 env->ExceptionDescribe();env->ExceptionClear();
             }else if(texture){
@@ -167,7 +169,7 @@ bool tryLoadMuseumAsset(JNIEnv* env,jobject activity,vrui::Renderer& renderer){
                         rgba[i*4+2]=static_cast<uint8_t>(p);
                         rgba[i*4+3]=static_cast<uint8_t>(p>>24);
                     }
-                    renderer.uploadMuseumTexture(rgba,width,height);
+                    renderer.uploadEnvironmentTexture(rgba,width,height);
                 }
                 env->DeleteLocalRef(texture);
             }
@@ -175,7 +177,7 @@ bool tryLoadMuseumAsset(JNIEnv* env,jobject activity,vrui::Renderer& renderer){
         env->DeleteLocalRef(textureCls);
     }
     __android_log_print(ANDROID_LOG_INFO,"ImageEditorXR","%s",
-        success?"Museum glTF mesh uploaded":"Museum glTF mesh disabled; shader fallback active");
+        success?"Environment glTF mesh uploaded":"Environment glTF mesh disabled; shader fallback active");
     return success;
 }
 bool loadBatchView(JNIEnv* env,jobject activity,vrui::Renderer& renderer,
@@ -1594,27 +1596,6 @@ void run(JNIEnv* env, jobject activity) {
             }
             if(depthNeedsReload.exchange(false))refreshDepth(env,activity,menu);
             const int galleryReady=batchReadyMode.exchange(0);
-            if(galleryReady>=2 && menu.galleryDetail &&
-               tryLoadMuseumAsset(env,activity,menu) && !r.depthBuffer){
-                // Only now allocate a local depth attachment. VR startup and
-                // ordinary gallery rendering remain independent of 3D assets.
-                GLuint candidate=0;
-                glGenRenderbuffers(1,&candidate);
-                glBindRenderbuffer(GL_RENDERBUFFER,candidate);
-                glRenderbufferStorage(GL_RENDERBUFFER,GL_DEPTH_COMPONENT16,2048,1536);
-                glBindRenderbuffer(GL_RENDERBUFFER,0);
-                glFramebufferRenderbuffer(GL_FRAMEBUFFER,GL_DEPTH_ATTACHMENT,
-                    GL_RENDERBUFFER,candidate);
-                if(glCheckFramebufferStatus(GL_FRAMEBUFFER)==GL_FRAMEBUFFER_COMPLETE){
-                    r.depthBuffer=candidate;
-                }else{
-                    glFramebufferRenderbuffer(GL_FRAMEBUFFER,GL_DEPTH_ATTACHMENT,
-                        GL_RENDERBUFFER,0);
-                    if(candidate)glDeleteRenderbuffers(1,&candidate);
-                    menu.environmentVertices=0; // Model disabled; cylinder still works.
-                    log("Optional museum depth buffer unavailable; shader fallback active");
-                }
-            }
             if(galleryReady==3 && !menu.galleryAvailable())
                 menu.initializeGallery();
             if(galleryReady!=0 && (galleryReady==1||menu.galleryAvailable()) &&
@@ -1635,6 +1616,27 @@ void run(JNIEnv* env, jobject activity) {
                 dragMode=DragMode::None;
                 menu.brushMode=false;
                 menu.selectionOverlayVisible=false;
+            }
+            // Load after the gallery theme and cylinder metadata have been
+            // applied, otherwise a reopened cylinder gets the wrong 3D scene.
+            if(page==vrui::Page::Sphere && menu.galleryDetail &&
+               tryLoadEnvironmentAsset(env,activity,menu) && !r.depthBuffer){
+                GLuint candidate=0;
+                glGenRenderbuffers(1,&candidate);
+                glBindRenderbuffer(GL_RENDERBUFFER,candidate);
+                glRenderbufferStorage(GL_RENDERBUFFER,GL_DEPTH_COMPONENT16,2048,1536);
+                glBindRenderbuffer(GL_RENDERBUFFER,0);
+                glFramebufferRenderbuffer(GL_FRAMEBUFFER,GL_DEPTH_ATTACHMENT,
+                    GL_RENDERBUFFER,candidate);
+                if(glCheckFramebufferStatus(GL_FRAMEBUFFER)==GL_FRAMEBUFFER_COMPLETE){
+                    r.depthBuffer=candidate;
+                }else{
+                    glFramebufferRenderbuffer(GL_FRAMEBUFFER,GL_DEPTH_ATTACHMENT,
+                        GL_RENDERBUFFER,0);
+                    if(candidate)glDeleteRenderbuffers(1,&candidate);
+                    menu.environmentVertices=0; // Cylinder still renders.
+                    log("Optional environment depth unavailable; shader fallback active");
+                }
             }
             if(galleryReady>=2 && !menu.galleryAvailable()){
                 // A faulty optional gallery shader must not strand the user in
@@ -1716,7 +1718,7 @@ void run(JNIEnv* env, jobject activity) {
                         cx,std::clamp(view.pose.position.y+galleryY,-2.35f,2.35f),cz};
                     menu.drawSphere(quaternion,tangents,eyeSign,camera,galleryYaw,galleryTime);
                     if(r.depthBuffer)
-                        menu.drawMuseumMesh(quaternion,tangents,camera,galleryYaw);
+                        menu.drawEnvironmentMesh(quaternion,tangents,camera,galleryYaw);
                 }else{
                     menu.draw((page==vrui::Page::Wall||detachedEditor)?
                                   vrui::Page::Immersive:page,
