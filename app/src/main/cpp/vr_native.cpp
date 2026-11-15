@@ -1308,6 +1308,8 @@ void run(JNIEnv* env, jobject activity) {
                     batchMethod(env,activity,"requestSaveCylinder","(I)V",menu.galleryTheme);
                 else if(page==vrui::Page::Gallery && hovered==158)
                     batchMethod(env,activity,"requestSavedCylinders","()V");
+                else if(page==vrui::Page::Gallery && hovered==159)
+                    batchMethod(env,activity,"requestGalleryLayout","()V");
                 else if(page==vrui::Page::Open && hovered>=132&&hovered<=134){
                     menu.depthStyle=hovered-132;
                     if(menu.hasPhoto()){
