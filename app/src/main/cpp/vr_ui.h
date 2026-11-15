@@ -1213,11 +1213,29 @@ vec3 material(vec3 p,int face){
     float seamY=step(.94,fract(p.y*1.4));
     float grid=clamp(seamX+seamY,0.0,1.0);
     if(galleryTheme==0){
-        // Museum: cream stone gallery, patterned floor, coffered ceiling.
-        if(face==0)return mix(vec3(.52,.46,.38),vec3(.32,.28,.22),grid*.55);
-        if(face==1)return vec3(.40,.34,.25)+vec3(.12)*pow(stripe,22.0);
-        float tile=step(.94,fract(p.x*1.4))+step(.94,fract(p.z*1.4));
-        return mix(vec3(.45,.41,.34),vec3(.19,.16,.14),clamp(tile,0.0,1.0));
+        // Museum stonework: paneled limestone walls and real marble-like
+        // floor/ceiling materials. The finer structure is handled by
+        // separate depth-tested museumArchitecture() geometry.
+        if(face==0){
+            float w=atan(p.x,-p.z);
+            float panelLine=step(.977,fract((w+3.141593)*8./6.2831853));
+            float chairRail=1.-smoothstep(.02,.055,abs(p.y+1.58));
+            float border=max(panelLine,chairRail);
+            vec3 stone=vec3(.54,.49,.41)+vec3(.018)*sin(p.y*8.+w*5.);
+            return mix(stone,vec3(.70,.57,.34),border*.73);
+        }
+        if(face==1){
+            float cofferX=step(.94,fract(p.x*.75));
+            float cofferZ=step(.94,fract(p.z*.75));
+            float coffer=max(cofferX,cofferZ);
+            return mix(vec3(.48,.43,.34),vec3(.76,.68,.50),coffer);
+        }
+        float vein=sin(p.x*4.1+p.z*2.7+sin(p.z*10.)*.25);
+        float tileX=step(.975,fract(p.x*.68));
+        float tileZ=step(.975,fract(p.z*.68));
+        float tile=clamp(tileX+tileZ,0.,1.);
+        vec3 marble=vec3(.57,.55,.52)+vec3(.045)*sin(vein*7.);
+        return mix(marble,vec3(.31,.29,.27),tile);
     }
     if(galleryTheme==1){
         // Nightclub: dark surfaces, vivid violet and cyan light tracks.
@@ -1463,6 +1481,17 @@ void main(){
  texcoord.x=clamp(texcoord.x+eyeSign*styleScale*(depth-.5)*.0025,.0005,.9995);
  vec4 photo=texture(panorama,texcoord);
  vec3 color=mix(material(hit,face),photo.rgb,photo.a);
+ if(galleryTheme==0 && face==0 && photo.a<.5){
+     // Gold-edged photo mounts inside the transparent atlas margins.
+     // Check neighboring alpha rather than imposing a distorted grid.
+     vec2 pixel=1.0/vec2(textureSize(panorama,0));
+     float borderAlpha=max(max(
+         texture(panorama,texcoord+vec2(pixel.x*9.,0.)).a,
+         texture(panorama,texcoord-vec2(pixel.x*9.,0.)).a),
+         max(texture(panorama,texcoord+vec2(0.,pixel.y*9.)).a,
+             texture(panorama,texcoord-vec2(0.,pixel.y*9.)).a));
+     if(borderAlpha>.5)color=vec3(.64,.48,.24);
+ }
  vec3 propColor=vec3(0.);
  float prop=environmentDetail==1?sculpture(eye,ray,t,propColor):t;
  if(galleryTheme==0 && environmentDetail==1)
