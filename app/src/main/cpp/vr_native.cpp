@@ -131,7 +131,7 @@ bool tryLoadMuseumAsset(JNIEnv* env,jobject activity,vrui::Renderer& renderer){
     }
     if(!data)return false;
     jsize count=env->GetArrayLength(data);
-    if(count<=0||count%8!=0||count>1440000){
+    if(count<=0||count%11!=0||count>1980000){
         env->DeleteLocalRef(data);return false;
     }
     std::vector<float> vertices(static_cast<size_t>(count));
