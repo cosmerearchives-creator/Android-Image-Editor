@@ -705,22 +705,24 @@ struct Renderer {
     float galleryRadius=3.f;
     bool galleryDetail=true;
     // Optional glTF mesh pass, initialized only when a cylinder is opened.
-    GLuint environmentProgram=0,environmentVao=0,environmentVbo=0;
+    GLuint environmentProgram=0,environmentVao=0,environmentVbo=0,environmentTexture=0;
     GLsizei environmentVertices=0;
     bool environmentAttempted=false;
     bool uploadMuseumMesh(const std::vector<float>& vertices){
-        if(vertices.empty()||vertices.size()%6!=0||vertices.size()>1080000)
+        if(vertices.empty()||vertices.size()%8!=0||vertices.size()>1440000)
             return false;
         if(!environmentProgram){
             const char* vs=R"(#version 300 es
             precision highp float;
             layout(location=0) in vec3 position;
             layout(location=1) in vec3 baseColor;
+            layout(location=2) in vec2 texcoord;
             uniform vec4 orientation;
             uniform vec3 cameraPosition;
             uniform vec4 fovTangent;
             uniform float galleryYaw;
             out vec3 surfaceColor;
+            out vec2 surfaceUV;
             vec3 quat(vec3 v,vec4 q){
                 vec3 t=2.0*cross(q.xyz,v);
                 return v+q.w*t+cross(q.xyz,t);
@@ -742,13 +744,22 @@ struct Renderer {
                     2.0*farPlane*nearPlane/(nearPlane-farPlane);
                 gl_Position=vec4(px*depth,py*depth,clipZ,depth);
                 surfaceColor=baseColor;
+                surfaceUV=texcoord;
             })";
             const char* fs=R"(#version 300 es
             precision highp float;
             in vec3 surfaceColor;
+            in vec2 surfaceUV;
+            uniform sampler2D baseTexture;
+            uniform int hasTexture;
             out vec4 frag;
             void main(){
-                frag=vec4(surfaceColor,1.0);
+                vec3 tint=surfaceColor;
+                // The authored PNG supplies surface detail; glTF color keeps
+                // material identity for gold accents and stone.
+                vec3 detail=hasTexture==1?texture(baseTexture,surfaceUV).rgb:
+                    vec3(1.0);
+                frag=vec4(tint*detail,1.0);
             })";
             GLuint vert=shader(GL_VERTEX_SHADER,vs),frag=shader(GL_FRAGMENT_SHADER,fs);
             if(vert&&frag){
@@ -769,20 +780,45 @@ struct Renderer {
         glBindBuffer(GL_ARRAY_BUFFER,environmentVbo);
         glBufferData(GL_ARRAY_BUFFER,vertices.size()*sizeof(float),vertices.data(),GL_STATIC_DRAW);
         glEnableVertexAttribArray(0);
-        glVertexAttribPointer(0,3,GL_FLOAT,GL_FALSE,6*sizeof(float),(void*)0);
+        glVertexAttribPointer(0,3,GL_FLOAT,GL_FALSE,8*sizeof(float),(void*)0);
         glEnableVertexAttribArray(1);
-        glVertexAttribPointer(1,3,GL_FLOAT,GL_FALSE,6*sizeof(float),
+        glVertexAttribPointer(1,3,GL_FLOAT,GL_FALSE,8*sizeof(float),
             reinterpret_cast<void*>(3*sizeof(float)));
+        glEnableVertexAttribArray(2);
+        glVertexAttribPointer(2,2,GL_FLOAT,GL_FALSE,8*sizeof(float),
+            reinterpret_cast<void*>(6*sizeof(float)));
         glBindVertexArray(0);
         glBindBuffer(GL_ARRAY_BUFFER,0);
-        environmentVertices=static_cast<GLsizei>(vertices.size()/6);
+        environmentVertices=static_cast<GLsizei>(vertices.size()/8);
         return true;
+    }
+    bool uploadMuseumTexture(const std::vector<uint8_t>& rgba,int width,int height){
+        if(width<1||height<1||width>512||height>512||
+           rgba.size()!=size_t(width)*height*4u)return false;
+        if(!environmentTexture)glGenTextures(1,&environmentTexture);
+        if(!environmentTexture)return false;
+        glActiveTexture(GL_TEXTURE2);
+        glBindTexture(GL_TEXTURE_2D,environmentTexture);
+        glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_S,GL_REPEAT);
+        glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_T,GL_REPEAT);
+        glTexImage2D(GL_TEXTURE_2D,0,GL_RGBA8,width,height,0,GL_RGBA,
+            GL_UNSIGNED_BYTE,rgba.data());
+        glBindTexture(GL_TEXTURE_2D,0);
+        glActiveTexture(GL_TEXTURE0);
+        return glGetError()==GL_NO_ERROR;
     }
     void drawMuseumMesh(const float* q,const float* tanFov,const float* camera,
                         float yaw){
         if(!environmentProgram||environmentVertices<=0||!galleryDetail||
            galleryTheme!=0)return;
         glUseProgram(environmentProgram);
+        glUniform1i(glGetUniformLocation(environmentProgram,"baseTexture"),2);
+        glUniform1i(glGetUniformLocation(environmentProgram,"hasTexture"),
+            environmentTexture?1:0);
+        glActiveTexture(GL_TEXTURE2);
+        glBindTexture(GL_TEXTURE_2D,environmentTexture);
         glUniform4fv(glGetUniformLocation(environmentProgram,"orientation"),1,q);
         glUniform4fv(glGetUniformLocation(environmentProgram,"fovTangent"),1,tanFov);
         glUniform3fv(glGetUniformLocation(environmentProgram,"cameraPosition"),1,camera);
@@ -794,6 +830,9 @@ struct Renderer {
         glDrawArrays(GL_TRIANGLES,0,environmentVertices);
         glBindVertexArray(0);
         glDisable(GL_DEPTH_TEST);
+        glActiveTexture(GL_TEXTURE2);
+        glBindTexture(GL_TEXTURE_2D,0);
+        glActiveTexture(GL_TEXTURE0);
     }
 
     bool advancedVisible=false;
@@ -2474,6 +2513,7 @@ void main(){
         submitUi(v);
     }
     ~Renderer(){clearMask();clearQuickDepth();
+        if(environmentTexture)glDeleteTextures(1,&environmentTexture);
         if(environmentVbo)glDeleteBuffers(1,&environmentVbo);
         if(environmentVao)glDeleteVertexArrays(1,&environmentVao);
         if(environmentProgram)glDeleteProgram(environmentProgram);
