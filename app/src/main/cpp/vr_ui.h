@@ -704,6 +704,98 @@ struct Renderer {
     int galleryTheme=0; // 0 museum, 1 club, 2 tiki, 3 fire, 4 dungeon, 5 trees
     float galleryRadius=3.f;
     bool galleryDetail=true;
+    // Optional glTF mesh pass, initialized only when a cylinder is opened.
+    GLuint environmentProgram=0,environmentVao=0,environmentVbo=0;
+    GLsizei environmentVertices=0;
+    bool environmentAttempted=false;
+    bool uploadMuseumMesh(const std::vector<float>& vertices){
+        if(vertices.empty()||vertices.size()%6!=0||vertices.size()>1080000)
+            return false;
+        if(!environmentProgram){
+            const char* vs=R"(#version 300 es
+            precision highp float;
+            layout(location=0) in vec3 position;
+            layout(location=1) in vec3 baseColor;
+            uniform vec4 orientation;
+            uniform vec3 cameraPosition;
+            uniform vec4 fovTangent;
+            uniform float galleryYaw;
+            out vec3 surfaceColor;
+            vec3 quat(vec3 v,vec4 q){
+                vec3 t=2.0*cross(q.xyz,v);
+                return v+q.w*t+cross(q.xyz,t);
+            }
+            vec3 spin(vec3 v,float a){
+                float c=cos(a),s=sin(a);
+                return vec3(c*v.x-s*v.z,v.y,s*v.x+c*v.z);
+            }
+            void main(){
+                vec3 local=spin(position,-galleryYaw)-cameraPosition;
+                vec3 view=quat(local,vec4(-orientation.xyz,orientation.w));
+                float depth=max(.001,-view.z);
+                float l=fovTangent.x,r=fovTangent.y;
+                float bottom=fovTangent.z,top=fovTangent.w;
+                float px=2.0*(view.x/depth-l)/(r-l)-1.0;
+                float py=2.0*(view.y/depth-bottom)/(top-bottom)-1.0;
+                float nearPlane=.05,farPlane=40.0;
+                float clipZ=(farPlane+nearPlane)/(nearPlane-farPlane)*view.z+
+                    2.0*farPlane*nearPlane/(nearPlane-farPlane);
+                gl_Position=vec4(px*depth,py*depth,clipZ,depth);
+                surfaceColor=baseColor;
+            })";
+            const char* fs=R"(#version 300 es
+            precision highp float;
+            in vec3 surfaceColor;
+            out vec4 frag;
+            void main(){
+                frag=vec4(surfaceColor,1.0);
+            })";
+            GLuint vert=shader(GL_VERTEX_SHADER,vs),frag=shader(GL_FRAGMENT_SHADER,fs);
+            if(vert&&frag){
+                GLuint candidate=glCreateProgram();
+                glAttachShader(candidate,vert);glAttachShader(candidate,frag);
+                glLinkProgram(candidate);
+                GLint ok=0;glGetProgramiv(candidate,GL_LINK_STATUS,&ok);
+                if(ok)environmentProgram=candidate;
+                else glDeleteProgram(candidate);
+            }
+            if(vert)glDeleteShader(vert);
+            if(frag)glDeleteShader(frag);
+            if(!environmentProgram)return false;
+        }
+        if(!environmentVao)glGenVertexArrays(1,&environmentVao);
+        if(!environmentVbo)glGenBuffers(1,&environmentVbo);
+        glBindVertexArray(environmentVao);
+        glBindBuffer(GL_ARRAY_BUFFER,environmentVbo);
+        glBufferData(GL_ARRAY_BUFFER,vertices.size()*sizeof(float),vertices.data(),GL_STATIC_DRAW);
+        glEnableVertexAttribArray(0);
+        glVertexAttribPointer(0,3,GL_FLOAT,GL_FALSE,6*sizeof(float),(void*)0);
+        glEnableVertexAttribArray(1);
+        glVertexAttribPointer(1,3,GL_FLOAT,GL_FALSE,6*sizeof(float),
+            reinterpret_cast<void*>(3*sizeof(float)));
+        glBindVertexArray(0);
+        glBindBuffer(GL_ARRAY_BUFFER,0);
+        environmentVertices=static_cast<GLsizei>(vertices.size()/6);
+        return true;
+    }
+    void drawMuseumMesh(const float* q,const float* tanFov,const float* camera,
+                        float yaw){
+        if(!environmentProgram||environmentVertices<=0||!galleryDetail||
+           galleryTheme!=0)return;
+        glUseProgram(environmentProgram);
+        glUniform4fv(glGetUniformLocation(environmentProgram,"orientation"),1,q);
+        glUniform4fv(glGetUniformLocation(environmentProgram,"fovTangent"),1,tanFov);
+        glUniform3fv(glGetUniformLocation(environmentProgram,"cameraPosition"),1,camera);
+        glUniform1f(glGetUniformLocation(environmentProgram,"galleryYaw"),yaw);
+        glEnable(GL_DEPTH_TEST);
+        glDepthFunc(GL_LESS);
+        glDepthMask(GL_TRUE);
+        glBindVertexArray(environmentVao);
+        glDrawArrays(GL_TRIANGLES,0,environmentVertices);
+        glBindVertexArray(0);
+        glDisable(GL_DEPTH_TEST);
+    }
+
     bool advancedVisible=false;
     bool immersiveToolsVisible=false;
     bool selectionOverlayVisible=false;
@@ -2382,6 +2474,9 @@ void main(){
         submitUi(v);
     }
     ~Renderer(){clearMask();clearQuickDepth();
+        if(environmentVbo)glDeleteBuffers(1,&environmentVbo);
+        if(environmentVao)glDeleteVertexArrays(1,&environmentVao);
+        if(environmentProgram)glDeleteProgram(environmentProgram);
         if(sphereTexture)glDeleteTextures(1,&sphereTexture);
         if(sphereDepthTexture)glDeleteTextures(1,&sphereDepthTexture);
         if(sphereProgram)glDeleteProgram(sphereProgram);
