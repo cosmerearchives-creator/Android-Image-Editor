@@ -7,7 +7,9 @@ separate OpenGL ES 3.0 vertex/fragment pass after the cylinder panorama.
 ## Current museum scene
 - `app/src/main/assets/museum_pedestal.gltf`
 - A modular museum scene with fluted limestone columns and separate gold cornice geometry.
-- v0.13.0 supports multiple meshes, reusable scene nodes, nested grouping, and node transformations. The bundled scene exercises 14 instances of two mesh definitions.
+- v0.13.0 introduced multiple meshes, reusable nodes and nested transforms.
+- v0.14.0 expands the museum to five reusable mesh definitions placed in 25 scene nodes: columns, cornices, carved arches, wooden benches, and a central marble-like sculpture. UVs and the existing bounded texture are retained.
+- v0.14.0 adds world-space per-triangle normals and low-cost two-direction warm lighting in the OpenGL ES mesh shader. It is not physically based rendering.
 - Position, UV, and index geometry is interpreted from an embedded base64 glTF buffer.
 - v0.12.1 adds a real embedded PNG stone texture and per-vertex TEXCOORD_0 UVs; the optional OpenGL ES 3 renderer uploads and samples the decoded image.
 - The loading code is `GltfMesh.java`; the optional GL mesh renderer is in
@@ -25,7 +27,7 @@ separate OpenGL ES 3.0 vertex/fragment pass after the cylinder panorama.
 - Scenes use Y-up positions in meters. Nested glTF nodes support `matrix` or translation/rotation/scale (TRS), baked into the bounded vertex stream.
 - Total decoded buffer <=2 MB; bounded index and vertex counts.
 - No external files, arbitrary network loads, animation, skinning, multiple
-  textures, scene-node transforms, .glb, or full PBR yet.
+  textures, .glb, or full PBR yet.
 
 Scene transforms and mesh reuse still feed a single flattened GPU vertex stream; per-instance GPU draw batching and collision are separate future milestones.
 
@@ -50,6 +52,8 @@ glTF features are unsupported forever.
 
 ## Testing
 Open VR home; enter Gallery; open a museum cylinder with Detailed 3D Scenery
-enabled. The imported mesh should appear as a small, PNG-textured fluted stone/gold pedestal
-in front of the wall. Turn Detailed 3D Scenery off and reopen to confirm the
+enabled. The Museum should show fluted columns, gold trim, arched gallery bays,
+wood benches and a central carved display. Look for directional shading on
+the curved arch and sculpture surfaces; all geometry should remain stable
+when turning or approaching it. Turn Detailed 3D Scenery off and reopen to confirm the
 unchanged shader-only fallback. Reopen a saved cylinder and compare both eyes.
