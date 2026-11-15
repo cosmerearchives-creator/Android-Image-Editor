@@ -29,6 +29,17 @@ public final class BatchStore {
     private static final int DEPTH_EDGE=1024;
     private static final String PHOTO="source.png",DEPTH="depth.png",MASK="mask.bin";
     private static final Paint paint=new Paint(Paint.ANTI_ALIAS_FLAG|Paint.FILTER_BITMAP_FLAG);
+    public static int[] layout(Context ctx){
+        android.content.SharedPreferences prefs=ctx.getSharedPreferences("vr_gallery_layout",Context.MODE_PRIVATE);
+        return new int[]{prefs.getInt("spacing",2),prefs.getInt("density",3)};
+    }
+    public static void saveLayout(Context ctx,int spacing,int density){
+        ctx.getSharedPreferences("vr_gallery_layout",Context.MODE_PRIVATE).edit()
+            .putInt("spacing",Math.max(0,Math.min(12,spacing)))
+            .putInt("density",Math.max(1,Math.min(6,density))).apply();
+        sphere(ctx).delete();sphereDepth(ctx).delete();
+    }
+
     private BatchStore(){}
 
     private static File root(Context context){
@@ -39,8 +50,8 @@ public final class BatchStore {
     private static File cache(Context ctx,String name){return new File(root(ctx),name);}
     public static File wall(Context ctx){return cache(ctx,"wall.png");}
     public static File wallDepth(Context ctx){return cache(ctx,"wall_depth.png");}
-    public static File sphere(Context ctx){return cache(ctx,"cylinder_v4.png");}
-    public static File sphereDepth(Context ctx){return cache(ctx,"cylinder_depth_v4.png");}
+    public static File sphere(Context ctx){return cache(ctx,"cylinder_v5.png");}
+    public static File sphereDepth(Context ctx){return cache(ctx,"cylinder_depth_v5.png");}
     private static File[] entries(Context ctx){
         File[] items=root(ctx).listFiles(f->f.isDirectory()&&new File(f,PHOTO).isFile());
         if(items==null)return new File[0];
@@ -299,7 +310,10 @@ public final class BatchStore {
             if(image!=null){
                 try{
                     int ix=i%cols,iy=i/cols;
-                    float margin=depths?2:Math.max(4,Math.min(tileW,tileH)/45f);
+                    int[] settings=gallerySection?layout(ctx):null;
+                    float margin=gallerySection?
+                        Math.max(1f,Math.min(tileW,tileH)*settings[0]/100f):
+                        depths?2:Math.max(4,Math.min(tileW,tileH)/45f);
                     float innerW=tileW-2*margin,innerH=tileH-2*margin;
                     float scale=Math.min(innerW/image.getWidth(),innerH/image.getHeight());
                     float drawW=image.getWidth()*scale,drawH=image.getHeight()*scale;
@@ -336,7 +350,8 @@ public final class BatchStore {
             canvas.save();
             canvas.translate(0,height/4);
             canvas.clipRect(0,0,width,height/2);
-            int wallColumns=Math.max(1,(int)Math.ceil(Math.sqrt(list.length*4.0)));
+            int density=layout(ctx)[1];
+            int wallColumns=Math.max(1,(int)Math.ceil(Math.sqrt(list.length*density)));
             int wallRows=(list.length+wallColumns-1)/wallColumns;
             drawTiles(ctx,list,canvas,width,height/2,wallColumns,wallRows,
                 depths,true,progress);
