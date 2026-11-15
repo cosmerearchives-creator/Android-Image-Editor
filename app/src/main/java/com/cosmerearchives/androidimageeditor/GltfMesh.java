@@ -10,13 +10,13 @@ import java.nio.ByteOrder;
 
 /** Strict, offline glTF 2.0 proof-of-pipeline loader.
  * Supports embedded base64 buffer, float32 POSITION, unsigned-short indices,
- * and baseColorFactor on TRIANGLES. Invalid assets never crash VR startup.
- * Future milestones: full scene graph, glb, UV textures, PBR, and animations.
+ * baseColorFactor, TEXCOORD_0 and an embedded PNG texture on TRIANGLES.
+ * Invalid assets never crash VR startup. Full scenes, glb, PBR, and animation are next.
  */
 public final class GltfMesh {
     private GltfMesh(){}
 
-    public static float[] loadMuseum(Context context) throws Exception {
+    private static JSONObject readMuseum(Context context) throws Exception {
         byte[] json;
         try(InputStream stream=context.getAssets().open("museum_pedestal.gltf")){
             java.io.ByteArrayOutputStream out=new java.io.ByteArrayOutputStream();
@@ -27,6 +27,34 @@ public final class GltfMesh {
         JSONObject doc=new JSONObject(new String(json,java.nio.charset.StandardCharsets.UTF_8));
         if(!"2.0".equals(doc.getJSONObject("asset").getString("version")))
             throw new IllegalArgumentException("Not glTF 2.0");
+        return doc;
+    }
+    public static int[] loadMuseumTexture(Context context) throws Exception{
+        JSONObject doc=readMuseum(context);
+        JSONArray images=doc.optJSONArray("images");
+        if(images==null||images.length()==0)return null;
+        String uri=images.getJSONObject(0).getString("uri");
+        String prefix="data:image/png;base64,";
+        if(!uri.startsWith(prefix))
+            throw new IllegalArgumentException("Only embedded PNG images supported");
+        byte[] bytes=Base64.decode(uri.substring(prefix.length()),Base64.DEFAULT);
+        if(bytes.length>1_000_000)throw new IllegalArgumentException("Texture too large");
+        android.graphics.Bitmap bitmap=android.graphics.BitmapFactory.decodeByteArray(
+            bytes,0,bytes.length);
+        if(bitmap==null)throw new IllegalArgumentException("Invalid PNG");
+        try{
+            int width=bitmap.getWidth(),height=bitmap.getHeight();
+            if(width<1||height<1||width>512||height>512||
+                (long)width*height>512*512)
+                throw new IllegalArgumentException("Texture exceeds Quest budget");
+            int[] pixels=new int[width*height+2];
+            pixels[0]=width;pixels[1]=height;
+            bitmap.getPixels(pixels,2,width,0,0,width,height);
+            return pixels;
+        }finally{bitmap.recycle();}
+    }
+    public static float[] loadMuseum(Context context) throws Exception {
+        JSONObject doc=readMuseum(context);
         JSONArray buffers=doc.getJSONArray("buffers");
         if(buffers.length()!=1)throw new IllegalArgumentException("Only one embedded buffer");
         String uri=buffers.getJSONObject(0).getString("uri");
@@ -62,6 +90,25 @@ public final class GltfMesh {
                 for(int i=0;i<vertexCount;i++)
                     for(int axis=0;axis<3;axis++)
                         positions[i*3+axis]=binary.getFloat(offset+i*stride+axis*4);
+                float[] uv=new float[vertexCount*2];
+                JSONObject attrs=primitive.getJSONObject("attributes");
+                if(attrs.has("TEXCOORD_0")){
+                    JSONObject tex=accessors.getJSONObject(attrs.getInt("TEXCOORD_0"));
+                    if(tex.getInt("componentType")!=5126||
+                       !"VEC2".equals(tex.getString("type"))||
+                       tex.getInt("count")!=vertexCount)
+                        throw new IllegalArgumentException("Unsupported UV accessor");
+                    JSONObject texView=views.getJSONObject(tex.getInt("bufferView"));
+                    int uvOffset=texView.optInt("byteOffset",0)+tex.optInt("byteOffset",0);
+                    int uvStride=texView.optInt("byteStride",8);
+                    if(uvStride<8||uvStride>256||uvOffset<0||
+                       (long)uvOffset+(long)(vertexCount-1)*uvStride+8>bytes.length)
+                        throw new IllegalArgumentException("UV accessor out of bounds");
+                    for(int i=0;i<vertexCount;i++){
+                        uv[i*2]=binary.getFloat(uvOffset+i*uvStride);
+                        uv[i*2+1]=binary.getFloat(uvOffset+i*uvStride+4);
+                    }
+                }
                 float red=.75f,green=.66f,blue=.48f;
                 if(materials!=null&&primitive.has("material")){
                     JSONObject material=materials.getJSONObject(primitive.getInt("material"));
@@ -89,10 +136,11 @@ public final class GltfMesh {
                     if(index>=vertexCount)throw new IllegalArgumentException("Index out of bounds");
                     for(int axis=0;axis<3;axis++)output.add(positions[index*3+axis]);
                     output.add(red);output.add(green);output.add(blue);
+                    output.add(uv[index*2]);output.add(uv[index*2+1]);
                 }
             }
         }
-        if(output.isEmpty()||output.size()>1080000)
+        if(output.isEmpty()||output.size()>1440000)
             throw new IllegalArgumentException("Empty or oversized mesh");
         float[] result=new float[output.size()];
         for(int i=0;i<result.length;i++)result[i]=output.get(i);
