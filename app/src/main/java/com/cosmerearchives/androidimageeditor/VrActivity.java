@@ -94,6 +94,14 @@ public final class VrActivity extends Activity {
         }
     }
     @SuppressWarnings("unused")
+    public int[] loadMuseumTexture(){
+        try{return GltfMesh.loadMuseumTexture(getApplicationContext());}
+        catch(Exception error){
+            Log.e(TAG,"Museum embedded texture failed (using material color)",error);
+            return null;
+        }
+    }
+    @SuppressWarnings("unused")
     public int activeCylinderTheme(){
         return activeSavedCylinder>=0
             ?BatchStore.savedCylinderTheme(getApplicationContext(),activeSavedCylinder)
