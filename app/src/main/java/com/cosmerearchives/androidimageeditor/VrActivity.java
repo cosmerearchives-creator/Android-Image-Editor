@@ -68,6 +68,16 @@ public final class VrActivity extends Activity {
             .putInt("theme",Math.max(0,Math.min(5,theme))).apply();
     }
     @SuppressWarnings("unused")
+    public int galleryRadiusCm(){
+        return BatchStore.radiusCm(getApplicationContext());
+    }
+    @SuppressWarnings("unused")
+    public int activeCylinderRadiusCm(){
+        return activeSavedCylinder>=0
+            ?BatchStore.savedRadiusCm(getApplicationContext(),activeSavedCylinder)
+            :galleryRadiusCm();
+    }
+    @SuppressWarnings("unused")
     public int activeCylinderTheme(){
         return activeSavedCylinder>=0
             ?BatchStore.savedCylinderTheme(getApplicationContext(),activeSavedCylinder)
@@ -135,12 +145,27 @@ public final class VrActivity extends Activity {
                 public void onStopTrackingTouch(android.widget.SeekBar bar){}
             });
             layout.addView(density);
+            android.widget.TextView radiusLabel=new android.widget.TextView(this);
+            radiusLabel.setText("Cylinder radius: "+(BatchStore.radiusCm(this)/100f)+" m");
+            layout.addView(radiusLabel);
+            android.widget.SeekBar radius=new android.widget.SeekBar(this);
+            radius.setMax(10);
+            radius.setProgress(Math.max(0,Math.min(10,(BatchStore.radiusCm(this)-250)/25)));
+            radius.setOnSeekBarChangeListener(new android.widget.SeekBar.OnSeekBarChangeListener(){
+                public void onProgressChanged(android.widget.SeekBar bar,int value,boolean fromUser){
+                    radiusLabel.setText("Cylinder radius: "+((250+value*25)/100f)+" m");
+                }
+                public void onStartTrackingTouch(android.widget.SeekBar bar){}
+                public void onStopTrackingTouch(android.widget.SeekBar bar){}
+            });
+            layout.addView(radius);
             new android.app.AlertDialog.Builder(this)
                 .setTitle("Cylinder image layout")
                 .setView(layout)
                 .setPositiveButton("APPLY",(dialog,which)->{
                     BatchStore.saveLayout(getApplicationContext(),
                         spacing.getProgress(),density.getProgress()+1);
+                    BatchStore.saveRadiusCm(getApplicationContext(),250+radius.getProgress()*25);
                     Toast.makeText(this,"Layout saved. Reopen View Sphere to rebuild.",
                         Toast.LENGTH_LONG).show();
                 })
