@@ -213,25 +213,46 @@ public final class GltfMesh {
                 int base=indexView.optInt("byteOffset",0)+indices.optInt("byteOffset",0);
                 if(base<0||(long)base+indexCount*2L>bytes.length)
                     throw new IllegalArgumentException("Indices out of bounds");
-                for(int i=0;i<indexCount;i++){
-                    int index=binary.getShort(base+i*2)&65535;
-                    if(index>=vertexCount)throw new IllegalArgumentException("Index out of bounds");
-                    float px=positions[index*3],py=positions[index*3+1],
-                        pz=positions[index*3+2];
-                    float[] m=instance.matrix;
-                    float wx=m[0]*px+m[4]*py+m[8]*pz+m[12];
-                    float wy=m[1]*px+m[5]*py+m[9]*pz+m[13];
-                    float wz=m[2]*px+m[6]*py+m[10]*pz+m[14];
-                    if(!Float.isFinite(wx)||!Float.isFinite(wy)||!Float.isFinite(wz))
-                        throw new IllegalArgumentException("Nonfinite model geometry");
-                    output.add(wx);output.add(wy);output.add(wz);
-                    output.add(red);output.add(green);output.add(blue);
-                    output.add(uv[index*2]);output.add(uv[index*2+1]);
-                    if(output.size()>1440000)throw new IllegalArgumentException("Scene triangle budget");
+                // Transform each indexed triangle once and compute a
+                // world-space flat normal for reliable low-cost museum light.
+                float[] m=instance.matrix;
+                for(int i=0;i<indexCount;i+=3){
+                    float[] tri=new float[9];
+                    int[] refs=new int[3];
+                    for(int corner=0;corner<3;corner++){
+                        int index=binary.getShort(base+(i+corner)*2)&65535;
+                        if(index>=vertexCount)
+                            throw new IllegalArgumentException("Index out of bounds");
+                        refs[corner]=index;
+                        float px=positions[index*3],py=positions[index*3+1],
+                            pz=positions[index*3+2];
+                        float wx=m[0]*px+m[4]*py+m[8]*pz+m[12];
+                        float wy=m[1]*px+m[5]*py+m[9]*pz+m[13];
+                        float wz=m[2]*px+m[6]*py+m[10]*pz+m[14];
+                        if(!Float.isFinite(wx)||!Float.isFinite(wy)||!Float.isFinite(wz))
+                            throw new IllegalArgumentException("Nonfinite model geometry");
+                        tri[corner*3]=wx;tri[corner*3+1]=wy;tri[corner*3+2]=wz;
+                    }
+                    float ax=tri[3]-tri[0],ay=tri[4]-tri[1],az=tri[5]-tri[2];
+                    float bx=tri[6]-tri[0],by=tri[7]-tri[1],bz=tri[8]-tri[2];
+                    float nx=ay*bz-az*by,ny=az*bx-ax*bz,nz=ax*by-ay*bx;
+                    float length=(float)Math.sqrt(nx*nx+ny*ny+nz*nz);
+                    if(length>.00001f){nx/=length;ny/=length;nz/=length;}
+                    else{nx=0;ny=1;nz=0;}
+                    for(int corner=0;corner<3;corner++){
+                        int index=refs[corner];
+                        output.add(tri[corner*3]);output.add(tri[corner*3+1]);
+                        output.add(tri[corner*3+2]);
+                        output.add(red);output.add(green);output.add(blue);
+                        output.add(uv[index*2]);output.add(uv[index*2+1]);
+                        output.add(nx);output.add(ny);output.add(nz);
+                    }
+                    if(output.size()>1980000)
+                        throw new IllegalArgumentException("Scene triangle budget");
                 }
             }
         }
-        if(output.isEmpty()||output.size()>1440000)
+        if(output.isEmpty()||output.size()>1980000)
             throw new IllegalArgumentException("Empty or oversized mesh");
         float[] result=new float[output.size()];
         for(int i=0;i<result.length;i++)result[i]=output.get(i);
