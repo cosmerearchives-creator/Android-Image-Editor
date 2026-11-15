@@ -703,6 +703,7 @@ struct Renderer {
     int batchState=0,batchProgress=0,batchCount=0,batchConverted=0;
     int galleryTheme=0; // 0 museum, 1 club, 2 tiki, 3 fire, 4 dungeon, 5 trees
     float galleryRadius=3.f;
+    bool galleryDetail=true;
     bool advancedVisible=false;
     bool immersiveToolsVisible=false;
     bool selectionOverlayVisible=false;
@@ -1200,7 +1201,7 @@ uniform vec4 orientation,fovTangent;
 uniform vec3 cameraPosition;
 uniform float galleryYaw,eyeSign,styleScale,galleryTime;
 uniform float galleryRadius;
-uniform int styleInverted,galleryTheme;
+uniform int styleInverted,galleryTheme,environmentDetail;
 out vec4 frag;
 vec3 quat(vec3 v,vec4 q){vec3 t=2.0*cross(q.xyz,v);return v+q.w*t+cross(q.xyz,t);}
 vec3 spin(vec3 v,float a){float c=cos(a),s=sin(a);return vec3(c*v.x-s*v.z,v.y,s*v.x+c*v.z);}
@@ -1392,7 +1393,7 @@ void main(){
  vec4 photo=texture(panorama,texcoord);
  vec3 color=mix(material(hit,face),photo.rgb,photo.a);
  vec3 propColor=vec3(0.);
- float prop=sculpture(eye,ray,t,propColor);
+ float prop=environmentDetail==1?sculpture(eye,ray,t,propColor):t;
  if(prop<t)color=propColor;
  frag=vec4(color,1.);
 }
@@ -1488,6 +1489,7 @@ void main(){
         glUniform1f(glGetUniformLocation(sphereProgram,"galleryYaw"),galleryYaw);
         glUniform1f(glGetUniformLocation(sphereProgram,"galleryRadius"),galleryRadius);
         glUniform1i(glGetUniformLocation(sphereProgram,"galleryTheme"),galleryTheme);
+        glUniform1i(glGetUniformLocation(sphereProgram,"environmentDetail"),galleryDetail?1:0);
         glUniform1f(glGetUniformLocation(sphereProgram,"galleryTime"),elapsed);
         glUniform1f(glGetUniformLocation(sphereProgram,"styleScale"),
                     depthStyle==1?1.65f:1.f);
