@@ -1255,6 +1255,115 @@ vec3 material(vec3 p,int face){
     if(face==2)return vec3(.15,.105,.045)+vec3(.02,.05,.012)*stripe;
     return vec3(.15,.095,.04)+vec3(.11,.07,.02)*pow(stripe,25.0);
 }
+// Small analytic 3D props. Intersections are evaluated only inside the
+// cylindrical viewer; normal VR startup never compiles this shader.
+float postHit(vec3 origin,vec3 direction,vec2 center,float radius,float low,float high){
+    vec2 local=origin.xz-center;
+    float aa=dot(direction.xz,direction.xz);
+    if(aa<0.00001)return 1e8;
+    float bb=dot(local,direction.xz);
+    float cc=dot(local,local)-radius*radius;
+    float d=bb*bb-aa*cc;
+    if(d<0.0)return 1e8;
+    float t0=(-bb-sqrt(d))/aa;
+    float t1=(-bb+sqrt(d))/aa;
+    float y0=origin.y+t0*direction.y;
+    float y1=origin.y+t1*direction.y;
+    if(t0>0.001 && y0>=low && y0<=high)return t0;
+    if(t1>0.001 && y1>=low && y1<=high)return t1;
+    return 1e8;
+}
+float orbHit(vec3 origin,vec3 direction,vec3 center,float radius){
+    vec3 local=origin-center;
+    float bb=dot(local,direction);
+    float cc=dot(local,local)-radius*radius;
+    float d=bb*bb-cc;
+    if(d<0.0)return 1e8;
+    float nearT=-bb-sqrt(d);
+    float farT=-bb+sqrt(d);
+    return nearT>0.001?nearT:(farT>0.001?farT:1e8);
+}
+float sculpture(vec3 eye,vec3 ray,float boundary,inout vec3 pigment){
+    float closest=boundary;
+    float r=galleryRadius;
+    // Eight evenly spaced, narrow props follow the round wall.
+    // Their scale stays constant as users enlarge the room.
+    for(int k=0;k<8;k++){
+        float a=(float(k)+.5)*.7853981634;
+        vec2 center=vec2(sin(a),cos(a))*(r-.18);
+        float postRadius=galleryTheme==5?.105:
+                         galleryTheme==0?.095:.075;
+        float post=postHit(eye,ray,center,postRadius,-2.65,2.65);
+        if(post<closest){
+            vec3 p=eye+ray*post;
+            float grain=abs(sin(p.y*13.+a*3.));
+            vec3 base=vec3(.35,.29,.22);
+            if(galleryTheme==0){
+                // Carved limestone columns with gilded capitals.
+                base=abs(p.y)>2.35?vec3(.64,.50,.23):vec3(.73,.67,.54);
+                base-=vec3(.08)*pow(grain,25.);
+            }else if(galleryTheme==1){
+                // Floor-to-ceiling LED tubes.
+                float pulse=.6+.4*sin(galleryTime*1.8+a*3.);
+                base=mix(vec3(.06,.8,1.0),vec3(.85,.04,1.0),
+                    mod(float(k),2.) )*pulse;
+            }else if(galleryTheme==2){
+                // Bamboo supports tied with dark fiber bands.
+                base=vec3(.54,.33,.10);
+                base*=step(.94,fract(p.y*2.5))>.5?.38:1.;
+            }else if(galleryTheme==3){
+                // Black iron posts with ember-lit joints.
+                base=abs(sin(p.y*4.))>.95?vec3(.85,.25,.02):
+                     vec3(.14,.10,.15);
+            }else if(galleryTheme==4){
+                // Stone piers with block courses.
+                base=vec3(.38,.40,.40);
+                base-=vec3(.18)*step(.96,fract(p.y*1.3));
+            }else{
+                // Actual 3D tree trunks, not just a bark texture.
+                base=vec3(.36,.22,.09)-vec3(.07)*pow(grain,18.);
+            }
+            closest=post;pigment=base;
+        }
+        if(galleryTheme==5){
+            // Low-poly-like organic clusters forming an overhead canopy.
+            vec3 canopy=vec3(center.x*.91,2.48,center.y*.91);
+            float leaf=orbHit(eye,ray,canopy,.54);
+            if(leaf<closest){
+                vec3 p=eye+ray*leaf;
+                float var=.5+.5*sin(p.x*17.+p.z*11.+p.y*9.);
+                pigment=mix(vec3(.035,.17,.04),vec3(.12,.37,.05),var);
+                closest=leaf;
+            }
+        }else if(galleryTheme==2 || galleryTheme==3){
+            // Hanging lanterns / animated torch sconces.
+            vec3 center3=vec3(center.x*.97,1.75,center.y*.97);
+            float orb=orbHit(eye,ray,center3,galleryTheme==2?.17:.15);
+            if(orb<closest){
+                vec3 p=eye+ray*orb;
+                float flicker=.78+.22*sin(galleryTime*4.+a*5.+p.y*8.);
+                pigment=galleryTheme==2?vec3(.95,.48,.09)*flicker:
+                    vec3(1.0,.22,.015)*flicker;
+                closest=orb;
+            }
+        }else if(galleryTheme==0){
+            // Hanging art spotlights above the pictures.
+            float light=orbHit(eye,ray,vec3(center.x*.94,2.34,center.y*.94),.085);
+            if(light<closest){
+                pigment=vec3(1.0,.86,.56);
+                closest=light;
+            }
+        }else if(galleryTheme==1){
+            // Ceiling-mounted violet light fixtures.
+            float light=orbHit(eye,ray,vec3(center.x*.88,2.38,center.y*.88),.11);
+            if(light<closest){
+                pigment=vec3(.9,.15,1.0);
+                closest=light;
+            }
+        }
+    }
+    return closest;
+}
 void main(){
  vec3 ray=normalize(vec3(mix(fovTangent.x,fovTangent.y,uv.x),mix(fovTangent.z,fovTangent.w,uv.y),-1.));
  ray=spin(normalize(quat(ray,orientation)),galleryYaw);
@@ -1281,7 +1390,11 @@ void main(){
  if(styleInverted==1)depth=1.-depth;
  texcoord.x=clamp(texcoord.x+eyeSign*styleScale*(depth-.5)*.0025,.0005,.9995);
  vec4 photo=texture(panorama,texcoord);
- frag=vec4(mix(material(hit,face),photo.rgb,photo.a),1.);
+ vec3 color=mix(material(hit,face),photo.rgb,photo.a);
+ vec3 propColor=vec3(0.);
+ float prop=sculpture(eye,ray,t,propColor);
+ if(prop<t)color=propColor;
+ frag=vec4(color,1.);
 }
 )";
         // Keep the regular VR home/editor operational if this optional renderer
