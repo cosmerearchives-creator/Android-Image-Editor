@@ -126,7 +126,7 @@ bool tryLoadEnvironmentAsset(JNIEnv* env,jobject activity,vrui::Renderer& render
         env->DeleteLocalRef(cls);return false;
     }
     jfloatArray data=static_cast<jfloatArray>(
-        env->CallObjectMethod(activity,method));
+        env->CallObjectMethod(activity,method,static_cast<jint>(theme)));
     env->DeleteLocalRef(cls);
     if(env->ExceptionCheck()){
         env->ExceptionDescribe();env->ExceptionClear();return false;
