@@ -5,6 +5,8 @@ import json
 import pathlib
 import struct
 import sys
+import io
+import zlib
 
 path = pathlib.Path("app/src/main/assets/museum_pedestal.gltf")
 with path.open(encoding="utf-8") as stream:
@@ -38,6 +40,8 @@ for mesh in model["meshes"]:
     for primitive in mesh["primitives"]:
         assert primitive.get("mode", 4) == 4, "Expected triangles"
         positions = accessor(primitive["attributes"]["POSITION"], "VEC3", 5126)
+        uv = accessor(primitive["attributes"]["TEXCOORD_0"], "VEC2", 5126)
+        assert uv[1] == positions[1], "UV and position vertex counts differ"
         indices = accessor(primitive["indices"], "SCALAR", 5123)
         assert positions[1] <= 50000
         assert indices[1] % 3 == 0
@@ -46,4 +50,33 @@ for mesh in model["meshes"]:
             assert idx < positions[1], "Triangle index overflow"
         triangles += indices[1] // 3
 assert triangles > 0
-print(f"glTF validated: {triangles} triangles; {len(data)} bytes")
+images = model["images"]
+assert len(images) == 1, "Expected one bounded embedded texture"
+texture_uri = images[0]["uri"]
+png_prefix = "data:image/png;base64,"
+assert texture_uri.startswith(png_prefix), "Texture must be embedded PNG"
+png = base64.b64decode(texture_uri[len(png_prefix):], validate=True)
+assert len(png) <= 1_000_000, "Embedded texture too large"
+assert png[:8] == b"\\x89PNG\\r\\n\\x1a\\n", "Bad PNG signature"
+width, height = struct.unpack_from(">II", png, 16)
+assert 0 < width <= 512 and 0 < height <= 512, "Image dimensions out of bounds"
+chunks = io.BytesIO(png[8:])
+payload = bytearray()
+found_end = False
+while chunk := chunks.read(4):
+    length = struct.unpack(">I", chunk)[0]
+    assert length <= 1_000_000, "PNG chunk too large"
+    kind = chunks.read(4)
+    body = chunks.read(length)
+    crc = chunks.read(4)
+    assert len(body) == length and len(crc) == 4
+    assert zlib.crc32(kind + body) == struct.unpack(">I", crc)[0], "Invalid PNG CRC"
+    if kind == b"IDAT":
+        payload.extend(body)
+    if kind == b"IEND":
+        found_end = True
+        break
+assert found_end and payload, "PNG missing image data or end marker"
+assert len(zlib.decompress(payload)) > 0, "PNG data could not decompress"
+print(f"glTF validated: {triangles} triangles; {len(data)} mesh bytes; {width}x{height} PNG")
+
