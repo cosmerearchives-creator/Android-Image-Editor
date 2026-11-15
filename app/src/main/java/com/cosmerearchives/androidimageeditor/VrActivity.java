@@ -102,25 +102,141 @@ public final class VrActivity extends Activity {
         });
     }
     @SuppressWarnings("unused")
-    public void requestSavedCylinders(){
+    public void requestGalleryLayout(){
         runOnUiThread(()->{
-            String[] names=BatchStore.savedCylinderNames(getApplicationContext());
-            if(names.length==0){
-                Toast.makeText(this,"No saved cylinders yet. Choose SAVE CYLINDER.",
-                    Toast.LENGTH_LONG).show();
-                return;
-            }
+            int[] settings=BatchStore.layout(getApplicationContext());
+            android.widget.LinearLayout layout=new android.widget.LinearLayout(this);
+            layout.setOrientation(android.widget.LinearLayout.VERTICAL);
+            int pad=(int)(16*getResources().getDisplayMetrics().density);
+            layout.setPadding(pad,pad,pad,pad);
+            android.widget.TextView spacingLabel=new android.widget.TextView(this);
+            spacingLabel.setText("Photo spacing: "+settings[0]+"%");
+            layout.addView(spacingLabel);
+            android.widget.SeekBar spacing=new android.widget.SeekBar(this);
+            spacing.setMax(12);spacing.setProgress(settings[0]);
+            spacing.setOnSeekBarChangeListener(new android.widget.SeekBar.OnSeekBarChangeListener(){
+                public void onProgressChanged(android.widget.SeekBar bar,int value,boolean fromUser){
+                    spacingLabel.setText("Photo spacing: "+value+"%");
+                }
+                public void onStartTrackingTouch(android.widget.SeekBar bar){}
+                public void onStopTrackingTouch(android.widget.SeekBar bar){}
+            });
+            layout.addView(spacing);
+            android.widget.TextView densityLabel=new android.widget.TextView(this);
+            densityLabel.setText("Columns / density: "+settings[1]);
+            layout.addView(densityLabel);
+            android.widget.SeekBar density=new android.widget.SeekBar(this);
+            density.setMax(5);density.setProgress(settings[1]-1);
+            density.setOnSeekBarChangeListener(new android.widget.SeekBar.OnSeekBarChangeListener(){
+                public void onProgressChanged(android.widget.SeekBar bar,int value,boolean fromUser){
+                    densityLabel.setText("Columns / density: "+(value+1));
+                }
+                public void onStartTrackingTouch(android.widget.SeekBar bar){}
+                public void onStopTrackingTouch(android.widget.SeekBar bar){}
+            });
+            layout.addView(density);
             new android.app.AlertDialog.Builder(this)
-                .setTitle("Saved cylinders")
-                .setItems(names,(dialog,index)->{
-                    if(batchBusy.get())return;
-                    activeSavedCylinder=index;
-                    notifyBatchGalleryReady(3);
+                .setTitle("Cylinder image layout")
+                .setView(layout)
+                .setPositiveButton("APPLY",(dialog,which)->{
+                    BatchStore.saveLayout(getApplicationContext(),
+                        spacing.getProgress(),density.getProgress()+1);
+                    Toast.makeText(this,"Layout saved. Reopen View Sphere to rebuild.",
+                        Toast.LENGTH_LONG).show();
                 })
                 .setNegativeButton("CANCEL",null).show();
         });
     }
-
+    @SuppressWarnings("unused")
+    public void requestSavedCylinders(){
+        runOnUiThread(this::showSavedCylinderLibrary);
+    }
+    private void showSavedCylinderLibrary(){
+        String[] names=BatchStore.savedCylinderNames(getApplicationContext());
+        if(names.length==0){
+            Toast.makeText(this,"No saved cylinders yet. Choose SAVE CYLINDER.",
+                Toast.LENGTH_LONG).show();
+            return;
+        }
+        android.widget.ScrollView scroll=new android.widget.ScrollView(this);
+        android.widget.LinearLayout list=new android.widget.LinearLayout(this);
+        list.setOrientation(android.widget.LinearLayout.VERTICAL);
+        scroll.addView(list);
+        android.app.AlertDialog dialog=new android.app.AlertDialog.Builder(this)
+            .setTitle("Saved Cylinders")
+            .setView(scroll).setNegativeButton("CLOSE",null).create();
+        for(int i=0;i<names.length;i++){
+            final int index=i;
+            android.widget.LinearLayout row=new android.widget.LinearLayout(this);
+            row.setOrientation(android.widget.LinearLayout.HORIZONTAL);
+            android.graphics.Bitmap thumb=BatchStore.savedThumbnail(
+                getApplicationContext(),i);
+            android.widget.ImageView image=new android.widget.ImageView(this);
+            if(thumb!=null)image.setImageBitmap(thumb);
+            image.setScaleType(android.widget.ImageView.ScaleType.CENTER_CROP);
+            int height=(int)(72*getResources().getDisplayMetrics().density);
+            row.addView(image,new android.widget.LinearLayout.LayoutParams(height,height));
+            android.widget.Button open=new android.widget.Button(this);
+            open.setText(names[i]);
+            open.setAllCaps(false);
+            row.addView(open,new android.widget.LinearLayout.LayoutParams(0,height,1));
+            open.setOnClickListener(v->{
+                if(batchBusy.get())return;
+                activeSavedCylinder=index;
+                dialog.dismiss();
+                notifyBatchGalleryReady(3);
+            });
+            android.widget.Button options=new android.widget.Button(this);
+            options.setText("...");
+            row.addView(options,new android.widget.LinearLayout.LayoutParams(
+                (int)(66*getResources().getDisplayMetrics().density),height));
+            options.setOnClickListener(v->{
+                String[] actions={"Rename","Duplicate","Delete"};
+                new android.app.AlertDialog.Builder(this)
+                    .setTitle(BatchStore.savedCylinderLabel(getApplicationContext(),index))
+                    .setItems(actions,(d,which)->{
+                        if(which==0){
+                            android.widget.EditText name=new android.widget.EditText(this);
+                            name.setSingleLine(true);
+                            name.setText(BatchStore.savedCylinderLabel(
+                                getApplicationContext(),index));
+                            new android.app.AlertDialog.Builder(this).setTitle("Rename cylinder")
+                                .setView(name).setPositiveButton("SAVE",(edit,button)->{
+                                    try{
+                                        BatchStore.renameCylinder(getApplicationContext(),
+                                            index,name.getText().toString());
+                                        dialog.dismiss();showSavedCylinderLibrary();
+                                    }catch(Exception e){
+                                        Toast.makeText(this,e.getMessage(),Toast.LENGTH_LONG).show();
+                                    }
+                                }).setNegativeButton("CANCEL",null).show();
+                        }else if(which==1){
+                            try{
+                                BatchStore.duplicateCylinder(getApplicationContext(),index);
+                                dialog.dismiss();showSavedCylinderLibrary();
+                            }catch(Exception e){
+                                Toast.makeText(this,e.getMessage(),Toast.LENGTH_LONG).show();
+                            }
+                        }else{
+                            new android.app.AlertDialog.Builder(this)
+                                .setTitle("Delete saved cylinder?")
+                                .setMessage("This permanently deletes this saved cylinder. Imported images are preserved.")
+                                .setPositiveButton("DELETE",(confirm,button)->{
+                                    try{
+                                        BatchStore.deleteCylinder(getApplicationContext(),index);
+                                        activeSavedCylinder=-1;
+                                        dialog.dismiss();showSavedCylinderLibrary();
+                                    }catch(Exception e){
+                                        Toast.makeText(this,e.getMessage(),Toast.LENGTH_LONG).show();
+                                    }
+                                }).setNegativeButton("CANCEL",null).show();
+                        }
+                    }).show();
+            });
+            list.addView(row);
+        }
+        dialog.show();
+    }
 
     private static final int BATCH_FOLDER=13;
     private static final String PICKER_PREFS="batch_file_picker";
