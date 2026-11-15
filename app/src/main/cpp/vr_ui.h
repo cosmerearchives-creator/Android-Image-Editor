@@ -1798,8 +1798,10 @@ void main(){
                 label(v,"COMING SOON",320,385,4,muted);
                 label(v,"VR NAVIGATION TEST",272,318,3,muted);
             }
-            box(v,170,92,684,98,hovered==3?purpleHover:purple);
-            label(v,"BACK",440,121,4,white);
+            box(v,170,92,684,page==Page::Gallery?43.f:98.f,
+                hovered==3?purpleHover:purple);
+            label(v,"BACK",440,page==Page::Gallery?102:121,
+                page==Page::Gallery?3:4,white);
             // Must be drawn AFTER the shared Back button, or the button
             // would visually cover the reveal icon while still capturing it.
             if(page==Page::Open){
