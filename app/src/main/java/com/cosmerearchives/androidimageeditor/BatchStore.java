@@ -33,6 +33,26 @@ public final class BatchStore {
         android.content.SharedPreferences prefs=ctx.getSharedPreferences("vr_gallery_layout",Context.MODE_PRIVATE);
         return new int[]{prefs.getInt("spacing",2),prefs.getInt("density",3)};
     }
+    public static int radiusCm(Context ctx){
+        return ctx.getSharedPreferences("vr_gallery_layout",Context.MODE_PRIVATE)
+            .getInt("radiusCm",300);
+    }
+    public static void saveRadiusCm(Context ctx,int cm){
+        ctx.getSharedPreferences("vr_gallery_layout",Context.MODE_PRIVATE).edit()
+            .putInt("radiusCm",Math.max(250,Math.min(500,cm))).apply();
+    }
+    public static int savedRadiusCm(Context ctx,int index){
+        try{
+            File folder=savedAt(ctx,index);
+            File radius=new File(folder,"radius.txt");
+            if(radius.isFile()){
+                String value=new String(java.nio.file.Files.readAllBytes(radius.toPath()),
+                    java.nio.charset.StandardCharsets.UTF_8).trim();
+                return Math.max(250,Math.min(500,Integer.parseInt(value)));
+            }
+        }catch(Exception ignored){}
+        return 300; // Older rooms were rendered at a 3.0 m radius.
+    }
     public static void saveLayout(Context ctx,int spacing,int density){
         ctx.getSharedPreferences("vr_gallery_layout",Context.MODE_PRIVATE).edit()
             .putInt("spacing",Math.max(0,Math.min(12,spacing)))
@@ -395,6 +415,11 @@ public final class BatchStore {
                 new File(folder,"depth.png").toPath());
             try(FileOutputStream stream=new FileOutputStream(new File(folder,"theme.txt"))){
                 stream.write(Integer.toString(Math.max(0,Math.min(5,theme)))
+                    .getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                stream.getFD().sync();
+            }
+            try(FileOutputStream stream=new FileOutputStream(new File(folder,"radius.txt"))){
+                stream.write(Integer.toString(radiusCm(ctx))
                     .getBytes(java.nio.charset.StandardCharsets.UTF_8));
                 stream.getFD().sync();
             }
