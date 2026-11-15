@@ -16,9 +16,17 @@ import java.nio.ByteOrder;
 public final class GltfMesh {
     private GltfMesh(){}
 
-    private static JSONObject readMuseum(Context context) throws Exception {
+    private static final String[] SCENES = {
+        "museum_pedestal.gltf", "club_environment.gltf",
+        "tiki_environment.gltf", "fire_environment.gltf",
+        "dungeon_environment.gltf", "woodland_environment.gltf"
+    };
+    private static JSONObject readEnvironment(Context context,int theme) throws Exception {
+        if(theme<0||theme>=SCENES.length)
+            throw new IllegalArgumentException("Invalid environment theme");
+
         byte[] json;
-        try(InputStream stream=context.getAssets().open("museum_pedestal.gltf")){
+        try(InputStream stream=context.getAssets().open(SCENES[theme])){
             java.io.ByteArrayOutputStream out=new java.io.ByteArrayOutputStream();
             byte[] chunk=new byte[8192];int n;
             while((n=stream.read(chunk))!=-1)out.write(chunk,0,n);
@@ -29,8 +37,8 @@ public final class GltfMesh {
             throw new IllegalArgumentException("Not glTF 2.0");
         return doc;
     }
-    public static int[] loadMuseumTexture(Context context) throws Exception{
-        JSONObject doc=readMuseum(context);
+    public static int[] loadEnvironmentTexture(Context context,int theme) throws Exception{
+        JSONObject doc=readEnvironment(context,theme);
         JSONArray images=doc.optJSONArray("images");
         if(images==null||images.length()==0)return null;
         String uri=images.getJSONObject(0).getString("uri");
@@ -133,8 +141,8 @@ public final class GltfMesh {
             throw new IllegalArgumentException("Invalid scene size");
         return output;
     }
-    public static float[] loadMuseum(Context context) throws Exception {
-        JSONObject doc=readMuseum(context);
+    public static float[] loadEnvironment(Context context,int theme) throws Exception {
+        JSONObject doc=readEnvironment(context,theme);
         JSONArray buffers=doc.getJSONArray("buffers");
         if(buffers.length()!=1)throw new IllegalArgumentException("Only one embedded buffer");
         String uri=buffers.getJSONObject(0).getString("uri");
