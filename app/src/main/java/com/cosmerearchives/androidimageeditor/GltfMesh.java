@@ -143,6 +143,13 @@ public final class GltfMesh {
     }
     public static float[] loadEnvironment(Context context,int theme) throws Exception {
         JSONObject doc=readEnvironment(context,theme);
+        // Reject unsafe/nonfinite transforms before they reach the GPU.
+        // A single invalid imported node must not corrupt the VR render pass.
+        for(Instance instance:sceneInstances(doc)){
+            for(float value:instance.matrix)
+                if(!Float.isFinite(value)||Math.abs(value)>100000f)
+                    throw new IllegalArgumentException("Unsafe scene transform");
+        }
         JSONArray buffers=doc.getJSONArray("buffers");
         if(buffers.length()!=1)throw new IllegalArgumentException("Only one embedded buffer");
         String uri=buffers.getJSONObject(0).getString("uri");
@@ -177,6 +184,14 @@ public final class GltfMesh {
                    (long)offset+(long)(vertexCount-1)*stride+12>bytes.length)
                     throw new IllegalArgumentException("Position accessor out of bounds");
                 float[] positions=new float[vertexCount*3];
+                // glTF accessors must stay within their declared bufferView,
+                // not merely within the overall binary buffer.
+                int viewStart=positionView.optInt("byteOffset",0);
+                int viewLength=positionView.getInt("byteLength");
+                if(offset<viewStart||
+                   (long)offset+(long)(vertexCount-1)*stride+12>
+                       (long)viewStart+viewLength)
+                    throw new IllegalArgumentException("Position exceeds bufferView");
                 for(int i=0;i<vertexCount;i++)
                     for(int axis=0;axis<3;axis++)
                         positions[i*3+axis]=binary.getFloat(offset+i*stride+axis*4);
@@ -194,6 +209,11 @@ public final class GltfMesh {
                     if(uvStride<8||uvStride>256||uvOffset<0||
                        (long)uvOffset+(long)(vertexCount-1)*uvStride+8>bytes.length)
                         throw new IllegalArgumentException("UV accessor out of bounds");
+                    int uvViewStart=texView.optInt("byteOffset",0);
+                    if(uvOffset<uvViewStart||
+                       (long)uvOffset+(long)(vertexCount-1)*uvStride+8>
+                           (long)uvViewStart+texView.getInt("byteLength"))
+                        throw new IllegalArgumentException("UV exceeds bufferView");
                     for(int i=0;i<vertexCount;i++){
                         uv[i*2]=binary.getFloat(uvOffset+i*uvStride);
                         uv[i*2+1]=binary.getFloat(uvOffset+i*uvStride+4);
