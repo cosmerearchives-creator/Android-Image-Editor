@@ -82,6 +82,17 @@ public final class VrActivity extends Activity {
             ?BatchStore.savedRadiusCm(getApplicationContext(),activeSavedCylinder)
             :galleryRadiusCm();
     }
+    /** Called once, lazily, on the OpenXR GL thread. A malformed bundled
+     * asset simply falls back to the existing fully functional VR gallery.
+     */
+    @SuppressWarnings("unused")
+    public float[] loadMuseumMesh(){
+        try{return GltfMesh.loadMuseum(getApplicationContext());}
+        catch(Exception error){
+            Log.e(TAG,"Museum glTF load failed (falling back to shader)",error);
+            return null;
+        }
+    }
     @SuppressWarnings("unused")
     public int activeCylinderTheme(){
         return activeSavedCylinder>=0
