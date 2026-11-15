@@ -443,8 +443,9 @@ struct XrResources {
     EGLDisplay display{EGL_NO_DISPLAY};
     EGLContext context{EGL_NO_CONTEXT};
     EGLSurface surface{EGL_NO_SURFACE};
-    GLuint fbo{0};
+    GLuint fbo{0},depthBuffer{0};
     ~XrResources() {
+        if (depthBuffer) glDeleteRenderbuffers(1, &depthBuffer);
         if (fbo) glDeleteFramebuffers(1, &fbo);
         if (aimSpace != XR_NULL_HANDLE) xrDestroySpace(aimSpace);
         if (leftAimSpace != XR_NULL_HANDLE) xrDestroySpace(leftAimSpace);
@@ -690,6 +691,17 @@ void run(JNIEnv* env, jobject activity) {
     check(xrEnumerateSwapchainImages(r.swapchain, imagesCount, &imagesCount,
           reinterpret_cast<XrSwapchainImageBaseHeader*>(images.data())), "swapchain images");
     glGenFramebuffers(1, &r.fbo);
+    // The OpenXR swapchain contains only color; a local depth renderbuffer
+    // lets actual glTF triangles occlude one another. It is never submitted
+    // separately to the compositor.
+    glGenRenderbuffers(1,&r.depthBuffer);
+    glBindRenderbuffer(GL_RENDERBUFFER,r.depthBuffer);
+    glRenderbufferStorage(GL_RENDERBUFFER,GL_DEPTH_COMPONENT16,2048,1536);
+    glBindRenderbuffer(GL_RENDERBUFFER,0);
+    glBindFramebuffer(GL_FRAMEBUFFER,r.fbo);
+    glFramebufferRenderbuffer(GL_FRAMEBUFFER,GL_DEPTH_ATTACHMENT,
+        GL_RENDERBUFFER,r.depthBuffer);
+    glBindFramebuffer(GL_FRAMEBUFFER,0);
     vrui::Renderer menu;
     if (!menu.initialize()) throw "VR menu shader initialization";
     menu.galleryTheme=galleryThemeFromJava(env,activity,"loadGalleryTheme");
@@ -1642,7 +1654,7 @@ void run(JNIEnv* env, jobject activity) {
                 glEnable(GL_SCISSOR_TEST);
                 glScissor(eye*1024,0,1024,768);
                 glClearColor(0.045f,0.038f,0.08f,1.f);
-                glClear(GL_COLOR_BUFFER_BIT);
+                glClear(GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT);
                 glDisable(GL_SCISSOR_TEST);
                 const float eyeSign=eye==0?-1.f:1.f;
                 // Both controllers have independent visible pointers.
