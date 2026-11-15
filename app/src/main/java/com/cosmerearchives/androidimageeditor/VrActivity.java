@@ -72,6 +72,11 @@ public final class VrActivity extends Activity {
         return BatchStore.radiusCm(getApplicationContext());
     }
     @SuppressWarnings("unused")
+    public int gallerySceneryDetail(){
+        return getSharedPreferences("vr_gallery",MODE_PRIVATE)
+            .getBoolean("sceneryDetail",true)?1:0;
+    }
+    @SuppressWarnings("unused")
     public int activeCylinderRadiusCm(){
         return activeSavedCylinder>=0
             ?BatchStore.savedRadiusCm(getApplicationContext(),activeSavedCylinder)
@@ -159,6 +164,10 @@ public final class VrActivity extends Activity {
                 public void onStopTrackingTouch(android.widget.SeekBar bar){}
             });
             layout.addView(radius);
+            android.widget.CheckBox detail=new android.widget.CheckBox(this);
+            detail.setText("Detailed 3D scenery (switch off if performance drops)");
+            detail.setChecked(gallerySceneryDetail()==1);
+            layout.addView(detail);
             new android.app.AlertDialog.Builder(this)
                 .setTitle("Cylinder image layout")
                 .setView(layout)
@@ -166,6 +175,8 @@ public final class VrActivity extends Activity {
                     BatchStore.saveLayout(getApplicationContext(),
                         spacing.getProgress(),density.getProgress()+1);
                     BatchStore.saveRadiusCm(getApplicationContext(),250+radius.getProgress()*25);
+                    getSharedPreferences("vr_gallery",MODE_PRIVATE).edit()
+                        .putBoolean("sceneryDetail",detail.isChecked()).apply();
                     Toast.makeText(this,"Layout saved. Reopen View Sphere to rebuild.",
                         Toast.LENGTH_LONG).show();
                 })
