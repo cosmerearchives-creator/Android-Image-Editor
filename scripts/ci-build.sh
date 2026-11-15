@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+python3 scripts/verify-3d-assets.py
+
 export JAVA_HOME="${JAVA_HOME_17_X64:-$JAVA_HOME}"
 export PATH="$JAVA_HOME/bin:$PATH"
 
