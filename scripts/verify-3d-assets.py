@@ -50,6 +50,31 @@ for mesh in model["meshes"]:
             assert idx < positions[1], "Triangle index overflow"
         triangles += indices[1] // 3
 assert triangles > 0
+# Validate every referenced scene node, nested transforms, and mesh reference.
+nodes = model.get("nodes", [])
+scenes = model.get("scenes", [])
+assert scenes and nodes, "Missing scene graph"
+roots = scenes[model.get("scene", 0)]["nodes"]
+instances = []
+def visit(index, stack, depth):
+    assert 0 <= index < len(nodes), "Invalid scene node"
+    assert index not in stack and depth <= 12, "Cyclic/deep glTF graph"
+    node = nodes[index]
+    for name, count in (("translation", 3), ("rotation", 4), ("scale", 3),
+                        ("matrix", 16)):
+        if name in node:
+            assert len(node[name]) == count, "Invalid transform size"
+            assert all(abs(float(x)) < 1e6 for x in node[name]), "Unsafe transform"
+    if "mesh" in node:
+        assert 0 <= node["mesh"] < len(model["meshes"]), "Invalid mesh reference"
+        instances.append(node["mesh"])
+        assert len(instances) <= 96, "Excessive mesh instances"
+    for child in node.get("children", []):
+        visit(child, stack | {index}, depth + 1)
+for root in roots:
+    visit(root, set(), 0)
+assert len(instances) >= 2 and len(set(instances)) >= 2, (
+    "Museum multi-mesh scene regression")
 images = model["images"]
 assert len(images) == 1, "Expected one bounded embedded texture"
 texture_uri = images[0]["uri"]
@@ -78,5 +103,6 @@ while chunk := chunks.read(4):
         break
 assert found_end and payload, "PNG missing image data or end marker"
 assert len(zlib.decompress(payload)) > 0, "PNG data could not decompress"
-print(f"glTF validated: {triangles} triangles; {len(data)} mesh bytes; {width}x{height} PNG")
+print(f"glTF validated: {triangles} source triangles, {len(instances)} instances, "
+      f"{len(data)} mesh bytes; {width}x{height} PNG")
 
