@@ -708,7 +708,18 @@ struct Renderer {
     GLuint environmentProgram=0,environmentVao=0,environmentVbo=0,environmentTexture=0;
     GLsizei environmentVertices=0;
     bool environmentAttempted=false;
-    bool uploadMuseumMesh(const std::vector<float>& vertices){
+    int environmentTheme=-1;
+    void resetEnvironmentScene(int theme){
+        if(environmentTheme==theme)return;
+        environmentTheme=theme;
+        environmentAttempted=false;
+        environmentVertices=0;
+        if(environmentTexture){
+            glDeleteTextures(1,&environmentTexture);
+            environmentTexture=0;
+        }
+    }
+    bool uploadEnvironmentMesh(const std::vector<float>& vertices){
         if(vertices.empty()||vertices.size()%11!=0||vertices.size()>1980000)
             return false;
         if(!environmentProgram){
@@ -805,7 +816,7 @@ struct Renderer {
         environmentVertices=static_cast<GLsizei>(vertices.size()/11);
         return true;
     }
-    bool uploadMuseumTexture(const std::vector<uint8_t>& rgba,int width,int height){
+    bool uploadEnvironmentTexture(const std::vector<uint8_t>& rgba,int width,int height){
         if(width<1||height<1||width>512||height>512||
            rgba.size()!=size_t(width)*height*4u)return false;
         if(!environmentTexture)glGenTextures(1,&environmentTexture);
@@ -822,10 +833,10 @@ struct Renderer {
         glActiveTexture(GL_TEXTURE0);
         return glGetError()==GL_NO_ERROR;
     }
-    void drawMuseumMesh(const float* q,const float* tanFov,const float* camera,
+    void drawEnvironmentMesh(const float* q,const float* tanFov,const float* camera,
                         float yaw){
         if(!environmentProgram||environmentVertices<=0||!galleryDetail||
-           galleryTheme!=0)return;
+           galleryTheme!=environmentTheme)return;
         glUseProgram(environmentProgram);
         glUniform1i(glGetUniformLocation(environmentProgram,"baseTexture"),2);
         glUniform1i(glGetUniformLocation(environmentProgram,"hasTexture"),
