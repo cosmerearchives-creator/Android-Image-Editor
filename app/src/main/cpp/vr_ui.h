@@ -90,7 +90,8 @@ inline int buttonAt(Page page,float x,float y,bool advancedVisible=true) {
         if(y>=360&&y<=440)return x<512?154:155;
         if(y>=265&&y<=340)return x<512?157:158;
         if(y>=200&&y<=250)return 156;
-        if(y>=92&&y<=190)return 3;
+        if(y>=140&&y<=190)return 159;
+        if(y>=92&&y<=135)return 3;
         return -1;
     }
     if(page==Page::Home) {
@@ -1772,6 +1773,8 @@ void main(){
                 themeLabel+=themes[galleryTheme%6];
                 label(v,batchState==5?"CONFIRM VIEW OVER 16 IMAGES":
                      themeLabel.c_str(),192,213,2,white);
+                box(v,170,140,684,50,hovered==159?purpleHover:button);
+                label(v,"IMAGE LAYOUT SETTINGS",192,153,2,white);
             } else if(page==Page::Projects) {
                 const int ys[]={495,405,315,225};
                 for(int i=0;i<4;i++){
