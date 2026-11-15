@@ -709,7 +709,7 @@ struct Renderer {
     GLsizei environmentVertices=0;
     bool environmentAttempted=false;
     bool uploadMuseumMesh(const std::vector<float>& vertices){
-        if(vertices.empty()||vertices.size()%8!=0||vertices.size()>1440000)
+        if(vertices.empty()||vertices.size()%11!=0||vertices.size()>1980000)
             return false;
         if(!environmentProgram){
             const char* vs=R"(#version 300 es
@@ -717,12 +717,14 @@ struct Renderer {
             layout(location=0) in vec3 position;
             layout(location=1) in vec3 baseColor;
             layout(location=2) in vec2 texcoord;
+            layout(location=3) in vec3 meshNormal;
             uniform vec4 orientation;
             uniform vec3 cameraPosition;
             uniform vec4 fovTangent;
             uniform float galleryYaw;
             out vec3 surfaceColor;
             out vec2 surfaceUV;
+            out vec3 surfaceNormal;
             vec3 quat(vec3 v,vec4 q){
                 vec3 t=2.0*cross(q.xyz,v);
                 return v+q.w*t+cross(q.xyz,t);
@@ -745,11 +747,13 @@ struct Renderer {
                 gl_Position=vec4(px*depth,py*depth,clipZ,depth);
                 surfaceColor=baseColor;
                 surfaceUV=texcoord;
+                surfaceNormal=meshNormal;
             })";
             const char* fs=R"(#version 300 es
             precision highp float;
             in vec3 surfaceColor;
             in vec2 surfaceUV;
+            in vec3 surfaceNormal;
             uniform sampler2D baseTexture;
             uniform int hasTexture;
             out vec4 frag;
@@ -759,7 +763,13 @@ struct Renderer {
                 // material identity for gold accents and stone.
                 vec3 detail=hasTexture==1?texture(baseTexture,surfaceUV).rgb:
                     vec3(1.0);
-                frag=vec4(tint*detail,1.0);
+                // Two stationary warm museum lights and ambient fill. Flat
+                // world-space normals give arches and carved details depth.
+                vec3 n=normalize(surfaceNormal);
+                float key=max(0.0,dot(n,normalize(vec3(.65,.85,.45))));
+                float fill=max(0.0,dot(n,normalize(vec3(-.65,.45,-.35))));
+                float illumination=.42+.39*key+.19*fill;
+                frag=vec4(tint*detail*illumination,1.0);
             })";
             GLuint vert=shader(GL_VERTEX_SHADER,vs),frag=shader(GL_FRAGMENT_SHADER,fs);
             if(vert&&frag){
@@ -780,16 +790,19 @@ struct Renderer {
         glBindBuffer(GL_ARRAY_BUFFER,environmentVbo);
         glBufferData(GL_ARRAY_BUFFER,vertices.size()*sizeof(float),vertices.data(),GL_STATIC_DRAW);
         glEnableVertexAttribArray(0);
-        glVertexAttribPointer(0,3,GL_FLOAT,GL_FALSE,8*sizeof(float),(void*)0);
+        glVertexAttribPointer(0,3,GL_FLOAT,GL_FALSE,11*sizeof(float),(void*)0);
         glEnableVertexAttribArray(1);
-        glVertexAttribPointer(1,3,GL_FLOAT,GL_FALSE,8*sizeof(float),
+        glVertexAttribPointer(1,3,GL_FLOAT,GL_FALSE,11*sizeof(float),
             reinterpret_cast<void*>(3*sizeof(float)));
         glEnableVertexAttribArray(2);
-        glVertexAttribPointer(2,2,GL_FLOAT,GL_FALSE,8*sizeof(float),
+        glVertexAttribPointer(2,2,GL_FLOAT,GL_FALSE,11*sizeof(float),
             reinterpret_cast<void*>(6*sizeof(float)));
+        glEnableVertexAttribArray(3);
+        glVertexAttribPointer(3,3,GL_FLOAT,GL_FALSE,11*sizeof(float),
+            reinterpret_cast<void*>(8*sizeof(float)));
         glBindVertexArray(0);
         glBindBuffer(GL_ARRAY_BUFFER,0);
-        environmentVertices=static_cast<GLsizei>(vertices.size()/8);
+        environmentVertices=static_cast<GLsizei>(vertices.size()/11);
         return true;
     }
     bool uploadMuseumTexture(const std::vector<uint8_t>& rgba,int width,int height){
