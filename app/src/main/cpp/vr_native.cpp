@@ -70,7 +70,7 @@ void refreshBatchStats(JNIEnv* env,jobject activity,vrui::Renderer& menu){
     jclass cls=env->GetObjectClass(activity);
     jmethodID method=env->GetMethodID(cls,"batchStats","()[I");
     if(method){
-        jintArray data=static_cast<jintArray>(env->CallObjectMethod(activity,method,static_cast<jint>(theme)));
+        jintArray data=static_cast<jintArray>(env->CallObjectMethod(activity,method));
         if(data&&env->GetArrayLength(data)>=2){
             jint values[2]{};
             env->GetIntArrayRegion(data,0,2,values);
