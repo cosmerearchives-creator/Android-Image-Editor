@@ -413,6 +413,71 @@ public final class BatchStore {
         Arrays.sort(list,(a,b)->b.getName().compareTo(a.getName()));
         return list;
     }
+    private static File savedAt(Context ctx,int index)throws IOException{
+        File[] entries=savedEntries(ctx);
+        if(index<0||index>=entries.length)throw new IOException("Cylinder no longer exists");
+        return entries[index];
+    }
+    public static String savedCylinderLabel(Context ctx,int index){
+        try{
+            File entry=savedAt(ctx,index);
+            File name=new File(entry,"name.txt");
+            if(name.isFile()){
+                byte[] bytes=java.nio.file.Files.readAllBytes(name.toPath());
+                String custom=new String(bytes,java.nio.charset.StandardCharsets.UTF_8).trim();
+                if(!custom.isEmpty())return custom;
+            }
+            return entry.getName().replace("room_","").replace('_',' ');
+        }catch(Exception ignored){return "Saved cylinder";}
+    }
+    public static synchronized void renameCylinder(Context ctx,int index,String label)
+            throws IOException{
+        File entry=savedAt(ctx,index);
+        String safe=label==null?"":label.trim().replace('\n',' ').replace('\r',' ');
+        if(safe.isEmpty()||safe.length()>70)throw new IOException("Name must be 1-70 characters");
+        try(FileOutputStream output=new FileOutputStream(new File(entry,"name.txt"))){
+            output.write(safe.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            output.getFD().sync();
+        }
+    }
+    public static synchronized void deleteCylinder(Context ctx,int index)throws IOException{
+        File entry=savedAt(ctx,index);
+        File[] children=entry.listFiles();
+        if(children!=null)for(File file:children)
+            if(!file.delete())throw new IOException("Couldn't delete saved cylinder file");
+        if(!entry.delete())throw new IOException("Couldn't remove saved cylinder");
+    }
+    public static synchronized String duplicateCylinder(Context ctx,int index)throws IOException{
+        File source=savedAt(ctx,index);
+        File copy=new File(savedRoot(ctx),"room_"+new java.text.SimpleDateFormat(
+            "yyyyMMdd_HHmmss_SSS",Locale.ROOT).format(new java.util.Date()));
+        if(!copy.mkdirs())throw new IOException("Couldn't create cylinder copy");
+        try{
+            File[] items=source.listFiles();
+            if(items==null)throw new IOException("Source unavailable");
+            for(File file:items)if(file.isFile())
+                java.nio.file.Files.copy(file.toPath(),new File(copy,file.getName()).toPath());
+            String previous=savedCylinderLabel(ctx,index);
+            try(FileOutputStream output=new FileOutputStream(new File(copy,"name.txt"))){
+                output.write((previous+" (Copy)").getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            }
+            return copy.getName();
+        }catch(IOException ex){
+            File[] files=copy.listFiles();
+            if(files!=null)for(File file:files)file.delete();
+            copy.delete();
+            throw ex;
+        }
+    }
+    public static Bitmap savedThumbnail(Context ctx,int index){
+        try{
+            File file=new File(savedAt(ctx,index),"wall.png");
+            BitmapFactory.Options options=new BitmapFactory.Options();
+            options.inSampleSize=16;
+            options.inPreferredConfig=Bitmap.Config.RGB_565;
+            return BitmapFactory.decodeFile(file.getAbsolutePath(),options);
+        }catch(Exception ignored){return null;}
+    }
     public static String[] savedCylinderNames(Context ctx){
         File[] list=savedEntries(ctx);
         String[] names=new String[list.length];
@@ -420,7 +485,7 @@ public final class BatchStore {
             "Dungeon","Hanging on Trees"};
         for(int i=0;i<list.length;i++){
             String stamp=list[i].getName().replace("room_","").replace('_',' ');
-            names[i]=stamp+"  -  "+themes[savedCylinderTheme(ctx,i)];
+            names[i]=savedCylinderLabel(ctx,i)+"  -  "+themes[savedCylinderTheme(ctx,i)];
         }
         return names;
     }
