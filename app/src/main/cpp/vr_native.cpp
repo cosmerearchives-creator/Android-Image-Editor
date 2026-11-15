@@ -131,7 +131,7 @@ bool tryLoadMuseumAsset(JNIEnv* env,jobject activity,vrui::Renderer& renderer){
     }
     if(!data)return false;
     jsize count=env->GetArrayLength(data);
-    if(count<=0||count%6!=0||count>1080000){
+    if(count<=0||count%8!=0||count>1440000){
         env->DeleteLocalRef(data);return false;
     }
     std::vector<float> vertices(static_cast<size_t>(count));
@@ -141,6 +141,39 @@ bool tryLoadMuseumAsset(JNIEnv* env,jobject activity,vrui::Renderer& renderer){
         env->ExceptionDescribe();env->ExceptionClear();return false;
     }
     bool success=renderer.uploadMuseumMesh(vertices);
+    if(success){
+        jclass textureCls=env->GetObjectClass(activity);
+        jmethodID textureMethod=env->GetMethodID(textureCls,
+            "loadMuseumTexture","()[I");
+        if(textureMethod){
+            jintArray texture=static_cast<jintArray>(
+                env->CallObjectMethod(activity,textureMethod));
+            if(env->ExceptionCheck()){
+                env->ExceptionDescribe();env->ExceptionClear();
+            }else if(texture){
+                const jsize length=env->GetArrayLength(texture);
+                jint dimensions[2]{};
+                if(length>=2)env->GetIntArrayRegion(texture,0,2,dimensions);
+                const int width=dimensions[0],height=dimensions[1];
+                if(width>0&&height>0&&width<=512&&height<=512&&
+                   static_cast<int64_t>(width)*height+2==length){
+                    std::vector<jint> pixels(static_cast<size_t>(width)*height);
+                    env->GetIntArrayRegion(texture,2,width*height,pixels.data());
+                    std::vector<uint8_t> rgba(pixels.size()*4u);
+                    for(size_t i=0;i<pixels.size();++i){
+                        uint32_t p=static_cast<uint32_t>(pixels[i]);
+                        rgba[i*4]=static_cast<uint8_t>(p>>16);
+                        rgba[i*4+1]=static_cast<uint8_t>(p>>8);
+                        rgba[i*4+2]=static_cast<uint8_t>(p);
+                        rgba[i*4+3]=static_cast<uint8_t>(p>>24);
+                    }
+                    renderer.uploadMuseumTexture(rgba,width,height);
+                }
+                env->DeleteLocalRef(texture);
+            }
+        }else if(env->ExceptionCheck())env->ExceptionClear();
+        env->DeleteLocalRef(textureCls);
+    }
     __android_log_print(ANDROID_LOG_INFO,"ImageEditorXR","%s",
         success?"Museum glTF mesh uploaded":"Museum glTF mesh disabled; shader fallback active");
     return success;
