@@ -73,8 +73,14 @@ def visit(index, stack, depth):
         visit(child, stack | {index}, depth + 1)
 for root in roots:
     visit(root, set(), 0)
-assert len(instances) >= 2 and len(set(instances)) >= 2, (
-    "Museum multi-mesh scene regression")
+assert len(instances) >= 24 and len(set(instances)) >= 5, (
+    "Detailed museum scene assets missing")
+expanded_triangles = sum(
+    sum(accessors[p["indices"]]["count"] // 3
+        for p in model["meshes"][mesh]["primitives"])
+    for mesh in instances
+)
+assert 0 < expanded_triangles <= 60000, "Expanded mesh exceeds VR triangle budget"
 images = model["images"]
 assert len(images) == 1, "Expected one bounded embedded texture"
 texture_uri = images[0]["uri"]
@@ -103,6 +109,6 @@ while chunk := chunks.read(4):
         break
 assert found_end and payload, "PNG missing image data or end marker"
 assert len(zlib.decompress(payload)) > 0, "PNG data could not decompress"
-print(f"glTF validated: {triangles} source triangles, {len(instances)} instances, "
+print(f"glTF validated: {triangles} source / {expanded_triangles} placed triangles, {len(instances)} instances, "
       f"{len(data)} mesh bytes; {width}x{height} PNG")
 
