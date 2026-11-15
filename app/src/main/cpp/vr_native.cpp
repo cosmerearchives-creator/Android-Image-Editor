@@ -48,6 +48,15 @@ void batchMethod(JNIEnv* env,jobject activity,const char* name,
     if(env->ExceptionCheck()){env->ExceptionDescribe();env->ExceptionClear();}
     env->DeleteLocalRef(cls);
 }
+float galleryRadiusFromJava(JNIEnv* env,jobject activity,const char* name){
+    jclass cls=env->GetObjectClass(activity);
+    jmethodID method=env->GetMethodID(cls,name,"()I");
+    int cm=300;
+    if(method)cm=env->CallIntMethod(activity,method);
+    if(env->ExceptionCheck()){env->ExceptionDescribe();env->ExceptionClear();cm=300;}
+    env->DeleteLocalRef(cls);
+    return std::clamp(cm,250,500)/100.f;
+}
 int galleryThemeFromJava(JNIEnv* env,jobject activity,const char* name){
     jclass cls=env->GetObjectClass(activity);
     jmethodID method=env->GetMethodID(cls,name,"()I");
@@ -653,6 +662,7 @@ void run(JNIEnv* env, jobject activity) {
     vrui::Renderer menu;
     if (!menu.initialize()) throw "VR menu shader initialization";
     menu.galleryTheme=galleryThemeFromJava(env,activity,"loadGalleryTheme");
+    menu.galleryRadius=galleryRadiusFromJava(env,activity,"galleryRadiusCm");
     vrui::Page page = resumeImagePage.exchange(false) ? vrui::Page::Open : vrui::Page::Home;
     bool wasPressed = false;
     bool maskWasPainting=false;
@@ -1522,10 +1532,13 @@ void run(JNIEnv* env, jobject activity) {
                 menu.initializeGallery();
             if(galleryReady!=0 && (galleryReady==1||menu.galleryAvailable()) &&
                loadBatchView(env,activity,menu,galleryReady)){
-                if(galleryReady==3)
+                if(galleryReady==3){
                     menu.galleryTheme=galleryThemeFromJava(env,activity,"activeCylinderTheme");
-                else if(galleryReady==2)
+                    menu.galleryRadius=galleryRadiusFromJava(env,activity,"activeCylinderRadiusCm");
+                }else if(galleryReady==2){
                     menu.galleryTheme=galleryThemeFromJava(env,activity,"loadGalleryTheme");
+                    menu.galleryRadius=galleryRadiusFromJava(env,activity,"galleryRadiusCm");
+                }
                 page=galleryReady==1?vrui::Page::Wall:vrui::Page::Sphere;
                 panelPosition={0.f,0.f,-1.9f};
                 panelScale=galleryReady==1?3.7f:1.f;
@@ -1579,7 +1592,8 @@ void run(JNIEnv* env, jobject activity) {
                     float nx=galleryX+fx*inv*stick.currentState.y*dt*1.6f;
                     float nz=galleryZ+fz*inv*stick.currentState.y*dt*1.6f;
                     const float radius=std::hypot(nx,nz);
-                    if(radius>2.45f){nx*=2.45f/radius;nz*=2.45f/radius;}
+                    const float limit=menu.galleryRadius-.55f;
+                    if(radius>limit){nx*=limit/radius;nz*=limit/radius;}
                     galleryX=nx;galleryZ=nz;
                 }
             }
@@ -1605,10 +1619,13 @@ void run(JNIEnv* env, jobject activity) {
                     const float tangents[]={std::tan(view.fov.angleLeft),
                         std::tan(view.fov.angleRight),std::tan(view.fov.angleDown),
                         std::tan(view.fov.angleUp)};
+                    float cx=view.pose.position.x+galleryX;
+                    float cz=view.pose.position.z+galleryZ;
+                    const float total=std::hypot(cx,cz);
+                    const float eyeLimit=menu.galleryRadius-.25f;
+                    if(total>eyeLimit){cx*=eyeLimit/total;cz*=eyeLimit/total;}
                     const float camera[]={
-                        std::clamp(view.pose.position.x+galleryX,-2.45f,2.45f),
-                        std::clamp(view.pose.position.y+galleryY,-2.35f,2.35f),
-                        std::clamp(view.pose.position.z+galleryZ,-2.45f,2.45f)};
+                        cx,std::clamp(view.pose.position.y+galleryY,-2.35f,2.35f),cz};
                     menu.drawSphere(quaternion,tangents,eyeSign,camera,galleryYaw,galleryTime);
                 }else{
                     menu.draw((page==vrui::Page::Wall||detachedEditor)?
