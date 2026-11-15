@@ -4,9 +4,10 @@ The original six environments remain shader-driven. This milestone introduces a
 **real, indexed 3D mesh from a bundled glTF 2.0 asset** and renders it using a
 separate OpenGL ES 3.0 vertex/fragment pass after the cylinder panorama.
 
-## Current proof asset
+## Current museum scene
 - `app/src/main/assets/museum_pedestal.gltf`
-- A fluted limestone museum pedestal/column with material-colored surfaces.
+- A modular museum scene with fluted limestone columns and separate gold cornice geometry.
+- v0.13.0 supports multiple meshes, reusable scene nodes, nested grouping, and node transformations. The bundled scene exercises 14 instances of two mesh definitions.
 - Position, UV, and index geometry is interpreted from an embedded base64 glTF buffer.
 - v0.12.1 adds a real embedded PNG stone texture and per-vertex TEXCOORD_0 UVs; the optional OpenGL ES 3 renderer uploads and samples the decoded image.
 - The loading code is `GltfMesh.java`; the optional GL mesh renderer is in
@@ -21,10 +22,12 @@ separate OpenGL ES 3.0 vertex/fragment pass after the cylinder panorama.
 - `pbrMetallicRoughness.baseColorFactor` is interpreted as the material tint.
 - A single bounded embedded `data:image/png;base64` PNG (up to 512×512) is decoded through Android BitmapFactory and uploaded as a GL texture.
 - Float32 `TEXCOORD_0` VEC2 per-vertex UV coordinates are supported; material-specific images and full PBR remain future milestones.
-- Fixed vertex positions in meters with Y up and forward along -Z.
+- Scenes use Y-up positions in meters. Nested glTF nodes support `matrix` or translation/rotation/scale (TRS), baked into the bounded vertex stream.
 - Total decoded buffer <=2 MB; bounded index and vertex counts.
 - No external files, arbitrary network loads, animation, skinning, multiple
   textures, scene-node transforms, .glb, or full PBR yet.
+
+Scene transforms and mesh reuse still feed a single flattened GPU vertex stream; per-instance GPU draw batching and collision are separate future milestones.
 
 The limited subset is a **pipeline validation**, not a declaration that other
 glTF features are unsupported forever.
@@ -38,7 +41,7 @@ glTF features are unsupported forever.
 - CI runs `python3 scripts/verify-3d-assets.py` before building Android.
 
 ## Next implementation milestones
-1. Extend the parser to a validated general glTF 2.0 scene graph / .glb.
+1. Add a bounded .glb reader, interleaved and additional accessor formats, and scene graph test assets.
 2. Support multiple material textures and normal/roughness maps with total GPU texture budgets.
 3. Author detailed museum mesh sets externally in Blender or a compatible tool.
 4. Add mesh instancing / batching and distance-based detail switching.
