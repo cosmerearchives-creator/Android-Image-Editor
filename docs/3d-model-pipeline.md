@@ -7,7 +7,8 @@ separate OpenGL ES 3.0 vertex/fragment pass after the cylinder panorama.
 ## Current proof asset
 - `app/src/main/assets/museum_pedestal.gltf`
 - A fluted limestone museum pedestal/column with material-colored surfaces.
-- Position and index geometry is interpreted from an embedded base64 glTF buffer.
+- Position, UV, and index geometry is interpreted from an embedded base64 glTF buffer.
+- v0.12.1 adds a real embedded PNG stone texture and per-vertex TEXCOORD_0 UVs; the optional OpenGL ES 3 renderer uploads and samples the decoded image.
 - The loading code is `GltfMesh.java`; the optional GL mesh renderer is in
   `vr_ui.h` and is invoked per eye in `vr_native.cpp`.
 - Existing saved cylinders, imported images, model selection and gallery controls
@@ -17,11 +18,13 @@ separate OpenGL ES 3.0 vertex/fragment pass after the cylinder panorama.
 ## Supported glTF subset (intentional)
 - glTF 2.0 JSON with **one embedded data URI buffer**.
 - `TRIANGLES` primitives; `POSITION` float32 VEC3 and 16-bit unsigned indices.
-- `pbrMetallicRoughness.baseColorFactor` is interpreted as a simple color.
+- `pbrMetallicRoughness.baseColorFactor` is interpreted as the material tint.
+- A single bounded embedded `data:image/png;base64` PNG (up to 512×512) is decoded through Android BitmapFactory and uploaded as a GL texture.
+- Float32 `TEXCOORD_0` VEC2 per-vertex UV coordinates are supported; material-specific images and full PBR remain future milestones.
 - Fixed vertex positions in meters with Y up and forward along -Z.
 - Total decoded buffer <=2 MB; bounded index and vertex counts.
-- No external files, arbitrary network loads, animation, skinning, textures,
-  scene-node transforms, .glb, or full PBR yet.
+- No external files, arbitrary network loads, animation, skinning, multiple
+  textures, scene-node transforms, .glb, or full PBR yet.
 
 The limited subset is a **pipeline validation**, not a declaration that other
 glTF features are unsupported forever.
@@ -36,7 +39,7 @@ glTF features are unsupported forever.
 
 ## Next implementation milestones
 1. Extend the parser to a validated general glTF 2.0 scene graph / .glb.
-2. Add GPU UV texture and material support, bounded per-asset texture memory.
+2. Support multiple material textures and normal/roughness maps with total GPU texture budgets.
 3. Author detailed museum mesh sets externally in Blender or a compatible tool.
 4. Add mesh instancing / batching and distance-based detail switching.
 5. Add robust asset-version manifests and offline project references.
@@ -44,6 +47,6 @@ glTF features are unsupported forever.
 
 ## Testing
 Open VR home; enter Gallery; open a museum cylinder with Detailed 3D Scenery
-enabled. The imported mesh should appear as a small fluted stone/gold pedestal
+enabled. The imported mesh should appear as a small, PNG-textured fluted stone/gold pedestal
 in front of the wall. Turn Detailed 3D Scenery off and reopen to confirm the
 unchanged shader-only fallback. Reopen a saved cylinder and compare both eyes.
