@@ -663,6 +663,7 @@ void run(JNIEnv* env, jobject activity) {
     if (!menu.initialize()) throw "VR menu shader initialization";
     menu.galleryTheme=galleryThemeFromJava(env,activity,"loadGalleryTheme");
     menu.galleryRadius=galleryRadiusFromJava(env,activity,"galleryRadiusCm");
+    menu.galleryDetail=galleryThemeFromJava(env,activity,"gallerySceneryDetail")!=0;
     vrui::Page page = resumeImagePage.exchange(false) ? vrui::Page::Open : vrui::Page::Home;
     bool wasPressed = false;
     bool maskWasPainting=false;
@@ -1539,6 +1540,7 @@ void run(JNIEnv* env, jobject activity) {
                     menu.galleryTheme=galleryThemeFromJava(env,activity,"loadGalleryTheme");
                     menu.galleryRadius=galleryRadiusFromJava(env,activity,"galleryRadiusCm");
                 }
+                menu.galleryDetail=galleryThemeFromJava(env,activity,"gallerySceneryDetail")!=0;
                 page=galleryReady==1?vrui::Page::Wall:vrui::Page::Sphere;
                 panelPosition={0.f,0.f,-1.9f};
                 panelScale=galleryReady==1?3.7f:1.f;
