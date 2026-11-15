@@ -27,7 +27,9 @@ def accessor(index, kind, component):
     assert item["type"] == kind and item["componentType"] == component
     view = views[item["bufferView"]]
     offset = view.get("byteOffset", 0) + item.get("byteOffset", 0)
-    unit = (12 if component == 5126 else 2)
+    component_bytes = {5126: 4, 5123: 2}[component]
+    components = {"SCALAR": 1, "VEC2": 2, "VEC3": 3}[kind]
+    unit = component_bytes * components
     count = item["count"]
     stride = view.get("byteStride", unit)
     assert 0 <= offset < len(data) and 0 < count <= 180000
@@ -88,7 +90,7 @@ png_prefix = "data:image/png;base64,"
 assert texture_uri.startswith(png_prefix), "Texture must be embedded PNG"
 png = base64.b64decode(texture_uri[len(png_prefix):], validate=True)
 assert len(png) <= 1_000_000, "Embedded texture too large"
-assert png[:8] == b"\\x89PNG\\r\\n\\x1a\\n", "Bad PNG signature"
+assert png[:8] == b"\x89PNG\r\n\x1a\n", "Bad PNG signature"
 width, height = struct.unpack_from(">II", png, 16)
 assert 0 < width <= 512 and 0 < height <= 512, "Image dimensions out of bounds"
 chunks = io.BytesIO(png[8:])
