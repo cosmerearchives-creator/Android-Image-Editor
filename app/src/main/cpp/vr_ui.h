@@ -1238,28 +1238,63 @@ vec3 material(vec3 p,int face){
         return mix(marble,vec3(.31,.29,.27),tile);
     }
     if(galleryTheme==1){
-        // Nightclub: dark surfaces, vivid violet and cyan light tracks.
-        float neon=pow(max(0.,sin(p.x*8.0+p.z*4.0)),42.0);
-        vec3 lighting=vec3(.04,.7,.83)*neon+vec3(.65,.05,.78)*
-            pow(max(0.,sin(p.y*5.0+galleryTime*.45)),30.0);
-        return (face==2?vec3(.012,.02,.045):vec3(.035,.018,.075))+lighting;
+        // Club: ceiling LED strips, a lit dance-floor grid and wall washes.
+        if(face==2){
+            float xline=step(.955,fract(p.x*1.95));
+            float zline=step(.955,fract(p.z*1.95));
+            float pulse=.65+.35*sin(galleryTime*2.0);
+            return vec3(.025,.024,.060)+clamp(xline+zline,0.,1.)*
+                vec3(.15,.51,.80)*pulse;
+        }
+        if(face==1){
+            float bands=pow(abs(sin(p.x*4.0+p.z*1.5)),36.);
+            return vec3(.018,.025,.058)+bands*vec3(.52,.07,.65);
+        }
+        float wash=pow(max(0.,sin(p.y*4.+galleryTime*.5)),12.);
+        return vec3(.035,.018,.075)+wash*vec3(.11,.16,.37);
     }
     if(galleryTheme==2){
-        // Tiki: warm woven reeds and bamboo.
+        // Tiki: thatched canopy, weathered deck boards and bamboo screening.
+        if(face==1){
+            float thatch=pow(abs(sin(p.x*18.+p.z*9.)),17.);
+            return vec3(.32,.20,.072)+vec3(.19,.10,.035)*thatch;
+        }
+        if(face==2){
+            float seam=step(.97,fract(p.x*.85));
+            float grain=sin(p.z*11.+sin(p.x*3.)*.5)*.035;
+            return mix(vec3(.38,.21,.10)+vec3(grain),vec3(.11,.065,.035),seam);
+        }
         float reed=pow(stripe,24.0);
         float weave=pow(abs(sin(p.y*11.0+p.z*2.0)),26.0);
         return vec3(.28,.14,.055)+vec3(.18,.12,.045)*reed+
             vec3(.07,.055,.02)*weave;
     }
     if(galleryTheme==3){
-        // Fantastical fire-lit chamber: animated molten highlights.
+        // Volcanic room: cracked basalt with pulsing lava seams.
+        float crack=pow(abs(sin(p.x*5.8+p.z*4.4+
+            sin(p.y*4.2))),23.);
+        float pulse=.67+.33*sin(galleryTime*2.1);
+        if(face==2)return vec3(.09,.064,.079)+
+            vec3(.89,.18,.008)*crack*pulse;
+        if(face==1)return vec3(.13,.07,.09)+
+            vec3(.28,.065,.012)*pow(stripe,15.);
         float ember=pow(max(0.,sin(p.x*6.0+p.z*5.0+
             galleryTime*1.7+sin(p.y*4.0))),12.0);
-        return vec3(.12,.025,.065)+vec3(.88,.23,.012)*ember+
+        return vec3(.12,.025,.065)+vec3(.72,.17,.012)*ember+
             vec3(.14,.02,.1)*pow(stripe,14.0);
     }
     if(galleryTheme==4){
-        // Dungeon: mossy, large stone blocks with deep mortar.
+        // Dungeon: block masonry, rough flagged floor and vaulted ceiling.
+        if(face==2){
+            float seams=step(.94,fract(p.x*.78))+
+                step(.94,fract(p.z*.68+floor(p.x*.78)*.5));
+            return max(vec3(.035),vec3(.22,.25,.23)-
+                vec3(.15)*clamp(seams,0.,1.));
+        }
+        if(face==1){
+            float arch=abs(sin(atan(p.x,p.z)*6.));
+            return vec3(.13,.15,.16)+vec3(.10)*pow(arch,30.);
+        }
         float masonry=step(.91,fract(p.x*1.8+p.z*.9+
             floor(p.y*1.5)*.5))+step(.92,fract(p.y*1.5));
         float moss=pow(max(0.,sin(p.x*6.2+p.z*3.8)),18.0);
