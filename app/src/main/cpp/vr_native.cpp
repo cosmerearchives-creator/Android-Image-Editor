@@ -114,6 +114,36 @@ bool batchPixels(JNIEnv* env,jobject activity,bool spherical,bool depth,
     }
     return true;
 }
+bool tryLoadMuseumAsset(JNIEnv* env,jobject activity,vrui::Renderer& renderer){
+    if(renderer.environmentAttempted)return renderer.environmentVertices>0;
+    renderer.environmentAttempted=true;
+    jclass cls=env->GetObjectClass(activity);
+    jmethodID method=env->GetMethodID(cls,"loadMuseumMesh","()[F");
+    if(!method){
+        if(env->ExceptionCheck())env->ExceptionClear();
+        env->DeleteLocalRef(cls);return false;
+    }
+    jfloatArray data=static_cast<jfloatArray>(
+        env->CallObjectMethod(activity,method));
+    env->DeleteLocalRef(cls);
+    if(env->ExceptionCheck()){
+        env->ExceptionDescribe();env->ExceptionClear();return false;
+    }
+    if(!data)return false;
+    jsize count=env->GetArrayLength(data);
+    if(count<=0||count%6!=0||count>1080000){
+        env->DeleteLocalRef(data);return false;
+    }
+    std::vector<float> vertices(size_t(count));
+    env->GetFloatArrayRegion(data,0,count,vertices.data());
+    env->DeleteLocalRef(data);
+    if(env->ExceptionCheck()){
+        env->ExceptionDescribe();env->ExceptionClear();return false;
+    }
+    bool success=renderer.uploadMuseumMesh(vertices);
+    log(success?"Museum glTF mesh uploaded":"Museum glTF mesh disabled; shader fallback active");
+    return success;
+}
 bool loadBatchView(JNIEnv* env,jobject activity,vrui::Renderer& renderer,
                    int mode){
     const bool spherical=mode==2||mode==3;
@@ -1529,6 +1559,8 @@ void run(JNIEnv* env, jobject activity) {
             }
             if(depthNeedsReload.exchange(false))refreshDepth(env,activity,menu);
             const int galleryReady=batchReadyMode.exchange(0);
+            if(galleryReady>=2 && menu.galleryDetail)
+                tryLoadMuseumAsset(env,activity,menu);
             if(galleryReady==3 && !menu.galleryAvailable())
                 menu.initializeGallery();
             if(galleryReady!=0 && (galleryReady==1||menu.galleryAvailable()) &&
@@ -1629,6 +1661,7 @@ void run(JNIEnv* env, jobject activity) {
                     const float camera[]={
                         cx,std::clamp(view.pose.position.y+galleryY,-2.35f,2.35f),cz};
                     menu.drawSphere(quaternion,tangents,eyeSign,camera,galleryYaw,galleryTime);
+                    menu.drawMuseumMesh(quaternion,tangents,camera,galleryYaw);
                 }else{
                     menu.draw((page==vrui::Page::Wall||detachedEditor)?
                                   vrui::Page::Immersive:page,
