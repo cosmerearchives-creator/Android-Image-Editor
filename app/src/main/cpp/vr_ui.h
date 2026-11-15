@@ -702,6 +702,7 @@ struct Renderer {
     int depthStyle=0; // 0 natural, 1 exaggerated, 2 inverted - display transform only
     int batchState=0,batchProgress=0,batchCount=0,batchConverted=0;
     int galleryTheme=0; // 0 museum, 1 club, 2 tiki, 3 fire, 4 dungeon, 5 trees
+    float galleryRadius=3.f;
     bool advancedVisible=false;
     bool immersiveToolsVisible=false;
     bool selectionOverlayVisible=false;
@@ -1198,6 +1199,7 @@ uniform sampler2D panorama,panoDepth;
 uniform vec4 orientation,fovTangent;
 uniform vec3 cameraPosition;
 uniform float galleryYaw,eyeSign,styleScale,galleryTime;
+uniform float galleryRadius;
 uniform int styleInverted,galleryTheme;
 out vec4 frag;
 vec3 quat(vec3 v,vec4 q){vec3 t=2.0*cross(q.xyz,v);return v+q.w*t+cross(q.xyz,t);}
@@ -1257,7 +1259,7 @@ void main(){
  vec3 ray=normalize(vec3(mix(fovTangent.x,fovTangent.y,uv.x),mix(fovTangent.z,fovTangent.w,uv.y),-1.));
  ray=spin(normalize(quat(ray,orientation)),galleryYaw);
  vec3 eye=spin(cameraPosition,galleryYaw);
- float r=3.,h=2.7,t=1e8;
+ float r=galleryRadius,h=2.7,t=1e8;
  int face=0;
  float a=dot(ray.xz,ray.xz),b=2.*dot(eye.xz,ray.xz),c=dot(eye.xz,eye.xz)-r*r;
  float discriminant=b*b-4.*a*c;
@@ -1371,6 +1373,7 @@ void main(){
         glUniform1f(glGetUniformLocation(sphereProgram,"eyeSign"),eyeSign);
         glUniform3fv(glGetUniformLocation(sphereProgram,"cameraPosition"),1,cameraPosition);
         glUniform1f(glGetUniformLocation(sphereProgram,"galleryYaw"),galleryYaw);
+        glUniform1f(glGetUniformLocation(sphereProgram,"galleryRadius"),galleryRadius);
         glUniform1i(glGetUniformLocation(sphereProgram,"galleryTheme"),galleryTheme);
         glUniform1f(glGetUniformLocation(sphereProgram,"galleryTime"),elapsed);
         glUniform1f(glGetUniformLocation(sphereProgram,"styleScale"),
