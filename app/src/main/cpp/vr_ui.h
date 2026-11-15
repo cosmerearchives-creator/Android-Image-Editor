@@ -1284,6 +1284,77 @@ float orbHit(vec3 origin,vec3 direction,vec3 center,float radius){
     float farT=-bb+sqrt(d);
     return nearT>0.001?nearT:(farT>0.001?farT:1e8);
 }
+// Rectangular stone/plinth elements in museum-local coordinates. The returned
+// intersection participates in the same depth comparison as wall photographs.
+float museumBox(vec3 eye,vec3 ray,vec3 center,vec3 halfSize){
+    vec3 d=ray;
+    vec3 safeD=vec3(abs(d.x)<.00001?(d.x<0.?-.00001:.00001):d.x,
+                    abs(d.y)<.00001?(d.y<0.?-.00001:.00001):d.y,
+                    abs(d.z)<.00001?(d.z<0.?-.00001:.00001):d.z);
+    vec3 t0=(center-halfSize-eye)/safeD;
+    vec3 t1=(center+halfSize-eye)/safeD;
+    vec3 nearSide=min(t0,t1);
+    vec3 farSide=max(t0,t1);
+    float nearT=max(max(nearSide.x,nearSide.y),nearSide.z);
+    float farT=min(min(farSide.x,farSide.y),farSide.z);
+    if(farT<max(nearT,0.001))return 1e8;
+    return nearT>0.001?nearT:farT;
+}
+float museumArchitecture(vec3 eye,vec3 ray,float boundary,inout vec3 color){
+    float closest=boundary;
+    float r=galleryRadius;
+    // Eight display bays, each with a stone plinth, projecting entablature,
+    // base molding and a warm overhead architectural light.
+    for(int k=0;k<8;k++){
+        float a=(float(k)+.5)*.7853981634;
+        vec2 outward=vec2(sin(a),cos(a));
+        vec2 tangent=vec2(cos(a),-sin(a));
+        vec3 axis=vec3(tangent.x,0.,tangent.y);
+        vec3 normal=vec3(outward.x,0.,outward.y);
+        vec3 middle=normal*(r-.50);
+        vec3 localEye=vec3(dot(eye,axis),eye.y,dot(eye,normal));
+        vec3 localRay=vec3(dot(ray,axis),ray.y,dot(ray,normal));
+        float support=museumBox(localEye,localRay,
+            vec3(0.,-2.30,r-.47),vec3(.31,.28,.24));
+        if(support<closest){
+            closest=support;
+            color=vec3(.70,.64,.52);
+        }
+        float plinth=museumBox(localEye,localRay,
+            vec3(0.,-2.02,r-.49),vec3(.23,.065,.19));
+        if(plinth<closest){
+            closest=plinth;
+            color=vec3(.79,.70,.53);
+        }
+        float cornice=museumBox(localEye,localRay,
+            vec3(0.,2.49,r-.22),vec3(.84,.095,.30));
+        if(cornice<closest){
+            closest=cornice;
+            color=vec3(.79,.69,.49);
+        }
+        float upper=museumBox(localEye,localRay,
+            vec3(0.,2.30,r-.17),vec3(.72,.055,.18));
+        if(upper<closest){
+            closest=upper;
+            color=vec3(.57,.43,.24);
+        }
+        // Picture-light bar over every display bay.
+        float bar=museumBox(localEye,localRay,
+            vec3(0.,1.93,r-.37),vec3(.37,.035,.055));
+        if(bar<closest){
+            closest=bar;
+            color=vec3(.92,.77,.43);
+        }
+        // Ceiling coffers are spatially raised ribs, not a printed texture.
+        float ceilingRib=museumBox(localEye,localRay,
+            vec3(0.,2.60,r*.56),vec3(.055,.08,r*.40));
+        if(ceilingRib<closest){
+            closest=ceilingRib;
+            color=vec3(.73,.66,.51);
+        }
+    }
+    return closest;
+}
 float sculpture(vec3 eye,vec3 ray,float boundary,inout vec3 pigment){
     float closest=boundary;
     float r=galleryRadius;
@@ -1394,6 +1465,8 @@ void main(){
  vec3 color=mix(material(hit,face),photo.rgb,photo.a);
  vec3 propColor=vec3(0.);
  float prop=environmentDetail==1?sculpture(eye,ray,t,propColor):t;
+ if(galleryTheme==0 && environmentDetail==1)
+     prop=museumArchitecture(eye,ray,prop,propColor);
  if(prop<t)color=propColor;
  frag=vec4(color,1.);
 }
