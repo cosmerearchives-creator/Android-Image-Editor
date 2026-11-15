@@ -134,14 +134,15 @@ bool tryLoadMuseumAsset(JNIEnv* env,jobject activity,vrui::Renderer& renderer){
     if(count<=0||count%6!=0||count>1080000){
         env->DeleteLocalRef(data);return false;
     }
-    std::vector<float> vertices(size_t(count));
+    std::vector<float> vertices(static_cast<size_t>(count));
     env->GetFloatArrayRegion(data,0,count,vertices.data());
     env->DeleteLocalRef(data);
     if(env->ExceptionCheck()){
         env->ExceptionDescribe();env->ExceptionClear();return false;
     }
     bool success=renderer.uploadMuseumMesh(vertices);
-    log(success?"Museum glTF mesh uploaded":"Museum glTF mesh disabled; shader fallback active");
+    __android_log_print(ANDROID_LOG_INFO,"ImageEditorXR","%s",
+        success?"Museum glTF mesh uploaded":"Museum glTF mesh disabled; shader fallback active");
     return success;
 }
 bool loadBatchView(JNIEnv* env,jobject activity,vrui::Renderer& renderer,
