@@ -44,6 +44,17 @@ checks = {
         and "normalTexture" in renderer
         and "ormTexture" in renderer
         and "emissiveTexture" in renderer,
+    "imported CC BY chair JNI contract":
+        'GetMethodID(cls,"loadImportedChairMesh","()[F")' in native
+        and 'GetMethodID(cls,"loadImportedChairMap","(I)[I")' in native
+        and "uploadChairMesh(vertices)" in native
+        and "uploadChairMap(rgba,w,h,slot)" in native
+        and "float[] loadImportedChairMesh()" in activity
+        and "int[] loadImportedChairMap(int slot)" in activity
+        and "bool uploadChairMesh(" in renderer
+        and "bool uploadChairMap(" in renderer
+        and "void drawChair(" in renderer
+        and "menu.drawChair(" in native,
     "dynamic decorative detail threshold":
         "distance(cameraPosition,spin(detailAnchor.xyz,-galleryYaw))" in renderer
         and "detailAnchor.w>0.0" in renderer,
