@@ -706,6 +706,7 @@ struct Renderer {
     bool galleryDetail=true;
     // Optional glTF mesh pass, initialized only when a cylinder is opened.
     GLuint environmentProgram=0,environmentVao=0,environmentVbo=0,environmentTexture=0;
+    GLuint environmentMaterialMaps[3]{};
     GLsizei environmentVertices=0;
     bool environmentAttempted=false;
     int environmentTheme=-1;
@@ -718,6 +719,8 @@ struct Renderer {
             glDeleteTextures(1,&environmentTexture);
             environmentTexture=0;
         }
+        glDeleteTextures(3,environmentMaterialMaps);
+        for(auto& texture:environmentMaterialMaps)texture=0;
     }
     bool uploadEnvironmentMesh(const std::vector<float>& vertices){
         if(vertices.empty()||vertices.size()%20!=0||vertices.size()>3600000)
@@ -786,6 +789,10 @@ struct Renderer {
             uniform vec3 worldEye;
             uniform sampler2D baseTexture;
             uniform int hasTexture;
+            uniform sampler2D normalTexture;
+            uniform sampler2D ormTexture;
+            uniform sampler2D emissiveTexture;
+            uniform ivec3 hasMaterialMap;
             out vec4 frag;
             void main(){
                 vec3 tint=surfaceColor;
@@ -796,12 +803,26 @@ struct Renderer {
                 // Lightweight GGX microfacet lighting with Schlick Fresnel,
                 // glTF metallic/roughness factors and explicit emissive color.
                 vec3 albedo=pow(max(tint*detail,vec3(0.0)),vec3(2.2));
-                float metal=clamp(surfaceMetalRough.x,0.0,1.0);
-                float rough=max(.08,clamp(surfaceMetalRough.y,0.0,1.0));
+                vec3 packed=hasMaterialMap.y==1?
+                    texture(ormTexture,surfaceUV).rgb:vec3(1.0);
+                float occlusion=packed.r;
+                float metal=clamp(surfaceMetalRough.x*packed.b,0.0,1.0);
+                float rough=max(.08,clamp(surfaceMetalRough.y*packed.g,0.0,1.0));
                 vec3 n=normalize(surfaceNormal);
+                if(hasMaterialMap.x==1){
+                    vec3 texNormal=texture(normalTexture,surfaceUV).xyz*2.0-1.0;
+                    vec3 dp1=dFdx(surfaceWorldPosition),dp2=dFdy(surfaceWorldPosition);
+                    vec2 duv1=dFdx(surfaceUV),duv2=dFdy(surfaceUV);
+                    vec3 tangent=dp1*duv2.y-dp2*duv1.y;
+                    tangent=normalize(tangent-n*dot(n,tangent)+vec3(.00001));
+                    vec3 bitangent=normalize(cross(n,tangent));
+                    if(duv1.x*duv2.y-duv1.y*duv2.x<0.0)
+                        bitangent=-bitangent;
+                    n=normalize(mat3(tangent,bitangent,n)*texNormal);
+                }
                 vec3 v=normalize(worldEye-surfaceWorldPosition+vec3(0.0001));
                 vec3 f0=mix(vec3(.04),albedo,metal);
-                vec3 lit=albedo*(1.0-metal)*.14;
+                vec3 lit=albedo*(1.0-metal)*.14*occlusion;
                 vec3 lightDir[2]=vec3[2](
                     normalize(vec3(.65,.85,.45)),
                     normalize(vec3(-.65,.45,-.35)));
@@ -822,7 +843,8 @@ struct Renderer {
                     vec3 diffuse=(1.0-fresnel)*(1.0-metal)*albedo/3.14159265;
                     lit+=(diffuse+spec)*lightColor[i]*ndl;
                 }
-                lit+=surfaceEmissive;
+                lit+=surfaceEmissive*
+                    (hasMaterialMap.z==1?texture(emissiveTexture,surfaceUV).rgb:vec3(1.0));
                 frag=vec4(pow(max(lit,vec3(0.0)),vec3(1.0/2.2)),1.0);
             })";
             GLuint vert=shader(GL_VERTEX_SHADER,vs),frag=shader(GL_FRAGMENT_SHADER,fs);
@@ -885,10 +907,41 @@ struct Renderer {
         glActiveTexture(GL_TEXTURE0);
         return glGetError()==GL_NO_ERROR;
     }
+    bool uploadEnvironmentMaterialMap(const std::vector<uint8_t>& rgba,
+                                      int width,int height,int slot){
+        if(slot<1||slot>3||width<1||height<1||width>512||height>512||
+           rgba.size()!=size_t(width)*height*4u)return false;
+        GLuint& texture=environmentMaterialMaps[slot-1];
+        if(!texture)glGenTextures(1,&texture);
+        if(!texture)return false;
+        glActiveTexture(GL_TEXTURE2+slot);
+        glBindTexture(GL_TEXTURE_2D,texture);
+        glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_S,GL_REPEAT);
+        glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_T,GL_REPEAT);
+        glTexImage2D(GL_TEXTURE_2D,0,GL_RGBA8,width,height,0,GL_RGBA,
+            GL_UNSIGNED_BYTE,rgba.data());
+        glBindTexture(GL_TEXTURE_2D,0);
+        glActiveTexture(GL_TEXTURE0);
+        return glGetError()==GL_NO_ERROR;
+    }
     void drawEnvironmentMesh(const float* q,const float* tanFov,const float* camera,
                         float yaw){
         if(!environmentProgram||environmentVertices<=0||!galleryDetail||
            galleryTheme!=environmentTheme)return;
+        glUseProgram(environmentProgram);
+        glUniform1i(glGetUniformLocation(environmentProgram,"normalTexture"),3);
+        glUniform1i(glGetUniformLocation(environmentProgram,"ormTexture"),4);
+        glUniform1i(glGetUniformLocation(environmentProgram,"emissiveTexture"),5);
+        const GLint presence[]={environmentMaterialMaps[0]?1:0,
+            environmentMaterialMaps[1]?1:0,environmentMaterialMaps[2]?1:0};
+        glUniform3iv(glGetUniformLocation(environmentProgram,"hasMaterialMap"),
+            1,presence);
+        for(int slot=0;slot<3;++slot){
+            glActiveTexture(GL_TEXTURE3+slot);
+            glBindTexture(GL_TEXTURE_2D,environmentMaterialMaps[slot]);
+        }
         glUseProgram(environmentProgram);
         glUniform1i(glGetUniformLocation(environmentProgram,"baseTexture"),2);
         glUniform1i(glGetUniformLocation(environmentProgram,"hasTexture"),
@@ -908,6 +961,10 @@ struct Renderer {
         glDrawArrays(GL_TRIANGLES,0,environmentVertices);
         glBindVertexArray(0);
         glDisable(GL_DEPTH_TEST);
+        for(int slot=0;slot<3;++slot){
+            glActiveTexture(GL_TEXTURE3+slot);
+            glBindTexture(GL_TEXTURE_2D,0);
+        }
         glActiveTexture(GL_TEXTURE2);
         glBindTexture(GL_TEXTURE_2D,0);
         glActiveTexture(GL_TEXTURE0);
@@ -2592,6 +2649,7 @@ void main(){
     }
     ~Renderer(){clearMask();clearQuickDepth();
         if(environmentTexture)glDeleteTextures(1,&environmentTexture);
+        glDeleteTextures(3,environmentMaterialMaps);
         if(environmentVbo)glDeleteBuffers(1,&environmentVbo);
         if(environmentVao)glDeleteVertexArrays(1,&environmentVao);
         if(environmentProgram)glDeleteProgram(environmentProgram);
