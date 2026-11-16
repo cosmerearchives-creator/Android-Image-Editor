@@ -11,7 +11,8 @@ import java.nio.ByteOrder;
 /** Strict, offline glTF 2.0 proof-of-pipeline loader.
  * Supports embedded base64 buffer, float32 POSITION, unsigned-short indices,
  * baseColorFactor, TEXCOORD_0 and an embedded PNG texture on TRIANGLES.
- * Invalid assets never crash VR startup. Full scenes, glb, PBR, and animation are next.
+ * v0.15.0 uses a bounded 15-float vertex stream with optional detail LOD.
+ * Invalid assets fall back without interrupting VR startup.
  */
 public final class GltfMesh {
     private GltfMesh(){}
@@ -241,6 +242,22 @@ public final class GltfMesh {
                 int base=indexView.optInt("byteOffset",0)+indices.optInt("byteOffset",0);
                 if(base<0||(long)base+indexCount*2L>bytes.length)
                     throw new IllegalArgumentException("Indices out of bounds");
+                // Optional model-level distance LOD: retain structural meshes
+                // while culling decorative detail only when viewed remotely.
+                // glTF geometry is already transformed into room space.
+                final boolean optionalDetail=meshId==1;
+                float centerX=0,centerY=0,centerZ=0;
+                for(int v=0;v<vertexCount;v++){
+                    float vx=positions[v*3],vy=positions[v*3+1],vz=positions[v*3+2];
+                    centerX+=instance.matrix[0]*vx+instance.matrix[4]*vy+
+                        instance.matrix[8]*vz+instance.matrix[12];
+                    centerY+=instance.matrix[1]*vx+instance.matrix[5]*vy+
+                        instance.matrix[9]*vz+instance.matrix[13];
+                    centerZ+=instance.matrix[2]*vx+instance.matrix[6]*vy+
+                        instance.matrix[10]*vz+instance.matrix[14];
+                }
+                centerX/=vertexCount;centerY/=vertexCount;centerZ/=vertexCount;
+                final float detailRange=optionalDetail?3.35f:0f;
                 // Transform each indexed triangle once and compute a
                 // world-space flat normal for reliable low-cost museum light.
                 float[] m=instance.matrix;
@@ -274,13 +291,15 @@ public final class GltfMesh {
                         output.add(red);output.add(green);output.add(blue);
                         output.add(uv[index*2]);output.add(uv[index*2+1]);
                         output.add(nx);output.add(ny);output.add(nz);
+                        output.add(centerX);output.add(centerY);
+                        output.add(centerZ);output.add(detailRange);
                     }
-                    if(output.size()>1980000)
+                    if(output.size()>2700000)
                         throw new IllegalArgumentException("Scene triangle budget");
                 }
             }
         }
-        if(output.isEmpty()||output.size()>1980000)
+        if(output.isEmpty()||output.size()>2700000)
             throw new IllegalArgumentException("Empty or oversized mesh");
         float[] result=new float[output.size()];
         for(int i=0;i<result.length;i++)result[i]=output.get(i);
