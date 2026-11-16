@@ -28,6 +28,14 @@ checks = {
     "native renderer draw API":
         "menu.drawEnvironmentMesh(" in native
         and "void drawEnvironmentMesh(" in renderer,
+    "15-float scene vertex layout with detail anchor":
+        "count%15!=0||count>2700000" in native
+        and "vertices.size()%15!=0" in renderer
+        and "layout(location=4) in vec4 detailAnchor;" in renderer
+        and "environmentVertices=static_cast<GLsizei>(vertices.size()/15)" in renderer,
+    "dynamic decorative detail threshold":
+        "distance(cameraPosition,spin(detailAnchor.xyz,-galleryYaw))" in renderer
+        and "detailAnchor.w>0.0" in renderer,
     "Java activity mesh/texture API":
         "float[] loadEnvironmentMesh(int theme)" in activity
         and "int[] loadEnvironmentTexture(int theme)" in activity,
