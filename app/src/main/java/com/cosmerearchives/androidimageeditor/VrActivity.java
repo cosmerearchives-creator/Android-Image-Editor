@@ -102,6 +102,14 @@ public final class VrActivity extends Activity {
         }
     }
     @SuppressWarnings("unused")
+    public int[] loadEnvironmentMaterialMap(int theme,int slot){
+        try{return GltfMesh.loadEnvironmentMaterialMap(getApplicationContext(),theme,slot);}
+        catch(Exception error){
+            Log.e(TAG,"Optional material map unavailable; using material factors",error);
+            return null;
+        }
+    }
+    @SuppressWarnings("unused")
     public int activeCylinderTheme(){
         return activeSavedCylinder>=0
             ?BatchStore.savedCylinderTheme(getApplicationContext(),activeSavedCylinder)
