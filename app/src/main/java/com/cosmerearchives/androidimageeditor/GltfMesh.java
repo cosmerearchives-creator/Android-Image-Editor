@@ -428,10 +428,10 @@ public final class GltfMesh {
                                 JSONObject mat=materials.getJSONObject(
                                     primitive.getInt("material"));
                                 JSONObject pbr=mat.optJSONObject("pbrMetallicRoughness");
-                                JSONObject base=pbr==null?null:
-                                    pbr.optJSONObject("baseColorTexture");
-                                JSONObject ext=base==null?null:
-                                    base.optJSONObject("extensions");
+                                JSONObject baseColorTexture=pbr==null?null:
+                                     pbr.optJSONObject("baseColorTexture");
+                                JSONObject ext=baseColorTexture==null?null:
+                                     baseColorTexture.optJSONObject("extensions");
                                 JSONObject transform=ext==null?null:
                                     ext.optJSONObject("KHR_texture_transform");
                                 if(transform!=null){
