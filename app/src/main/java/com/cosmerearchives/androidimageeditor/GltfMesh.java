@@ -170,8 +170,73 @@ public final class GltfMesh {
             throw new IllegalArgumentException("Invalid scene size");
         return output;
     }
+    private static JSONObject importedChair;
+    private static JSONObject readImportedChair(Context context) throws Exception {
+        if(importedChair==null){
+            try(InputStream stream=context.getAssets().open("real_chair_damask.gltf")){
+                java.io.ByteArrayOutputStream out=new java.io.ByteArrayOutputStream();
+                byte[] chunk=new byte[8192];int n;
+                while((n=stream.read(chunk))!=-1)out.write(chunk,0,n);
+                if(out.size()>4_000_000)
+                    throw new IllegalArgumentException("Imported asset exceeds budget");
+                importedChair=new JSONObject(new String(out.toByteArray(),
+                    java.nio.charset.StandardCharsets.UTF_8));
+            }
+        }
+        return importedChair;
+    }
+    /** Imported externally authored chair, not generated primitive geometry. */
+    public static float[] loadImportedChairMesh(Context context) throws Exception {
+        return buildMesh(readImportedChair(context),true);
+    }
+    public static int[] loadImportedChairMap(Context context,int slot) throws Exception {
+        if(slot<0||slot>3)throw new IllegalArgumentException("Invalid chair map");
+        if(slot==3)return null; // Authored chair has no emissive material.
+        JSONObject doc=readImportedChair(context);
+        final int[][] sourceIds={{2,-1,6,8},{0,-1,5,-1},{3,4,7,-1}};
+        final int[] sources=sourceIds[slot];
+        JSONArray images=doc.getJSONArray("images");
+        android.graphics.Bitmap atlas=android.graphics.Bitmap.createBitmap(
+            512,512,android.graphics.Bitmap.Config.ARGB_8888);
+        try{
+            android.graphics.Canvas canvas=new android.graphics.Canvas(atlas);
+            android.graphics.Paint paint=new android.graphics.Paint(
+                android.graphics.Paint.FILTER_BITMAP_FLAG);
+            int neutral=slot==0?0xffffffff:
+                slot==1?0xff8080ff:0xffffb800;
+            canvas.drawColor(neutral);
+            for(int tile=0;tile<4;tile++){
+                if(sources[tile]<0)continue;
+                String uri=images.getJSONObject(sources[tile]).getString("uri");
+                String prefix="data:image/jpeg;base64,";
+                if(!uri.startsWith(prefix))
+                    throw new IllegalArgumentException("Chair JPEG not embedded");
+                byte[] jpg=Base64.decode(uri.substring(prefix.length()),Base64.DEFAULT);
+                if(jpg.length>1_000_000)
+                    throw new IllegalArgumentException("Chair map too large");
+                android.graphics.BitmapFactory.Options options=
+                    new android.graphics.BitmapFactory.Options();
+                options.inSampleSize=2;
+                android.graphics.Bitmap source=
+                    android.graphics.BitmapFactory.decodeByteArray(jpg,0,jpg.length,options);
+                if(source==null)throw new IllegalArgumentException("Invalid chair JPG");
+                try{
+                    int left=(tile%2)*256,top=(tile/2)*256;
+                    canvas.drawBitmap(source,null,
+                        new android.graphics.Rect(left,top,left+256,top+256),paint);
+                }finally{source.recycle();}
+            }
+            int[] result=new int[512*512+2];
+            result[0]=512;result[1]=512;
+            atlas.getPixels(result,2,512,0,0,512,512);
+            return result;
+        }finally{atlas.recycle();}
+    }
     public static float[] loadEnvironment(Context context,int theme) throws Exception {
-        JSONObject doc=readEnvironment(context,theme);
+        return buildMesh(readEnvironment(context,theme),false);
+    }
+    private static float[] buildMesh(JSONObject doc,boolean isImportedChair)
+            throws Exception {
         // Reject unsafe/nonfinite transforms before they reach the GPU.
         // A single invalid imported node must not corrupt the VR render pass.
         for(Instance instance:sceneInstances(doc)){
@@ -334,6 +399,11 @@ public final class GltfMesh {
                         float wx=m[0]*px+m[4]*py+m[8]*pz+m[12];
                         float wy=m[1]*px+m[5]*py+m[9]*pz+m[13];
                         float wz=m[2]*px+m[6]*py+m[10]*pz+m[14];
+                        if(isImportedChair){
+                            wx=wx*1.45f+1.30f;
+                            wy=wy*1.45f-1.90f;
+                            wz=wz*1.45f-1.35f;
+                        }
                         if(!Float.isFinite(wx)||!Float.isFinite(wy)||!Float.isFinite(wz))
                             throw new IllegalArgumentException("Nonfinite model geometry");
                         tri[corner*3]=wx;tri[corner*3+1]=wy;tri[corner*3+2]=wz;
@@ -353,6 +423,31 @@ public final class GltfMesh {
                             // Two-pixel tile gutters prevent bilinear color
                             // bleed; repeat source UV within each material.
                             float u=uv[index*2],v=uv[index*2+1];
+                            if(isImportedChair&&materials!=null&&
+                               primitive.has("material")){
+                                JSONObject mat=materials.getJSONObject(
+                                    primitive.getInt("material"));
+                                JSONObject pbr=mat.optJSONObject("pbrMetallicRoughness");
+                                JSONObject base=pbr==null?null:
+                                    pbr.optJSONObject("baseColorTexture");
+                                JSONObject ext=base==null?null:
+                                    base.optJSONObject("extensions");
+                                JSONObject transform=ext==null?null:
+                                    ext.optJSONObject("KHR_texture_transform");
+                                if(transform!=null){
+                                    JSONArray scale=transform.optJSONArray("scale");
+                                    JSONArray offsetUV=transform.optJSONArray("offset");
+                                    float su=scale==null?1:(float)scale.getDouble(0);
+                                    float sv=scale==null?1:(float)scale.getDouble(1);
+                                    float angle=(float)transform.optDouble("rotation",0);
+                                    float cu=(float)Math.cos(angle),si=(float)Math.sin(angle);
+                                    float uu=u*su,vv=v*sv;
+                                    u=cu*uu-si*vv+(offsetUV==null?0:
+                                        (float)offsetUV.getDouble(0));
+                                    v=si*uu+cu*vv+(offsetUV==null?0:
+                                        (float)offsetUV.getDouble(1));
+                                }
+                            }
                             u=u-(float)Math.floor(u);
                             v=v-(float)Math.floor(v);
                             float tileU=(u*.96875f+.015625f)*.5f+
