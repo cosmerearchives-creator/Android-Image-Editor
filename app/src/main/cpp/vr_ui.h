@@ -708,6 +708,10 @@ struct Renderer {
     GLuint environmentProgram=0,environmentVao=0,environmentVbo=0,environmentTexture=0;
     GLuint environmentMaterialMaps[3]{};
     GLsizei environmentVertices=0;
+    // Independently authored, externally sourced chair asset (Museum only).
+    GLuint chairVao=0,chairVbo=0,chairMaps[4]{};
+    GLsizei chairVertices=0;
+    bool chairAttempted=false;
     bool environmentAttempted=false;
     int environmentTheme=-1;
     void resetEnvironmentScene(int theme){
@@ -925,6 +929,50 @@ struct Renderer {
         glBindTexture(GL_TEXTURE_2D,0);
         glActiveTexture(GL_TEXTURE0);
         return glGetError()==GL_NO_ERROR;
+    }
+    bool uploadChairMesh(const std::vector<float>& vertices){
+        GLuint oldVao=environmentVao,oldVbo=environmentVbo;
+        GLsizei oldVertices=environmentVertices;
+        environmentVao=chairVao;environmentVbo=chairVbo;
+        bool okay=uploadEnvironmentMesh(vertices);
+        chairVao=environmentVao;chairVbo=environmentVbo;
+        chairVertices=okay?environmentVertices:0;
+        environmentVao=oldVao;environmentVbo=oldVbo;
+        environmentVertices=oldVertices;
+        return okay;
+    }
+    bool uploadChairMap(const std::vector<uint8_t>& rgba,int w,int h,int slot){
+        if(slot<0||slot>3)return false;
+        bool okay=false;
+        if(slot==0){
+            GLuint old=environmentTexture;
+            environmentTexture=chairMaps[0];
+            okay=uploadEnvironmentTexture(rgba,w,h);
+            chairMaps[0]=environmentTexture;
+            environmentTexture=old;
+        }else{
+            GLuint old=environmentMaterialMaps[slot-1];
+            environmentMaterialMaps[slot-1]=chairMaps[slot];
+            okay=uploadEnvironmentMaterialMap(rgba,w,h,slot);
+            chairMaps[slot]=environmentMaterialMaps[slot-1];
+            environmentMaterialMaps[slot-1]=old;
+        }
+        return okay;
+    }
+    void drawChair(const float* q,const float* tanFov,const float* camera,
+                   float yaw){
+        if(galleryTheme!=0||!chairVertices||!chairMaps[0])return;
+        GLuint oldVao=environmentVao,oldTexture=environmentTexture;
+        GLuint oldMaps[3]{environmentMaterialMaps[0],
+            environmentMaterialMaps[1],environmentMaterialMaps[2]};
+        GLsizei oldVertices=environmentVertices;
+        environmentVao=chairVao;environmentVertices=chairVertices;
+        environmentTexture=chairMaps[0];
+        for(int i=0;i<3;i++)environmentMaterialMaps[i]=chairMaps[i+1];
+        drawEnvironmentMesh(q,tanFov,camera,yaw);
+        environmentVao=oldVao;environmentTexture=oldTexture;
+        environmentVertices=oldVertices;
+        for(int i=0;i<3;i++)environmentMaterialMaps[i]=oldMaps[i];
     }
     void drawEnvironmentMesh(const float* q,const float* tanFov,const float* camera,
                         float yaw){
@@ -2650,6 +2698,9 @@ void main(){
     ~Renderer(){clearMask();clearQuickDepth();
         if(environmentTexture)glDeleteTextures(1,&environmentTexture);
         glDeleteTextures(3,environmentMaterialMaps);
+        glDeleteTextures(4,chairMaps);
+        if(chairVbo)glDeleteBuffers(1,&chairVbo);
+        if(chairVao)glDeleteVertexArrays(1,&chairVao);
         if(environmentVbo)glDeleteBuffers(1,&environmentVbo);
         if(environmentVao)glDeleteVertexArrays(1,&environmentVao);
         if(environmentProgram)glDeleteProgram(environmentProgram);
