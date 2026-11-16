@@ -248,6 +248,21 @@ public final class GltfMesh {
                         uv[i*2+1]=binary.getFloat(uvOffset+i*uvStride+4);
                     }
                 }
+                // Optional per-material texture-atlas slots share three
+                // bounded GL textures rather than one draw/texture per object.
+                int atlasSlot=-1;
+                JSONObject atlas=doc.optJSONObject("extras");
+                if(atlas!=null)atlas=atlas.optJSONObject("materialAtlas");
+                if(atlas!=null&&primitive.has("material")){
+                    JSONArray slots=atlas.getJSONArray("materialSlots");
+                    int materialId=primitive.getInt("material");
+                    if(atlas.getInt("columns")!=2||atlas.getInt("rows")!=2||
+                       materialId<0||materialId>=slots.length())
+                        throw new IllegalArgumentException("Invalid material atlas");
+                    atlasSlot=slots.getInt(materialId);
+                    if(atlasSlot<0||atlasSlot>3)
+                        throw new IllegalArgumentException("Invalid atlas tile");
+                }
                 float red=.75f,green=.66f,blue=.48f;
                 float metallic=0f,roughness=.8f,emR=0f,emG=0f,emB=0f;
                 if(materials!=null&&primitive.has("material")){
@@ -334,7 +349,20 @@ public final class GltfMesh {
                         output.add(tri[corner*3]);output.add(tri[corner*3+1]);
                         output.add(tri[corner*3+2]);
                         output.add(red);output.add(green);output.add(blue);
-                        output.add(uv[index*2]);output.add(uv[index*2+1]);
+                        if(atlasSlot>=0){
+                            // Two-pixel tile gutters prevent bilinear color
+                            // bleed; repeat source UV within each material.
+                            float u=uv[index*2],v=uv[index*2+1];
+                            u=u-(float)Math.floor(u);
+                            v=v-(float)Math.floor(v);
+                            float tileU=(u*.96875f+.015625f)*.5f+
+                                (atlasSlot%2)*.5f;
+                            float tileV=(v*.96875f+.015625f)*.5f+
+                                (atlasSlot/2)*.5f;
+                            output.add(tileU);output.add(tileV);
+                        }else{
+                            output.add(uv[index*2]);output.add(uv[index*2+1]);
+                        }
                         output.add(nx);output.add(ny);output.add(nz);
                         output.add(centerX);output.add(centerY);
                         output.add(centerZ);output.add(detailRange);
