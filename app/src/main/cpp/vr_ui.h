@@ -720,7 +720,7 @@ struct Renderer {
         }
     }
     bool uploadEnvironmentMesh(const std::vector<float>& vertices){
-        if(vertices.empty()||vertices.size()%11!=0||vertices.size()>1980000)
+        if(vertices.empty()||vertices.size()%15!=0||vertices.size()>2700000)
             return false;
         if(!environmentProgram){
             const char* vs=R"(#version 300 es
@@ -729,6 +729,7 @@ struct Renderer {
             layout(location=1) in vec3 baseColor;
             layout(location=2) in vec2 texcoord;
             layout(location=3) in vec3 meshNormal;
+            layout(location=4) in vec4 detailAnchor;
             uniform vec4 orientation;
             uniform vec3 cameraPosition;
             uniform vec4 fovTangent;
@@ -756,6 +757,12 @@ struct Renderer {
                 float clipZ=(farPlane+nearPlane)/(nearPlane-farPlane)*view.z+
                     2.0*farPlane*nearPlane/(nearPlane-farPlane);
                 gl_Position=vec4(px*depth,py*depth,clipZ,depth);
+                // Structural meshes have threshold 0 and always remain.
+                // Hide distant decorative mesh rasterization in both eyes.
+                if(detailAnchor.w>0.0 &&
+                   distance(cameraPosition,spin(detailAnchor.xyz,-galleryYaw))>
+                       detailAnchor.w)
+                    gl_Position=vec4(2.0,2.0,2.0,1.0);
                 surfaceColor=baseColor;
                 surfaceUV=texcoord;
                 surfaceNormal=meshNormal;
@@ -801,19 +808,22 @@ struct Renderer {
         glBindBuffer(GL_ARRAY_BUFFER,environmentVbo);
         glBufferData(GL_ARRAY_BUFFER,vertices.size()*sizeof(float),vertices.data(),GL_STATIC_DRAW);
         glEnableVertexAttribArray(0);
-        glVertexAttribPointer(0,3,GL_FLOAT,GL_FALSE,11*sizeof(float),(void*)0);
+        glVertexAttribPointer(0,3,GL_FLOAT,GL_FALSE,15*sizeof(float),(void*)0);
         glEnableVertexAttribArray(1);
-        glVertexAttribPointer(1,3,GL_FLOAT,GL_FALSE,11*sizeof(float),
+        glVertexAttribPointer(1,3,GL_FLOAT,GL_FALSE,15*sizeof(float),
             reinterpret_cast<void*>(3*sizeof(float)));
         glEnableVertexAttribArray(2);
-        glVertexAttribPointer(2,2,GL_FLOAT,GL_FALSE,11*sizeof(float),
+        glVertexAttribPointer(2,2,GL_FLOAT,GL_FALSE,15*sizeof(float),
             reinterpret_cast<void*>(6*sizeof(float)));
         glEnableVertexAttribArray(3);
-        glVertexAttribPointer(3,3,GL_FLOAT,GL_FALSE,11*sizeof(float),
+        glVertexAttribPointer(3,3,GL_FLOAT,GL_FALSE,15*sizeof(float),
             reinterpret_cast<void*>(8*sizeof(float)));
+        glEnableVertexAttribArray(4);
+        glVertexAttribPointer(4,4,GL_FLOAT,GL_FALSE,15*sizeof(float),
+            reinterpret_cast<void*>(11*sizeof(float)));
         glBindVertexArray(0);
         glBindBuffer(GL_ARRAY_BUFFER,0);
-        environmentVertices=static_cast<GLsizei>(vertices.size()/11);
+        environmentVertices=static_cast<GLsizei>(vertices.size()/15);
         return true;
     }
     bool uploadEnvironmentTexture(const std::vector<uint8_t>& rgba,int width,int height){
