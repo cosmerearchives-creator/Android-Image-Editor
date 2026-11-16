@@ -39,10 +39,38 @@ public final class GltfMesh {
         return doc;
     }
     public static int[] loadEnvironmentTexture(Context context,int theme) throws Exception{
+        return loadEnvironmentMaterialMap(context,theme,0);
+    }
+    /** Optional glTF material images: 0 base color, 1 normal, 2 packed
+     * occlusion-roughness-metallic, 3 emissive. Bound to the first material's
+     * texture definitions; future builds add full per-primitive textures. */
+    public static int[] loadEnvironmentMaterialMap(Context context,int theme,int slot)
+            throws Exception{
+        if(slot<0||slot>3)throw new IllegalArgumentException("Unknown material slot");
         JSONObject doc=readEnvironment(context,theme);
+        JSONArray materials=doc.optJSONArray("materials");
+        JSONArray textures=doc.optJSONArray("textures");
         JSONArray images=doc.optJSONArray("images");
         if(images==null||images.length()==0)return null;
-        String uri=images.getJSONObject(0).getString("uri");
+        int imageIndex=0;
+        if(slot>0){
+            if(materials==null||materials.length()==0||textures==null)return null;
+            JSONObject mat=materials.getJSONObject(0),spec=null;
+            if(slot==1)spec=mat.optJSONObject("normalTexture");
+            if(slot==2){
+                JSONObject pbr=mat.optJSONObject("pbrMetallicRoughness");
+                if(pbr!=null)spec=pbr.optJSONObject("metallicRoughnessTexture");
+            }
+            if(slot==3)spec=mat.optJSONObject("emissiveTexture");
+            if(spec==null)return null;
+            int texIndex=spec.getInt("index");
+            if(texIndex<0||texIndex>=textures.length())
+                throw new IllegalArgumentException("Invalid texture reference");
+            imageIndex=textures.getJSONObject(texIndex).getInt("source");
+        }
+        if(imageIndex<0||imageIndex>=images.length())
+            throw new IllegalArgumentException("Invalid image reference");
+        String uri=images.getJSONObject(imageIndex).getString("uri");
         String prefix="data:image/png;base64,";
         if(!uri.startsWith(prefix))
             throw new IllegalArgumentException("Only embedded PNG images supported");
