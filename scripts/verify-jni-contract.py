@@ -28,11 +28,22 @@ checks = {
     "native renderer draw API":
         "menu.drawEnvironmentMesh(" in native
         and "void drawEnvironmentMesh(" in renderer,
-    "15-float scene vertex layout with detail anchor":
-        "count%15!=0||count>2700000" in native
-        and "vertices.size()%15!=0" in renderer
+    "20-float PBR vertex layout with detail anchor":
+        "count%20!=0||count>3600000" in native
+        and "vertices.size()%20!=0" in renderer
         and "layout(location=4) in vec4 detailAnchor;" in renderer
-        and "environmentVertices=static_cast<GLsizei>(vertices.size()/15)" in renderer,
+        and "environmentVertices=static_cast<GLsizei>(vertices.size()/20)" in renderer,
+    "optional PBR material JNI slots":
+        '"loadEnvironmentMaterialMap","(II)[I"' in native
+        and "uploadEnvironmentMaterialMap(rgba,w,h,slot)" in native
+        and "bool uploadEnvironmentMaterialMap(" in renderer
+        and "int[] loadEnvironmentMaterialMap(int theme,int slot)" in activity,
+    "PBR material shader inputs":
+        "layout(location=5) in vec2 metalRough;" in renderer
+        and "layout(location=6) in vec3 emissive;" in renderer
+        and "normalTexture" in renderer
+        and "ormTexture" in renderer
+        and "emissiveTexture" in renderer,
     "dynamic decorative detail threshold":
         "distance(cameraPosition,spin(detailAnchor.xyz,-galleryYaw))" in renderer
         and "detailAnchor.w>0.0" in renderer,
