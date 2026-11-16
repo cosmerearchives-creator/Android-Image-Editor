@@ -1,0 +1,21 @@
+Third-party asset — Chair Damask Purplegold
+------------------------------------------
+Model and textures: Eric Chadwick
+Copyright: © 2021 Wayfair
+License: Creative Commons Attribution 4.0 International (CC BY 4.0)
+License terms: https://creativecommons.org/licenses/by/4.0/
+Original source: https://github.com/KhronosGroup/glTF-Sample-Assets/tree/main/Models/ChairDamaskPurplegold
+
+The authors do not endorse Android VR Collage.
+
+Modifications made for Android VR Collage:
+- Original glTF resources embedded in one offline glTF data file.
+- Original image resources stored as embedded JPEG data; converted to
+  reduced-resolution runtime texture atlases for Quest 2 rendering.
+- Importer applies a position/scale transform for the Museum test scene.
+- Importer approximates KHR_texture_transform and material lighting.
+- The application does not yet implement the source asset's full sheen
+  and specular glTF extensions.
+
+The source geometry and original source JPEGs are included so the asset
+is distinct from the application's procedurally generated primitives.
