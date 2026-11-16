@@ -11,7 +11,7 @@ import java.nio.ByteOrder;
 /** Strict, offline glTF 2.0 proof-of-pipeline loader.
  * Supports embedded base64 buffer, float32 POSITION, unsigned-short indices,
  * baseColorFactor, TEXCOORD_0 and an embedded PNG texture on TRIANGLES.
- * v0.15.0 uses a bounded 15-float vertex stream with optional detail LOD.
+ * v0.15.0 uses a bounded 20-float vertex stream with optional detail LOD.
  * Invalid assets fall back without interrupting VR startup.
  */
 public final class GltfMesh {
@@ -221,6 +221,7 @@ public final class GltfMesh {
                     }
                 }
                 float red=.75f,green=.66f,blue=.48f;
+                float metallic=0f,roughness=.8f,emR=0f,emG=0f,emB=0f;
                 if(materials!=null&&primitive.has("material")){
                     JSONObject material=materials.getJSONObject(primitive.getInt("material"));
                     JSONObject pbr=material.optJSONObject("pbrMetallicRoughness");
@@ -228,8 +229,24 @@ public final class GltfMesh {
                         JSONArray rgba=pbr.optJSONArray("baseColorFactor");
                         if(rgba!=null){red=(float)rgba.getDouble(0);
                             green=(float)rgba.getDouble(1);blue=(float)rgba.getDouble(2);}
+                        metallic=(float)pbr.optDouble("metallicFactor",1.0);
+                        roughness=(float)pbr.optDouble("roughnessFactor",1.0);
+                    }
+                    JSONArray emissive=material.optJSONArray("emissiveFactor");
+                    if(emissive!=null&&emissive.length()==3){
+                        emR=(float)emissive.getDouble(0);
+                        emG=(float)emissive.getDouble(1);
+                        emB=(float)emissive.getDouble(2);
                     }
                 }
+                if(!Float.isFinite(metallic)||!Float.isFinite(roughness)||
+                   !Float.isFinite(emR)||!Float.isFinite(emG)||!Float.isFinite(emB))
+                    throw new IllegalArgumentException("Invalid material factors");
+                metallic=Math.max(0,Math.min(1,metallic));
+                roughness=Math.max(.08f,Math.min(1,roughness));
+                emR=Math.max(0,Math.min(4,emR));
+                emG=Math.max(0,Math.min(4,emG));
+                emB=Math.max(0,Math.min(4,emB));
                 if(!primitive.has("indices"))throw new IllegalArgumentException("Indexed geometry required");
                 JSONObject indices=accessors.getJSONObject(primitive.getInt("indices"));
                 if(indices.getInt("componentType")!=5123||
@@ -293,13 +310,15 @@ public final class GltfMesh {
                         output.add(nx);output.add(ny);output.add(nz);
                         output.add(centerX);output.add(centerY);
                         output.add(centerZ);output.add(detailRange);
+                        output.add(metallic);output.add(roughness);
+                        output.add(emR);output.add(emG);output.add(emB);
                     }
-                    if(output.size()>2700000)
+                    if(output.size()>3600000)
                         throw new IllegalArgumentException("Scene triangle budget");
                 }
             }
         }
-        if(output.isEmpty()||output.size()>2700000)
+        if(output.isEmpty()||output.size()>3600000)
             throw new IllegalArgumentException("Empty or oversized mesh");
         float[] result=new float[output.size()];
         for(int i=0;i<result.length;i++)result[i]=output.get(i);
