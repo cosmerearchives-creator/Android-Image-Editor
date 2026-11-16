@@ -94,35 +94,46 @@ def validate(path):
     )
     assert 0 < expanded_triangles <= 60000, "Expanded mesh exceeds VR triangle budget"
     images = model["images"]
-    assert len(images) == 1, "Expected one bounded embedded texture"
-    texture_uri = images[0]["uri"]
+    assert 1 <= len(images) <= 4, "Texture count exceeds Quest budget"
+    textures = model.get("textures", [])
+    for texture in textures:
+        assert 0 <= texture["source"] < len(images), "Invalid image reference"
+    if path.name == "museum_pedestal.gltf":
+        first = model["materials"][0]
+        assert "normalTexture" in first, "Museum normal map missing"
+        assert "metallicRoughnessTexture" in first["pbrMetallicRoughness"], (
+            "Museum ORM map missing")
     png_prefix = "data:image/png;base64,"
-    assert texture_uri.startswith(png_prefix), "Texture must be embedded PNG"
-    png = base64.b64decode(texture_uri[len(png_prefix):], validate=True)
-    assert len(png) <= 1_000_000, "Embedded texture too large"
-    assert png[:8] == b"\x89PNG\r\n\x1a\n", "Bad PNG signature"
-    width, height = struct.unpack_from(">II", png, 16)
-    assert 0 < width <= 512 and 0 < height <= 512, "Image dimensions out of bounds"
-    chunks = io.BytesIO(png[8:])
-    payload = bytearray()
-    found_end = False
-    while chunk := chunks.read(4):
-        length = struct.unpack(">I", chunk)[0]
-        assert length <= 1_000_000, "PNG chunk too large"
-        kind = chunks.read(4)
-        body = chunks.read(length)
-        crc = chunks.read(4)
-        assert len(body) == length and len(crc) == 4
-        assert zlib.crc32(kind + body) == struct.unpack(">I", crc)[0], "Invalid PNG CRC"
-        if kind == b"IDAT":
-            payload.extend(body)
-        if kind == b"IEND":
-            found_end = True
-            break
-    assert found_end and payload, "PNG missing image data or end marker"
-    assert len(zlib.decompress(payload)) > 0, "PNG data could not decompress"
+    for image in images:
+        texture_uri = image["uri"]
+        assert texture_uri.startswith(png_prefix), "Texture must be embedded PNG"
+        png = base64.b64decode(texture_uri[len(png_prefix):], validate=True)
+        assert len(png) <= 1_000_000, "Embedded texture too large"
+        assert png[:8] == bytes((137,80,78,71,13,10,26,10)), "Bad PNG signature"
+        width, height = struct.unpack_from(">II", png, 16)
+        assert 0 < width <= 512 and 0 < height <= 512, (
+            "Image dimensions out of bounds")
+        chunks = io.BytesIO(png[8:])
+        payload = bytearray()
+        found_end = False
+        while chunk := chunks.read(4):
+            length = struct.unpack(">I", chunk)[0]
+            assert length <= 1_000_000, "PNG chunk too large"
+            kind = chunks.read(4)
+            body = chunks.read(length)
+            crc = chunks.read(4)
+            assert len(body) == length and len(crc) == 4
+            assert zlib.crc32(kind + body) == struct.unpack(">I", crc)[0], (
+                "Invalid PNG CRC")
+            if kind == b"IDAT":
+                payload.extend(body)
+            if kind == b"IEND":
+                found_end = True
+                break
+        assert found_end and payload, "PNG missing image data or end marker"
+        assert len(zlib.decompress(payload)) > 0, "PNG data could not decompress"
     print(f"{path.name}: glTF validated: {triangles} source / {expanded_triangles} placed triangles, {len(instances)} instances, "
-          f"{len(data)} mesh bytes; {width}x{height} PNG")
+          f"{len(data)} mesh bytes; {len(images)} validated PNG(s)")
 
 
 for scene_name in SCENE_ASSETS:
