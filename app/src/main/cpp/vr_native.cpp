@@ -133,7 +133,7 @@ bool tryLoadEnvironmentAsset(JNIEnv* env,jobject activity,vrui::Renderer& render
     }
     if(!data)return false;
     jsize count=env->GetArrayLength(data);
-    if(count<=0||count%11!=0||count>1980000){
+    if(count<=0||count%15!=0||count>2700000){
         env->DeleteLocalRef(data);return false;
     }
     std::vector<float> vertices(static_cast<size_t>(count));
