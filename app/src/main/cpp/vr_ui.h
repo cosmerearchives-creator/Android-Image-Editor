@@ -720,7 +720,7 @@ struct Renderer {
         }
     }
     bool uploadEnvironmentMesh(const std::vector<float>& vertices){
-        if(vertices.empty()||vertices.size()%15!=0||vertices.size()>2700000)
+        if(vertices.empty()||vertices.size()%20!=0||vertices.size()>3600000)
             return false;
         if(!environmentProgram){
             const char* vs=R"(#version 300 es
@@ -730,6 +730,8 @@ struct Renderer {
             layout(location=2) in vec2 texcoord;
             layout(location=3) in vec3 meshNormal;
             layout(location=4) in vec4 detailAnchor;
+            layout(location=5) in vec2 metalRough;
+            layout(location=6) in vec3 emissive;
             uniform vec4 orientation;
             uniform vec3 cameraPosition;
             uniform vec4 fovTangent;
@@ -737,6 +739,9 @@ struct Renderer {
             out vec3 surfaceColor;
             out vec2 surfaceUV;
             out vec3 surfaceNormal;
+            out vec2 surfaceMetalRough;
+            out vec3 surfaceEmissive;
+            out vec3 surfaceWorldPosition;
             vec3 quat(vec3 v,vec4 q){
                 vec3 t=2.0*cross(q.xyz,v);
                 return v+q.w*t+cross(q.xyz,t);
@@ -766,12 +771,19 @@ struct Renderer {
                 surfaceColor=baseColor;
                 surfaceUV=texcoord;
                 surfaceNormal=meshNormal;
+                surfaceMetalRough=metalRough;
+                surfaceEmissive=emissive;
+                surfaceWorldPosition=position;
             })";
             const char* fs=R"(#version 300 es
             precision highp float;
             in vec3 surfaceColor;
             in vec2 surfaceUV;
             in vec3 surfaceNormal;
+            in vec2 surfaceMetalRough;
+            in vec3 surfaceEmissive;
+            in vec3 surfaceWorldPosition;
+            uniform vec3 worldEye;
             uniform sampler2D baseTexture;
             uniform int hasTexture;
             out vec4 frag;
@@ -781,13 +793,37 @@ struct Renderer {
                 // material identity for gold accents and stone.
                 vec3 detail=hasTexture==1?texture(baseTexture,surfaceUV).rgb:
                     vec3(1.0);
-                // Two stationary warm museum lights and ambient fill. Flat
-                // world-space normals give arches and carved details depth.
+                // Lightweight GGX microfacet lighting with Schlick Fresnel,
+                // glTF metallic/roughness factors and explicit emissive color.
+                vec3 albedo=pow(max(tint*detail,vec3(0.0)),vec3(2.2));
+                float metal=clamp(surfaceMetalRough.x,0.0,1.0);
+                float rough=max(.08,clamp(surfaceMetalRough.y,0.0,1.0));
                 vec3 n=normalize(surfaceNormal);
-                float key=max(0.0,dot(n,normalize(vec3(.65,.85,.45))));
-                float fill=max(0.0,dot(n,normalize(vec3(-.65,.45,-.35))));
-                float illumination=.42+.39*key+.19*fill;
-                frag=vec4(tint*detail*illumination,1.0);
+                vec3 v=normalize(worldEye-surfaceWorldPosition+vec3(0.0001));
+                vec3 f0=mix(vec3(.04),albedo,metal);
+                vec3 lit=albedo*(1.0-metal)*.14;
+                vec3 lightDir[2]=vec3[2](
+                    normalize(vec3(.65,.85,.45)),
+                    normalize(vec3(-.65,.45,-.35)));
+                vec3 lightColor[2]=vec3[2](
+                    vec3(1.05,.87,.72),vec3(.55,.60,.74));
+                for(int i=0;i<2;i++){
+                    vec3 l=lightDir[i],h=normalize(v+l);
+                    float ndl=max(dot(n,l),0.0),ndv=max(dot(n,v),.02);
+                    float ndh=max(dot(n,h),0.0),vdh=max(dot(v,h),0.0);
+                    float a=rough*rough,a2=a*a;
+                    float den=ndh*ndh*(a2-1.0)+1.0;
+                    float d=a2/(3.14159265*den*den+.0001);
+                    float k=(rough+1.0)*(rough+1.0)/8.0;
+                    float g=ndl/(ndl*(1.0-k)+k)*
+                        ndv/(ndv*(1.0-k)+k);
+                    vec3 fresnel=f0+(1.0-f0)*pow(1.0-vdh,5.0);
+                    vec3 spec=d*g*fresnel/(4.0*ndl*ndv+.001);
+                    vec3 diffuse=(1.0-fresnel)*(1.0-metal)*albedo/3.14159265;
+                    lit+=(diffuse+spec)*lightColor[i]*ndl;
+                }
+                lit+=surfaceEmissive;
+                frag=vec4(pow(max(lit,vec3(0.0)),vec3(1.0/2.2)),1.0);
             })";
             GLuint vert=shader(GL_VERTEX_SHADER,vs),frag=shader(GL_FRAGMENT_SHADER,fs);
             if(vert&&frag){
@@ -808,22 +844,28 @@ struct Renderer {
         glBindBuffer(GL_ARRAY_BUFFER,environmentVbo);
         glBufferData(GL_ARRAY_BUFFER,vertices.size()*sizeof(float),vertices.data(),GL_STATIC_DRAW);
         glEnableVertexAttribArray(0);
-        glVertexAttribPointer(0,3,GL_FLOAT,GL_FALSE,15*sizeof(float),(void*)0);
+        glVertexAttribPointer(0,3,GL_FLOAT,GL_FALSE,20*sizeof(float),(void*)0);
         glEnableVertexAttribArray(1);
-        glVertexAttribPointer(1,3,GL_FLOAT,GL_FALSE,15*sizeof(float),
+        glVertexAttribPointer(1,3,GL_FLOAT,GL_FALSE,20*sizeof(float),
             reinterpret_cast<void*>(3*sizeof(float)));
         glEnableVertexAttribArray(2);
-        glVertexAttribPointer(2,2,GL_FLOAT,GL_FALSE,15*sizeof(float),
+        glVertexAttribPointer(2,2,GL_FLOAT,GL_FALSE,20*sizeof(float),
             reinterpret_cast<void*>(6*sizeof(float)));
         glEnableVertexAttribArray(3);
-        glVertexAttribPointer(3,3,GL_FLOAT,GL_FALSE,15*sizeof(float),
+        glVertexAttribPointer(3,3,GL_FLOAT,GL_FALSE,20*sizeof(float),
             reinterpret_cast<void*>(8*sizeof(float)));
         glEnableVertexAttribArray(4);
-        glVertexAttribPointer(4,4,GL_FLOAT,GL_FALSE,15*sizeof(float),
+        glVertexAttribPointer(4,4,GL_FLOAT,GL_FALSE,20*sizeof(float),
             reinterpret_cast<void*>(11*sizeof(float)));
+        glEnableVertexAttribArray(5);
+        glVertexAttribPointer(5,2,GL_FLOAT,GL_FALSE,20*sizeof(float),
+            reinterpret_cast<void*>(15*sizeof(float)));
+        glEnableVertexAttribArray(6);
+        glVertexAttribPointer(6,3,GL_FLOAT,GL_FALSE,20*sizeof(float),
+            reinterpret_cast<void*>(17*sizeof(float)));
         glBindVertexArray(0);
         glBindBuffer(GL_ARRAY_BUFFER,0);
-        environmentVertices=static_cast<GLsizei>(vertices.size()/15);
+        environmentVertices=static_cast<GLsizei>(vertices.size()/20);
         return true;
     }
     bool uploadEnvironmentTexture(const std::vector<uint8_t>& rgba,int width,int height){
@@ -856,6 +898,8 @@ struct Renderer {
         glUniform4fv(glGetUniformLocation(environmentProgram,"orientation"),1,q);
         glUniform4fv(glGetUniformLocation(environmentProgram,"fovTangent"),1,tanFov);
         glUniform3fv(glGetUniformLocation(environmentProgram,"cameraPosition"),1,camera);
+        const float eyeWorld[]={camera[0],camera[1],camera[2]};
+        glUniform3fv(glGetUniformLocation(environmentProgram,"worldEye"),1,eyeWorld);
         glUniform1f(glGetUniformLocation(environmentProgram,"galleryYaw"),yaw);
         glEnable(GL_DEPTH_TEST);
         glDepthFunc(GL_LESS);
