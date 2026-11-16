@@ -103,6 +103,19 @@ def validate(path):
         assert "normalTexture" in first, "Museum normal map missing"
         assert "metallicRoughnessTexture" in first["pbrMetallicRoughness"], (
             "Museum ORM map missing")
+    atlas = model.get("extras", {}).get("materialAtlas")
+    if path.name == "museum_pedestal.gltf":
+        assert atlas and atlas["columns"] == atlas["rows"] == 2, (
+            "Museum material atlas missing")
+        slots = atlas["materialSlots"]
+        assert len(slots) == len(model["materials"]), (
+            "Atlas material mapping count mismatch")
+        assert set(slots) == {0,1,2,3}, "Museum lacks all four distinct materials"
+        for slot in slots:
+            assert isinstance(slot,int) and 0 <= slot <= 3, (
+                "Invalid material atlas tile")
+        assert len(images) == 3, "Museum requires albedo normal ORM atlases"
+    widths, heights = [], []
     png_prefix = "data:image/png;base64,"
     for image in images:
         texture_uri = image["uri"]
@@ -111,6 +124,7 @@ def validate(path):
         assert len(png) <= 1_000_000, "Embedded texture too large"
         assert png[:8] == bytes((137,80,78,71,13,10,26,10)), "Bad PNG signature"
         width, height = struct.unpack_from(">II", png, 16)
+        widths.append(width); heights.append(height)
         assert 0 < width <= 512 and 0 < height <= 512, (
             "Image dimensions out of bounds")
         chunks = io.BytesIO(png[8:])
@@ -132,6 +146,9 @@ def validate(path):
                 break
         assert found_end and payload, "PNG missing image data or end marker"
         assert len(zlib.decompress(payload)) > 0, "PNG data could not decompress"
+    if atlas:
+        assert len(set(widths)) == len(set(heights)) == 1
+        assert widths[0] == heights[0] == 256, "Unexpected atlas tile size"
     print(f"{path.name}: glTF validated: {triangles} source / {expanded_triangles} placed triangles, {len(instances)} instances, "
           f"{len(data)} mesh bytes; {len(images)} validated PNG(s)")
 
