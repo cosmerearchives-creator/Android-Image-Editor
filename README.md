@@ -34,6 +34,8 @@ gh variable set ANDROID_SIGNING_CERT_SHA256 --env stable-release --repo "$repo" 
 
 ## Publish and verify
 
+The release job runs only when **Run workflow → publish** is enabled on `main`, or when a push to `main` has a commit message beginning with `release:`. Ordinary pushes validate the build but intentionally skip publishing. The release job builds, signs, verifies, and publishes the APK for the version currently recorded in `version.properties`; do not re-run a build-only workflow expecting it to publish.
+
 1. For a new stable release, increase `version.properties` on main and wait for CI to pass. Open **Actions → Android build and stable release → Run workflow**, select main, and enable **publish**.
 2. Confirm the intended version is the latest stable release. Codes are derived from the version components, so `v0.1.0` and `v0.1.1` use 1000 and 1001. The APK filenames include their release tags.
 3. Download both published APKs on a computer. Run `apksigner verify --verbose --print-certs` on each and confirm both have one signer with the permanent certificate's SHA-256 fingerprint. The publish job verifies the built APK's package, version and certificate, then compares the staged asset with the signed APK before publishing. The workflow stores no GitHub Actions artifacts. If publishing stops with a draft, inspect the draft and tag before retrying.
