@@ -36,6 +36,48 @@ Six-scene asset validation now runs before Android builds, together with
 a native/Java JNI contract check that also enforces the 15-float vertex
 stride. Failed asset loads still fall back to the existing panorama shaders.
 
+## v0.15.3 — First genuinely imported textured professional model
+
+This is an **asset import proof**, not a finished photorealistic Museum.
+
+- Source model: **Chair Damask Purplegold**, professionally modeled and
+  textured by Eric Chadwick for Wayfair, © 2021, CC BY 4.0.
+- Source: https://github.com/KhronosGroup/glTF-Sample-Assets/tree/main/Models/ChairDamaskPurplegold
+- All **11 original source meshes**, approximately **9,984 triangles**,
+  4 artist-authored materials and 9 original source JPEG image resources
+  are embedded offline in `app/src/main/assets/real_chair_damask.gltf`.
+- Original geometry is rendered in the existing Museum with a scale and
+  translation placing the chair near the gallery floor. The image atlas
+  uses the original external model's JPEG photographs/pattern textures,
+  NOT procedural replacement geometry or generated gradients.
+- Source material images are repacked into up to three **512 × 512 GPU
+  atlases** at runtime, retaining wood, metal, fabric, and label regions,
+  with a separate normal and roughness/metal atlas. The GL pass is
+  independent of the Museum's existing procedural scenery pass.
+- The imported model uses normal 20-float PBR scene vertices. The
+  optional `KHR_texture_transform` base-color UV repeat/rotation is
+  approximated by the importer, with fallback material colors.
+- The original glTF's full `KHR_materials_sheen` and
+  `KHR_materials_specular` extensions, secondary UV mapping, and full
+  scene-wide physically based light rig are **not** yet implemented.
+  Asset fidelity is therefore improved, but not identical to Blender
+  or Khronos Sample Viewer.
+- Attribution is bundled inside the APK assets as
+  `third_party_chair_attribution.txt`. The chair remains usable without
+  downloading external assets at runtime.
+
+CI validates license metadata, the original 11 meshes, 9 embedded
+JPEGs, material atlas mapping and actual binary indices in
+`scripts/verify-imported-chair.py`. The camera/view orientation and
+performance still require a Quest 2 headset test.
+
+**Next acceptance criterion:** inspect the actual imported chair in the
+Museum with Detailed 3D Scenery on. It must have identifiable carved
+wood, textured fabric and visible seat details rather than abstract
+blocks. If the object appears but its textures are inverted, blurred,
+or clipped, correct the texture transforms / renderer before importing
+a second asset. Do not expand the art library before verifying this.
+
 ## v0.15.2 — Museum material atlas and differentiated surfaces
 
 The Museum now uses three 256x256 PNG atlases, each with four separately
