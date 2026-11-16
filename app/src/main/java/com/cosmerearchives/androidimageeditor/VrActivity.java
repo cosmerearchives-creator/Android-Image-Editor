@@ -110,6 +110,22 @@ public final class VrActivity extends Activity {
         }
     }
     @SuppressWarnings("unused")
+    public float[] loadImportedChairMesh(){
+        try{return GltfMesh.loadImportedChairMesh(getApplicationContext());}
+        catch(Exception error){
+            Log.e(TAG,"Professionally modeled museum chair mesh failed",error);
+            return null;
+        }
+    }
+    @SuppressWarnings("unused")
+    public int[] loadImportedChairMap(int slot){
+        try{return GltfMesh.loadImportedChairMap(getApplicationContext(),slot);}
+        catch(Exception error){
+            Log.e(TAG,"Imported chair material map failed: "+slot,error);
+            return null;
+        }
+    }
+    @SuppressWarnings("unused")
     public int activeCylinderTheme(){
         return activeSavedCylinder>=0
             ?BatchStore.savedCylinderTheme(getApplicationContext(),activeSavedCylinder)
