@@ -133,7 +133,7 @@ bool tryLoadEnvironmentAsset(JNIEnv* env,jobject activity,vrui::Renderer& render
     }
     if(!data)return false;
     jsize count=env->GetArrayLength(data);
-    if(count<=0||count%15!=0||count>2700000){
+    if(count<=0||count%20!=0||count>3600000){
         env->DeleteLocalRef(data);return false;
     }
     std::vector<float> vertices(static_cast<size_t>(count));
@@ -175,6 +175,43 @@ bool tryLoadEnvironmentAsset(JNIEnv* env,jobject activity,vrui::Renderer& render
             }
         }else if(env->ExceptionCheck())env->ExceptionClear();
         env->DeleteLocalRef(textureCls);
+        // Optional maps are strictly bounded and loaded only once per theme.
+        // Missing maps are valid: their shader samplers use neutral defaults.
+        jclass materialCls=env->GetObjectClass(activity);
+        jmethodID materialMethod=env->GetMethodID(materialCls,
+            "loadEnvironmentMaterialMap","(II)[I");
+        if(materialMethod){
+            for(int slot=1;slot<=3;++slot){
+                jintArray array=static_cast<jintArray>(env->CallObjectMethod(
+                    activity,materialMethod,static_cast<jint>(theme),
+                    static_cast<jint>(slot)));
+                if(env->ExceptionCheck()){
+                    env->ExceptionDescribe();env->ExceptionClear();
+                    continue;
+                }
+                if(!array)continue;
+                jsize count=env->GetArrayLength(array);
+                jint dims[2]{};
+                if(count>=2)env->GetIntArrayRegion(array,0,2,dims);
+                const int w=dims[0],h=dims[1];
+                if(w>0&&h>0&&w<=512&&h<=512&&
+                   static_cast<int64_t>(w)*h+2==count){
+                    std::vector<jint> pixels(static_cast<size_t>(w)*h);
+                    env->GetIntArrayRegion(array,2,w*h,pixels.data());
+                    std::vector<uint8_t> rgba(pixels.size()*4u);
+                    for(size_t i=0;i<pixels.size();++i){
+                        uint32_t p=static_cast<uint32_t>(pixels[i]);
+                        rgba[i*4]=uint8_t(p>>16);
+                        rgba[i*4+1]=uint8_t(p>>8);
+                        rgba[i*4+2]=uint8_t(p);
+                        rgba[i*4+3]=uint8_t(p>>24);
+                    }
+                    renderer.uploadEnvironmentMaterialMap(rgba,w,h,slot);
+                }
+                env->DeleteLocalRef(array);
+            }
+        }else if(env->ExceptionCheck())env->ExceptionClear();
+        env->DeleteLocalRef(materialCls);
     }
     __android_log_print(ANDROID_LOG_INFO,"ImageEditorXR","%s",
         success?"Environment glTF mesh uploaded":"Environment glTF mesh disabled; shader fallback active");
