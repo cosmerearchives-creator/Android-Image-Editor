@@ -36,6 +36,31 @@ Six-scene asset validation now runs before Android builds, together with
 a native/Java JNI contract check that also enforces the 15-float vertex
 stride. Failed asset loads still fall back to the existing panorama shaders.
 
+## v0.15.2 — Museum material atlas and differentiated surfaces
+
+The Museum now uses three 256x256 PNG atlases, each with four separately
+authored procedural material regions: **limestone, walnut, brushed brass,
+and marble**. Base color, normal detail, and packed ORM tiles are aligned.
+Eight existing glTF materials are assigned to those four regions using
+`extras.materialAtlas` with a bounded `materialSlots` table. The Java
+glTF loader remaps primitive UVs into individual atlas tiles, inset from
+tile edges to avoid bilinear bleeding, without adding per-object draw calls
+or GPU texture switches. Separate wood/stone/metal/marble texture patterns
+are visibly more differentiated than the previous single small stone image.
+
+The existing three-map shader now samples the corresponding tile for
+each primitive, so the Museum can mix different material surface qualities
+inside the same GL draw. The other five environments retain their working
+previous-generation materials; the atlas extension is optional.
+
+This is a deliberate **procedural material realism pass**, not photogrammetry,
+high-resolution photographed textures, global illumination, or fully
+physically accurate rendering. The individual material regions are 128x128;
+future visual-quality passes should add carefully authored high-resolution
+source textures, better lighting and mesh detail while respecting Quest 2
+performance. The renderer keeps the same bounded GPU memory footprint
+(three 256x256 atlas maps plus fallback material handling).
+
 ## v0.15.1 — Realism shader foundation
 
 The mesh shader now uses a lightweight GGX microfacet model with Schlick
