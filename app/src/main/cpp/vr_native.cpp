@@ -217,6 +217,72 @@ bool tryLoadEnvironmentAsset(JNIEnv* env,jobject activity,vrui::Renderer& render
         success?"Environment glTF mesh uploaded":"Environment glTF mesh disabled; shader fallback active");
     return success;
 }
+// Load one externally authored chair. Missing model/maps leave the museum
+// functional; no model rendering work happens on the non-GL worker.
+bool tryLoadChairAsset(JNIEnv* env,jobject activity,vrui::Renderer& renderer){
+    if(renderer.chairAttempted)return renderer.chairVertices>0;
+    renderer.chairAttempted=true;
+    jclass cls=env->GetObjectClass(activity);
+    jmethodID meshMethod=env->GetMethodID(cls,"loadImportedChairMesh","()[F");
+    if(!meshMethod){
+        if(env->ExceptionCheck())env->ExceptionClear();
+        env->DeleteLocalRef(cls);
+        return false;
+    }
+    jfloatArray mesh=static_cast<jfloatArray>(env->CallObjectMethod(
+        activity,meshMethod));
+    if(env->ExceptionCheck()){
+        env->ExceptionDescribe();env->ExceptionClear();mesh=nullptr;
+    }
+    bool okay=false;
+    if(mesh){
+        int count=env->GetArrayLength(mesh);
+        if(count>0&&count%20==0&&count<=3600000){
+            std::vector<float> vertices(static_cast<size_t>(count));
+            env->GetFloatArrayRegion(mesh,0,count,vertices.data());
+            if(env->ExceptionCheck()){
+                env->ExceptionDescribe();env->ExceptionClear();
+            }else okay=renderer.uploadChairMesh(vertices);
+        }
+        env->DeleteLocalRef(mesh);
+    }
+    if(!okay){env->DeleteLocalRef(cls);return false;}
+    jmethodID mapMethod=env->GetMethodID(cls,"loadImportedChairMap","(I)[I");
+    if(mapMethod){
+        for(int slot=0;slot<=2;++slot){
+            jintArray array=static_cast<jintArray>(env->CallObjectMethod(
+                activity,mapMethod,static_cast<jint>(slot)));
+            if(env->ExceptionCheck()){
+                env->ExceptionDescribe();env->ExceptionClear();continue;
+            }
+            if(!array)continue;
+            jsize count=env->GetArrayLength(array);
+            jint dimensions[2]{};
+            if(count>=2)env->GetIntArrayRegion(array,0,2,dimensions);
+            const int w=dimensions[0],h=dimensions[1];
+            if(w>0&&h>0&&w<=512&&h<=512&&
+               int64_t(w)*h+2==count){
+                std::vector<jint> pixels(static_cast<size_t>(w)*h);
+                env->GetIntArrayRegion(array,2,w*h,pixels.data());
+                std::vector<uint8_t> rgba(pixels.size()*4u);
+                for(size_t i=0;i<pixels.size();++i){
+                    uint32_t color=static_cast<uint32_t>(pixels[i]);
+                    rgba[i*4]=uint8_t(color>>16);
+                    rgba[i*4+1]=uint8_t(color>>8);
+                    rgba[i*4+2]=uint8_t(color);
+                    rgba[i*4+3]=uint8_t(color>>24);
+                }
+                renderer.uploadChairMap(rgba,w,h,slot);
+            }
+            env->DeleteLocalRef(array);
+        }
+    }else if(env->ExceptionCheck())env->ExceptionClear();
+    env->DeleteLocalRef(cls);
+    __android_log_print(ANDROID_LOG_INFO,"ImageEditorXR",
+        "Imported CC BY chair: %s",renderer.chairMaps[0]?
+        "model and texture ready":"texture missing; chair hidden");
+    return renderer.chairVertices>0&&renderer.chairMaps[0]!=0;
+}
 bool loadBatchView(JNIEnv* env,jobject activity,vrui::Renderer& renderer,
                    int mode){
     const bool spherical=mode==2||mode==3;
@@ -1675,6 +1741,9 @@ void run(JNIEnv* env, jobject activity) {
                     log("Optional environment depth unavailable; shader fallback active");
                 }
             }
+            if(page==vrui::Page::Sphere && menu.galleryTheme==0 &&
+               menu.galleryDetail && menu.environmentVertices>0)
+                tryLoadChairAsset(env,activity,menu);
             if(galleryReady>=2 && !menu.galleryAvailable()){
                 // A faulty optional gallery shader must not strand the user in
                 // a black VR layer. Return to the standard functional UI.
@@ -1756,6 +1825,8 @@ void run(JNIEnv* env, jobject activity) {
                     menu.drawSphere(quaternion,tangents,eyeSign,camera,galleryYaw,galleryTime);
                     if(r.depthBuffer)
                         menu.drawEnvironmentMesh(quaternion,tangents,camera,galleryYaw);
+                    if(r.depthBuffer && menu.galleryTheme==0)
+                        menu.drawChair(quaternion,tangents,camera,galleryYaw);
                 }else{
                     menu.draw((page==vrui::Page::Wall||detachedEditor)?
                                   vrui::Page::Immersive:page,
