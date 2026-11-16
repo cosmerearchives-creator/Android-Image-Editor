@@ -36,6 +36,32 @@ Six-scene asset validation now runs before Android builds, together with
 a native/Java JNI contract check that also enforces the 15-float vertex
 stride. Failed asset loads still fall back to the existing panorama shaders.
 
+## v0.15.1 — Realism shader foundation
+
+The mesh shader now uses a lightweight GGX microfacet model with Schlick
+Fresnel, a metallic/roughness material response, gamma-aware colors and
+emissive material contributions. These are much more plausible material
+responses than the old diffuse-only lighting, but **not full glTF PBR**.
+The two existing directional lights remain the lighting sources; there is
+not yet image-based lighting, baked GI, physically accurate shadows or HDR.
+
+glTF `metallicFactor`, `roughnessFactor` and `emissiveFactor` travel
+alongside vertex colors, UV coordinates, normals and LOD data in a bounded
+20-float vertex layout. Additional optional embedded PNG slots use the
+first material's texture references: tangent-space normal, combined ORM
+(occlusion R, roughness G, metallic B) and emissive. Missing maps safely
+use material factors. The Museum contains two new **small procedural
+test maps** for normal detail and ORM so we can test the path on Quest 2.
+
+**Important limitation:** this first pass uses one shared optional map
+set per *scene*, taken from the first material; it does **not** yet switch
+texture sets per primitive. That will be necessary for convincing wood,
+stone and metallic objects within the same room. Current sample assets
+remain early models, not photorealistic scene assets. The next museum
+art-quality pass needs separately authored 512px textures, material-specific
+draw ranges, tangent corrections, baked occlusion and lighting adjustments.
+Keep GPU image dimensions <=512x512 per map and test frame rates on Quest 2.
+
 ## Current museum scene
 - `app/src/main/assets/museum_pedestal.gltf`
 - A modular museum scene with fluted limestone columns and separate gold cornice geometry.
