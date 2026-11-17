@@ -32,6 +32,10 @@ gh variable set ANDROID_SIGNING_CERT_SHA256 --env stable-release --repo "$repo" 
   --body '<public SHA-256 fingerprint from keytool>'
 ```
 
+## v0.15.4 Museum showroom test
+
+This release replaces only the Museum environment's procedural scene at build time using `scripts/rebuild-museum.py`: a textured stone floor, wood ceiling/coffers, plaster walls, burgundy fabric panels, framed displays, columns, rug, plinth and console. It preserves the separately loaded professional chair and the other gallery themes. The rebuilt room is still procedurally modeled, so the chair remains the reference for imported-model quality; compare its detail to the overall room and note any distorted textures or performance problems. All assets are generated offline during GitHub Actions builds, with no PC companion required.
+
 ## Publish and verify
 
 The release job runs only when **Run workflow → publish** is enabled on `main`, or when a push to `main` has a commit message beginning with `release:`. Ordinary pushes validate the build but intentionally skip publishing. The release job builds, signs, verifies, and publishes the APK for the version currently recorded in `version.properties`; do not re-run a build-only workflow expecting it to publish.
