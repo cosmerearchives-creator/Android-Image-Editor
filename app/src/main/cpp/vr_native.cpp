@@ -1481,12 +1481,9 @@ void run(JNIEnv* env, jobject activity) {
                 else if(page==vrui::Page::Gallery && hovered==156 &&
                         batchState.load()==5)
                     batchMethod(env,activity,"confirmLargeBatchView","()V");
-                else if(page==vrui::Page::Gallery && hovered==156){
-                    menu.galleryTheme=(menu.galleryTheme+1)%6;
-                    batchMethod(env,activity,"saveGalleryTheme","(I)V",menu.galleryTheme);
-                }
+                // Theme cycling removed: sphere galleries display only photos and stars.
                 else if(page==vrui::Page::Gallery && hovered==157)
-                    batchMethod(env,activity,"requestSaveCylinder","(I)V",menu.galleryTheme);
+                    batchMethod(env,activity,"requestSaveCylinder","(I)V",0);
                 else if(page==vrui::Page::Gallery && hovered==158)
                     batchMethod(env,activity,"requestSavedCylinders","()V");
                 else if(page==vrui::Page::Gallery && hovered==159)
@@ -1704,13 +1701,12 @@ void run(JNIEnv* env, jobject activity) {
             if(galleryReady!=0 && (galleryReady==1||menu.galleryAvailable()) &&
                loadBatchView(env,activity,menu,galleryReady)){
                 if(galleryReady==3){
-                    menu.galleryTheme=galleryThemeFromJava(env,activity,"activeCylinderTheme");
                     menu.galleryRadius=galleryRadiusFromJava(env,activity,"activeCylinderRadiusCm");
                 }else if(galleryReady==2){
-                    menu.galleryTheme=galleryThemeFromJava(env,activity,"loadGalleryTheme");
                     menu.galleryRadius=galleryRadiusFromJava(env,activity,"galleryRadiusCm");
                 }
-                menu.galleryDetail=galleryThemeFromJava(env,activity,"gallerySceneryDetail")!=0;
+                menu.galleryTheme=0;
+                menu.galleryDetail=false;
                 page=galleryReady==1?vrui::Page::Wall:vrui::Page::Sphere;
                 panelPosition={0.f,0.f,-1.9f};
                 panelScale=galleryReady==1?3.7f:1.f;
@@ -1720,30 +1716,7 @@ void run(JNIEnv* env, jobject activity) {
                 menu.brushMode=false;
                 menu.selectionOverlayVisible=false;
             }
-            // Load after the gallery theme and cylinder metadata have been
-            // applied, otherwise a reopened cylinder gets the wrong 3D scene.
-            if(page==vrui::Page::Sphere && menu.galleryDetail &&
-               tryLoadEnvironmentAsset(env,activity,menu) && !r.depthBuffer){
-                GLuint candidate=0;
-                glGenRenderbuffers(1,&candidate);
-                glBindRenderbuffer(GL_RENDERBUFFER,candidate);
-                glRenderbufferStorage(GL_RENDERBUFFER,GL_DEPTH_COMPONENT16,2048,1536);
-                glBindRenderbuffer(GL_RENDERBUFFER,0);
-                glFramebufferRenderbuffer(GL_FRAMEBUFFER,GL_DEPTH_ATTACHMENT,
-                    GL_RENDERBUFFER,candidate);
-                if(glCheckFramebufferStatus(GL_FRAMEBUFFER)==GL_FRAMEBUFFER_COMPLETE){
-                    r.depthBuffer=candidate;
-                }else{
-                    glFramebufferRenderbuffer(GL_FRAMEBUFFER,GL_DEPTH_ATTACHMENT,
-                        GL_RENDERBUFFER,0);
-                    if(candidate)glDeleteRenderbuffers(1,&candidate);
-                    menu.environmentVertices=0; // Cylinder still renders.
-                    log("Optional environment depth unavailable; shader fallback active");
-                }
-            }
-            if(page==vrui::Page::Sphere && menu.galleryTheme==0 &&
-               menu.galleryDetail && menu.environmentVertices>0)
-                tryLoadChairAsset(env,activity,menu);
+            // Starfield sphere requires no 3D environment meshes or depth buffer.
             if(galleryReady>=2 && !menu.galleryAvailable()){
                 // A faulty optional gallery shader must not strand the user in
                 // a black VR layer. Return to the standard functional UI.
@@ -1823,10 +1796,6 @@ void run(JNIEnv* env, jobject activity) {
                     const float camera[]={
                         cx,std::clamp(view.pose.position.y+galleryY,-2.35f,2.35f),cz};
                     menu.drawSphere(quaternion,tangents,eyeSign,camera,galleryYaw,galleryTime);
-                    if(r.depthBuffer)
-                        menu.drawEnvironmentMesh(quaternion,tangents,camera,galleryYaw);
-                    if(r.depthBuffer && menu.galleryTheme==0)
-                        menu.drawChair(quaternion,tangents,camera,galleryYaw);
                 }else{
                     menu.draw((page==vrui::Page::Wall||detachedEditor)?
                                   vrui::Page::Immersive:page,
