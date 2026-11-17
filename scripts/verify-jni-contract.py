@@ -25,8 +25,8 @@ checks = {
     "native renderer texture API":
         "renderer.uploadEnvironmentTexture(rgba,width,height)" in native
         and "bool uploadEnvironmentTexture(" in renderer,
-    "native renderer draw API":
-        "menu.drawEnvironmentMesh(" in native
+    "legacy environment draw API retained but no longer active":
+        "menu.drawEnvironmentMesh(" not in native
         and "void drawEnvironmentMesh(" in renderer,
     "20-float PBR vertex layout with detail anchor":
         "count%20!=0||count>3600000" in native
@@ -54,7 +54,7 @@ checks = {
         and "bool uploadChairMesh(" in renderer
         and "bool uploadChairMap(" in renderer
         and "void drawChair(" in renderer
-        and "menu.drawChair(" in native,
+        and "menu.drawChair(" not in native,
     "dynamic decorative detail threshold":
         "distance(cameraPosition,spin(detailAnchor.xyz,-galleryYaw))" in renderer
         and "detailAnchor.w>0.0" in renderer,
