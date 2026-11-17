@@ -11,19 +11,22 @@ if [[ "$head" != "$GITHUB_SHA" ]]; then
   exit 1
 fi
 
-# A manual dispatch can overlap the automatic release-triggered workflow.
-# Serialize via the release-job concurrency group; a repeated run should be
-# idempotent when the existing stable release is exactly this build.
-if gh release view "$tag" --repo "$repo" --json isDraft >/dev/null 2>&1; then
-  existing_target="$(gh api "repos/$repo/git/ref/tags/$tag" --jq .object.sha 2>/dev/null || true)"
-  existing_asset="$(gh release view "$tag" --repo "$repo" --json assets --jq '.assets[].name' | grep -Fx "$apk" || true)"
-  is_draft="$(gh release view "$tag" --repo "$repo" --json isDraft --jq .isDraft)"
-  if [[ "$existing_target" == "$GITHUB_SHA" && "$existing_asset" == "$apk" && "$is_draft" == "false" ]]; then
-    echo "Release $tag is already published for this exact commit and APK. Nothing to do."
-    exit 0
+# A failed attempt can leave an unpublished draft behind. Never treat a
+# draft as a verified stable release. Stable releases are immutable here.
+# Draft recovery runs below, after validating the stable version ordering.
+existing_release="$(gh api "repos/$repo/releases?per_page=100" --jq ".[] | select(.tag_name == \"$tag\") | .id" | head -n 1)"
+if [[ -n "$existing_release" ]]; then
+  existing_draft="$(gh api "repos/$repo/releases/$existing_release" --jq .draft)"
+  if [[ "$existing_draft" != "true" ]]; then
+    existing_target="$(gh api "repos/$repo/git/ref/tags/$tag" --jq .object.sha 2>/dev/null || true)"
+    existing_asset="$(gh api "repos/$repo/releases/$existing_release/assets?per_page=100" --jq ".[].name" | grep -Fx "$apk" || true)"
+    if [[ "$existing_target" == "$GITHUB_SHA" && "$existing_asset" == "$apk" ]]; then
+      echo "Release $tag is already published with the expected tag and APK."
+      exit 0
+    fi
+    echo "::error::Published release $tag already exists. Refusing to modify it."
+    exit 1
   fi
-  echo "::error::Release $tag exists but is not a verified stable release for this commit. Refusing to overwrite it."
-  exit 1
 fi
 latest="$(gh release list --repo "$repo" --exclude-drafts --exclude-pre-releases --json tagName,isLatest --jq '.[] | select(.isLatest) | .tagName')"
 if [[ -n "$latest" ]]; then
