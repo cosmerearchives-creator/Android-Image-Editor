@@ -1513,425 +1513,84 @@ in vec2 uv;
 uniform sampler2D panorama,panoDepth;
 uniform vec4 orientation,fovTangent;
 uniform vec3 cameraPosition;
-uniform float galleryYaw,eyeSign,styleScale,galleryTime;
-uniform float galleryRadius;
-uniform int styleInverted,galleryTheme,environmentDetail;
+uniform float galleryYaw,eyeSign,styleScale,galleryRadius;
+uniform int styleInverted;
 out vec4 frag;
-vec3 quat(vec3 v,vec4 q){vec3 t=2.0*cross(q.xyz,v);return v+q.w*t+cross(q.xyz,t);}
-vec3 spin(vec3 v,float a){float c=cos(a),s=sin(a);return vec3(c*v.x-s*v.z,v.y,s*v.x+c*v.z);}
-vec3 material(vec3 p,int face){
-    // Deliberately different architectural surfaces instead of faint tints.
-    // face: wall=0, ceiling=1, floor=2.
-    float stripe=abs(sin(p.x*7.0+p.z*3.0));
-    float seamX=step(.94,fract((p.x+p.z)*1.4));
-    float seamY=step(.94,fract(p.y*1.4));
-    float grid=clamp(seamX+seamY,0.0,1.0);
-    if(galleryTheme==0){
-        // Museum stonework: paneled limestone walls and real marble-like
-        // floor/ceiling materials. The finer structure is handled by
-        // separate depth-tested museumArchitecture() geometry.
-        if(face==0){
-            float w=atan(p.x,-p.z);
-            float panelLine=step(.977,fract((w+3.141593)*8./6.2831853));
-            float chairRail=1.-smoothstep(.02,.055,abs(p.y+1.58));
-            float border=max(panelLine,chairRail);
-            vec3 stone=vec3(.54,.49,.41)+vec3(.018)*sin(p.y*8.+w*5.);
-            return mix(stone,vec3(.70,.57,.34),border*.73);
-        }
-        if(face==1){
-            float cofferX=step(.94,fract(p.x*.75));
-            float cofferZ=step(.94,fract(p.z*.75));
-            float coffer=max(cofferX,cofferZ);
-            return mix(vec3(.48,.43,.34),vec3(.76,.68,.50),coffer);
-        }
-        float vein=sin(p.x*4.1+p.z*2.7+sin(p.z*10.)*.25);
-        float tileX=step(.975,fract(p.x*.68));
-        float tileZ=step(.975,fract(p.z*.68));
-        float tile=clamp(tileX+tileZ,0.,1.);
-        vec3 marble=vec3(.57,.55,.52)+vec3(.045)*sin(vein*7.);
-        return mix(marble,vec3(.31,.29,.27),tile);
-    }
-    if(galleryTheme==1){
-        // Club: ceiling LED strips, a lit dance-floor grid and wall washes.
-        if(face==2){
-            float xline=step(.955,fract(p.x*1.95));
-            float zline=step(.955,fract(p.z*1.95));
-            float pulse=.65+.35*sin(galleryTime*2.0);
-            return vec3(.025,.024,.060)+clamp(xline+zline,0.,1.)*
-                vec3(.15,.51,.80)*pulse;
-        }
-        if(face==1){
-            float bands=pow(abs(sin(p.x*4.0+p.z*1.5)),36.);
-            return vec3(.018,.025,.058)+bands*vec3(.52,.07,.65);
-        }
-        float wash=pow(max(0.,sin(p.y*4.+galleryTime*.5)),12.);
-        return vec3(.035,.018,.075)+wash*vec3(.11,.16,.37);
-    }
-    if(galleryTheme==2){
-        // Tiki: thatched canopy, weathered deck boards and bamboo screening.
-        if(face==1){
-            float thatch=pow(abs(sin(p.x*18.+p.z*9.)),17.);
-            return vec3(.32,.20,.072)+vec3(.19,.10,.035)*thatch;
-        }
-        if(face==2){
-            float seam=step(.97,fract(p.x*.85));
-            float grain=sin(p.z*11.+sin(p.x*3.)*.5)*.035;
-            return mix(vec3(.38,.21,.10)+vec3(grain),vec3(.11,.065,.035),seam);
-        }
-        float reed=pow(stripe,24.0);
-        float weave=pow(abs(sin(p.y*11.0+p.z*2.0)),26.0);
-        return vec3(.28,.14,.055)+vec3(.18,.12,.045)*reed+
-            vec3(.07,.055,.02)*weave;
-    }
-    if(galleryTheme==3){
-        // Volcanic room: cracked basalt with pulsing lava seams.
-        float crack=pow(abs(sin(p.x*5.8+p.z*4.4+
-            sin(p.y*4.2))),23.);
-        float pulse=.67+.33*sin(galleryTime*2.1);
-        if(face==2)return vec3(.09,.064,.079)+
-            vec3(.89,.18,.008)*crack*pulse;
-        if(face==1)return vec3(.13,.07,.09)+
-            vec3(.28,.065,.012)*pow(stripe,15.);
-        float ember=pow(max(0.,sin(p.x*6.0+p.z*5.0+
-            galleryTime*1.7+sin(p.y*4.0))),12.0);
-        return vec3(.12,.025,.065)+vec3(.72,.17,.012)*ember+
-            vec3(.14,.02,.1)*pow(stripe,14.0);
-    }
-    if(galleryTheme==4){
-        // Dungeon: block masonry, rough flagged floor and vaulted ceiling.
-        if(face==2){
-            float seams=step(.94,fract(p.x*.78))+
-                step(.94,fract(p.z*.68+floor(p.x*.78)*.5));
-            return max(vec3(.035),vec3(.22,.25,.23)-
-                vec3(.15)*clamp(seams,0.,1.));
-        }
-        if(face==1){
-            float arch=abs(sin(atan(p.x,p.z)*6.));
-            return vec3(.13,.15,.16)+vec3(.10)*pow(arch,30.);
-        }
-        float masonry=step(.91,fract(p.x*1.8+p.z*.9+
-            floor(p.y*1.5)*.5))+step(.92,fract(p.y*1.5));
-        float moss=pow(max(0.,sin(p.x*6.2+p.z*3.8)),18.0);
-        return max(vec3(.035),vec3(.22,.24,.24)-
-            vec3(.15)*clamp(masonry,0.0,1.0)+vec3(.01,.07,.018)*moss);
-    }
-    // Woodland: green canopy overhead, earthy floor, tree-bark wall.
-    if(face==1){
-        float leaves=sin(p.x*8.0)*sin(p.z*7.0);
-        return vec3(.035,.20,.055)+vec3(.04,.17,.015)*max(0.0,leaves);
-    }
-    if(face==2)return vec3(.15,.105,.045)+vec3(.02,.05,.012)*stripe;
-    return vec3(.15,.095,.04)+vec3(.11,.07,.02)*pow(stripe,25.0);
+vec3 quat(vec3 v,vec4 q){
+ vec3 t=2.0*cross(q.xyz,v);
+ return v+q.w*t+cross(q.xyz,t);
 }
-// Small analytic 3D props. Intersections are evaluated only inside the
-// cylindrical viewer; normal VR startup never compiles this shader.
-float postHit(vec3 origin,vec3 direction,vec2 center,float radius,float low,float high){
-    vec2 local=origin.xz-center;
-    float aa=dot(direction.xz,direction.xz);
-    if(aa<0.00001)return 1e8;
-    float bb=dot(local,direction.xz);
-    float cc=dot(local,local)-radius*radius;
-    float d=bb*bb-aa*cc;
-    if(d<0.0)return 1e8;
-    float t0=(-bb-sqrt(d))/aa;
-    float t1=(-bb+sqrt(d))/aa;
-    float y0=origin.y+t0*direction.y;
-    float y1=origin.y+t1*direction.y;
-    if(t0>0.001 && y0>=low && y0<=high)return t0;
-    if(t1>0.001 && y1>=low && y1<=high)return t1;
-    return 1e8;
+vec3 spin(vec3 v,float a){
+ float c=cos(a),s=sin(a);
+ return vec3(c*v.x-s*v.z,v.y,s*v.x+c*v.z);
 }
-float orbHit(vec3 origin,vec3 direction,vec3 center,float radius){
-    vec3 local=origin-center;
-    float bb=dot(local,direction);
-    float cc=dot(local,local)-radius*radius;
-    float d=bb*bb-cc;
-    if(d<0.0)return 1e8;
-    float nearT=-bb-sqrt(d);
-    float farT=-bb+sqrt(d);
-    return nearT>0.001?nearT:(farT>0.001?farT:1e8);
+float hash13(vec3 p){
+ p=fract(p*.1031);
+ p+=dot(p,p.yzx+33.33);
+ return fract((p.x+p.y)*p.z);
 }
-// Rectangular stone/plinth elements in museum-local coordinates. The returned
-// intersection participates in the same depth comparison as wall photographs.
-float museumBox(vec3 eye,vec3 ray,vec3 center,vec3 halfSize){
-    vec3 d=ray;
-    vec3 safeD=vec3(abs(d.x)<.00001?(d.x<0.?-.00001:.00001):d.x,
-                    abs(d.y)<.00001?(d.y<0.?-.00001:.00001):d.y,
-                    abs(d.z)<.00001?(d.z<0.?-.00001:.00001):d.z);
-    vec3 t0=(center-halfSize-eye)/safeD;
-    vec3 t1=(center+halfSize-eye)/safeD;
-    vec3 nearSide=min(t0,t1);
-    vec3 farSide=max(t0,t1);
-    float nearT=max(max(nearSide.x,nearSide.y),nearSide.z);
-    float farT=min(min(farSide.x,farSide.y),farSide.z);
-    if(farT<max(nearT,0.001))return 1e8;
-    return nearT>0.001?nearT:farT;
-}
-float museumArchitecture(vec3 eye,vec3 ray,float boundary,inout vec3 color){
-    float closest=boundary;
-    float r=galleryRadius;
-    // Eight display bays, each with a stone plinth, projecting entablature,
-    // base molding and a warm overhead architectural light.
-    for(int k=0;k<8;k++){
-        float a=(float(k)+.5)*.7853981634;
-        vec2 outward=vec2(sin(a),cos(a));
-        vec2 tangent=vec2(cos(a),-sin(a));
-        vec3 axis=vec3(tangent.x,0.,tangent.y);
-        vec3 normal=vec3(outward.x,0.,outward.y);
-        vec3 middle=normal*(r-.50);
-        vec3 localEye=vec3(dot(eye,axis),eye.y,dot(eye,normal));
-        vec3 localRay=vec3(dot(ray,axis),ray.y,dot(ray,normal));
-        float support=museumBox(localEye,localRay,
-            vec3(0.,-2.30,r-.47),vec3(.31,.28,.24));
-        if(support<closest){
-            closest=support;
-            color=vec3(.70,.64,.52);
-        }
-        float plinth=museumBox(localEye,localRay,
-            vec3(0.,-2.02,r-.49),vec3(.23,.065,.19));
-        if(plinth<closest){
-            closest=plinth;
-            color=vec3(.79,.70,.53);
-        }
-        float cornice=museumBox(localEye,localRay,
-            vec3(0.,2.49,r-.22),vec3(.84,.095,.30));
-        if(cornice<closest){
-            closest=cornice;
-            color=vec3(.79,.69,.49);
-        }
-        float upper=museumBox(localEye,localRay,
-            vec3(0.,2.30,r-.17),vec3(.72,.055,.18));
-        if(upper<closest){
-            closest=upper;
-            color=vec3(.57,.43,.24);
-        }
-        // Picture-light bar over every display bay.
-        float bar=museumBox(localEye,localRay,
-            vec3(0.,1.93,r-.37),vec3(.37,.035,.055));
-        if(bar<closest){
-            closest=bar;
-            color=vec3(.92,.77,.43);
-        }
-        // Ceiling coffers are spatially raised ribs, not a printed texture.
-        float ceilingRib=museumBox(localEye,localRay,
-            vec3(0.,2.60,r*.56),vec3(.055,.08,r*.40));
-        if(ceilingRib<closest){
-            closest=ceilingRib;
-            color=vec3(.73,.66,.51);
-        }
-    }
-    return closest;
-}
-// A shared modular room-building pass for the five non-museum themes.
-// All pieces are depth-tested against the photographed wall and render only
-// when Detailed 3D Scenery is enabled. Six bays limits Quest 2 fragment cost.
-float themedArchitecture(vec3 eye,vec3 ray,float boundary,inout vec3 color){
-    float closest=boundary;
-    float radius=galleryRadius;
-    for(int k=0;k<6;k++){
-        float angle=(float(k)+.5)*1.0471975512;
-        vec2 outward=vec2(sin(angle),cos(angle));
-        vec2 tangent=vec2(cos(angle),-sin(angle));
-        vec3 along=vec3(tangent.x,0.,tangent.y);
-        vec3 facing=vec3(outward.x,0.,outward.y);
-        vec3 localEye=vec3(dot(eye,along),eye.y,dot(eye,facing));
-        vec3 localRay=vec3(dot(ray,along),ray.y,dot(ray,facing));
-        float hitDistance=1e8;
-        vec3 tint=vec3(.2);
-        if(galleryTheme==1){
-            // Club: suspended stage truss, LED ceiling rails, floor risers.
-            hitDistance=museumBox(localEye,localRay,vec3(0.,2.42,radius-.48),
-                vec3(.68,.065,.065));
-            tint=vec3(.09,.11,.17);
-            if(hitDistance<closest){closest=hitDistance;color=tint;}
-            hitDistance=museumBox(localEye,localRay,vec3(0.,2.57,radius*.50),
-                vec3(.045,.045,radius*.38));
-            tint=vec3(.12,.56,.85)*(.75+.25*sin(galleryTime*1.8+angle));
-            if(hitDistance<closest){closest=hitDistance;color=tint;}
-            hitDistance=museumBox(localEye,localRay,vec3(0.,-2.62,radius-.52),
-                vec3(.66,.075,.35));
-            if(hitDistance<closest){closest=hitDistance;color=vec3(.11,.07,.20);}
-        }else if(galleryTheme==2){
-            // Tiki: chunky wooden beams, ceiling rafters, suspended eaves.
-            hitDistance=museumBox(localEye,localRay,vec3(0.,2.43,radius-.40),
-                vec3(.78,.11,.13));
-            if(hitDistance<closest){closest=hitDistance;color=vec3(.42,.23,.07);}
-            hitDistance=museumBox(localEye,localRay,vec3(0.,2.59,radius*.50),
-                vec3(.085,.065,radius*.40));
-            if(hitDistance<closest){closest=hitDistance;color=vec3(.52,.33,.11);}
-            hitDistance=museumBox(localEye,localRay,vec3(0.,-2.58,radius-.45),
-                vec3(.58,.09,.24));
-            if(hitDistance<closest){closest=hitDistance;color=vec3(.30,.17,.075);}
-        }else if(galleryTheme==3){
-            // Fantasy fire: volcanic cornices, raised altar and iron brackets.
-            hitDistance=museumBox(localEye,localRay,vec3(0.,2.41,radius-.33),
-                vec3(.73,.13,.25));
-            if(hitDistance<closest){closest=hitDistance;color=vec3(.20,.12,.17);}
-            hitDistance=museumBox(localEye,localRay,vec3(0.,-2.48,radius-.55),
-                vec3(.43,.22,.39));
-            if(hitDistance<closest){closest=hitDistance;color=vec3(.25,.13,.16);}
-            hitDistance=museumBox(localEye,localRay,vec3(0.,1.73,radius-.41),
-                vec3(.18,.055,.22));
-            if(hitDistance<closest){
-                closest=hitDistance;
-                color=vec3(.48,.19,.07)+vec3(.25,.13,.01)*
-                    (.5+.5*sin(galleryTime*3.+angle));
-            }
-        }else if(galleryTheme==4){
-            // Dungeon: stone arch imposts, heavy lintels and iron brackets.
-            hitDistance=museumBox(localEye,localRay,vec3(0.,2.16,radius-.32),
-                vec3(.71,.18,.20));
-            if(hitDistance<closest){closest=hitDistance;color=vec3(.31,.32,.31);}
-            hitDistance=museumBox(localEye,localRay,vec3(0.,-2.46,radius-.44),
-                vec3(.65,.20,.28));
-            if(hitDistance<closest){closest=hitDistance;color=vec3(.24,.26,.25);}
-            hitDistance=museumBox(localEye,localRay,vec3(0.,1.62,radius-.40),
-                vec3(.20,.05,.20));
-            if(hitDistance<closest){closest=hitDistance;color=vec3(.16,.15,.14);}
-        }else if(galleryTheme==5){
-            // Woodland: raised root beds, a connecting branch, overhead bough.
-            hitDistance=museumBox(localEye,localRay,vec3(0.,-2.54,radius-.43),
-                vec3(.62,.13,.31));
-            if(hitDistance<closest){closest=hitDistance;color=vec3(.15,.14,.065);}
-            hitDistance=museumBox(localEye,localRay,vec3(0.,2.20,radius-.46),
-                vec3(.63,.085,.12));
-            if(hitDistance<closest){closest=hitDistance;color=vec3(.30,.19,.085);}
-            hitDistance=museumBox(localEye,localRay,vec3(0.,2.55,radius*.54),
-                vec3(.12,.075,radius*.34));
-            if(hitDistance<closest){closest=hitDistance;color=vec3(.26,.20,.075);}
-        }
-    }
-    return closest;
-}
-float sculpture(vec3 eye,vec3 ray,float boundary,inout vec3 pigment){
-    float closest=boundary;
-    float r=galleryRadius;
-    // Eight evenly spaced, narrow props follow the round wall.
-    // Their scale stays constant as users enlarge the room.
-    for(int k=0;k<8;k++){
-        float a=(float(k)+.5)*.7853981634;
-        vec2 center=vec2(sin(a),cos(a))*(r-.18);
-        float postRadius=galleryTheme==5?.105:
-                         galleryTheme==0?.095:.075;
-        float post=postHit(eye,ray,center,postRadius,-2.65,2.65);
-        if(post<closest){
-            vec3 p=eye+ray*post;
-            float grain=abs(sin(p.y*13.+a*3.));
-            vec3 base=vec3(.35,.29,.22);
-            if(galleryTheme==0){
-                // Carved limestone columns with gilded capitals.
-                base=abs(p.y)>2.35?vec3(.64,.50,.23):vec3(.73,.67,.54);
-                base-=vec3(.08)*pow(grain,25.);
-            }else if(galleryTheme==1){
-                // Floor-to-ceiling LED tubes.
-                float pulse=.6+.4*sin(galleryTime*1.8+a*3.);
-                base=mix(vec3(.06,.8,1.0),vec3(.85,.04,1.0),
-                    mod(float(k),2.) )*pulse;
-            }else if(galleryTheme==2){
-                // Bamboo supports tied with dark fiber bands.
-                base=vec3(.54,.33,.10);
-                base*=step(.94,fract(p.y*2.5))>.5?.38:1.;
-            }else if(galleryTheme==3){
-                // Black iron posts with ember-lit joints.
-                base=abs(sin(p.y*4.))>.95?vec3(.85,.25,.02):
-                     vec3(.14,.10,.15);
-            }else if(galleryTheme==4){
-                // Stone piers with block courses.
-                base=vec3(.38,.40,.40);
-                base-=vec3(.18)*step(.96,fract(p.y*1.3));
-            }else{
-                // Actual 3D tree trunks, not just a bark texture.
-                base=vec3(.36,.22,.09)-vec3(.07)*pow(grain,18.);
-            }
-            closest=post;pigment=base;
-        }
-        if(galleryTheme==5){
-            // Low-poly-like organic clusters forming an overhead canopy.
-            vec3 canopy=vec3(center.x*.91,2.48,center.y*.91);
-            float leaf=orbHit(eye,ray,canopy,.54);
-            if(leaf<closest){
-                vec3 p=eye+ray*leaf;
-                float var=.5+.5*sin(p.x*17.+p.z*11.+p.y*9.);
-                pigment=mix(vec3(.035,.17,.04),vec3(.12,.37,.05),var);
-                closest=leaf;
-            }
-        }else if(galleryTheme==2 || galleryTheme==3){
-            // Hanging lanterns / animated torch sconces.
-            vec3 center3=vec3(center.x*.97,1.75,center.y*.97);
-            float orb=orbHit(eye,ray,center3,galleryTheme==2?.17:.15);
-            if(orb<closest){
-                vec3 p=eye+ray*orb;
-                float flicker=.78+.22*sin(galleryTime*4.+a*5.+p.y*8.);
-                pigment=galleryTheme==2?vec3(.95,.48,.09)*flicker:
-                    vec3(1.0,.22,.015)*flicker;
-                closest=orb;
-            }
-        }else if(galleryTheme==0){
-            // Hanging art spotlights above the pictures.
-            float light=orbHit(eye,ray,vec3(center.x*.94,2.34,center.y*.94),.085);
-            if(light<closest){
-                pigment=vec3(1.0,.86,.56);
-                closest=light;
-            }
-        }else if(galleryTheme==1){
-            // Ceiling-mounted violet light fixtures.
-            float light=orbHit(eye,ray,vec3(center.x*.88,2.38,center.y*.88),.11);
-            if(light<closest){
-                pigment=vec3(.9,.15,1.0);
-                closest=light;
-            }
-        }
-    }
-    return closest;
+vec3 quietStars(vec3 direction){
+ float horizon=clamp(direction.y*.5+.5,0.,1.);
+ vec3 sky=mix(vec3(.006,.008,.022),vec3(.010,.014,.031),horizon);
+ vec3 cell=floor(direction*225.);
+ vec3 f=fract(direction*225.)-.5;
+ float chance=hash13(cell);
+ float point=1.-smoothstep(.045,.15,length(f));
+ float bright=step(.9945,chance)*point;
+ float tint=hash13(cell+23.7);
+ vec3 star=mix(vec3(.40,.52,.77),vec3(.86,.89,.96),tint);
+ sky+=star*bright*(.25+.50*hash13(cell+17.));
+ vec3 farCell=floor(direction*87.);
+ vec3 ff=fract(direction*87.)-.5;
+ float small=step(.990,hash13(farCell))*
+             (1.-smoothstep(.03,.12,length(ff)));
+ sky+=vec3(.19,.24,.39)*small*.23;
+ return sky;
 }
 void main(){
- vec3 ray=normalize(vec3(mix(fovTangent.x,fovTangent.y,uv.x),mix(fovTangent.z,fovTangent.w,uv.y),-1.));
+ vec3 ray=normalize(vec3(mix(fovTangent.x,fovTangent.y,uv.x),
+                          mix(fovTangent.z,fovTangent.w,uv.y),-1.));
  ray=spin(normalize(quat(ray,orientation)),galleryYaw);
  vec3 eye=spin(cameraPosition,galleryYaw);
- float r=galleryRadius,h=2.7,t=1e8;
+ vec3 sky=quietStars(ray);
+ float radius=galleryRadius;
+ float halfHeight=2.7;
+ float t=1e8;
  int face=0;
- float a=dot(ray.xz,ray.xz),b=2.*dot(eye.xz,ray.xz),c=dot(eye.xz,eye.xz)-r*r;
+ float a=dot(ray.xz,ray.xz);
+ float b=2.*dot(eye.xz,ray.xz);
+ float c=dot(eye.xz,eye.xz)-radius*radius;
  float discriminant=b*b-4.*a*c;
  if(a>1e-6&&discriminant>=0.){
-   float side=(-b+sqrt(discriminant))/(2.*a);
-   if(side>0.&&abs(eye.y+side*ray.y)<=h)t=side;
+     float side=(-b+sqrt(discriminant))/(2.*a);
+     if(side>0.&&abs(eye.y+side*ray.y)<=halfHeight)t=side;
  }
  if(abs(ray.y)>1e-6){
-  float y=ray.y>0.?h:-h,cap=(y-eye.y)/ray.y;
-  vec3 point=eye+ray*cap;
-  if(cap>0.&&cap<t&&dot(point.xz,point.xz)<=r*r){t=cap;face=ray.y>0.?1:2;}
+     float y=ray.y>0.?halfHeight:-halfHeight;
+     float cap=(y-eye.y)/ray.y;
+     vec3 p=eye+ray*cap;
+     if(cap>0.&&cap<t&&dot(p.xz,p.xz)<=radius*radius){
+         t=cap;
+         face=ray.y>0.?1:2;
+     }
  }
- if(t>=1e8){frag=vec4(material(eye+ray*3.,0),1.);return;}
+ if(t>=1e8){frag=vec4(sky,1.);return;}
  vec3 hit=eye+ray*t;
  vec2 texcoord;
- if(face==0)texcoord=vec2(fract(.5+atan(hit.x,-hit.z)/6.2831853),.25+.5*(h-hit.y)/(2.*h));
- else {vec2 capUv=clamp(hit.xz/(2.*r)+.5,.001,.999);texcoord=vec2(.5+(capUv.x-.5)*.125,face==1?.25*capUv.y:.75+.25*capUv.y);}
+ if(face==0){
+     texcoord=vec2(fract(.5+atan(hit.x,-hit.z)/6.2831853),
+                   .25+.5*(halfHeight-hit.y)/(2.*halfHeight));
+ }else{
+     vec2 capUv=clamp(hit.xz/(2.*radius)+.5,.001,.999);
+     texcoord=vec2(.5+(capUv.x-.5)*.125,
+                   face==1?.25*capUv.y:.75+.25*capUv.y);
+ }
  float depth=texture(panoDepth,texcoord).r;
  if(styleInverted==1)depth=1.-depth;
- texcoord.x=clamp(texcoord.x+eyeSign*styleScale*(depth-.5)*.0025,.0005,.9995);
+ texcoord.x=clamp(texcoord.x+
+                 eyeSign*styleScale*(depth-.5)*.0025,.0005,.9995);
  vec4 photo=texture(panorama,texcoord);
- vec3 color=mix(material(hit,face),photo.rgb,photo.a);
- if(galleryTheme==0 && face==0 && photo.a<.5){
-     // Gold-edged photo mounts inside the transparent atlas margins.
-     // Check neighboring alpha rather than imposing a distorted grid.
-     vec2 pixel=1.0/vec2(textureSize(panorama,0));
-     float borderAlpha=max(max(
-         texture(panorama,texcoord+vec2(pixel.x*9.,0.)).a,
-         texture(panorama,texcoord-vec2(pixel.x*9.,0.)).a),
-         max(texture(panorama,texcoord+vec2(0.,pixel.y*9.)).a,
-             texture(panorama,texcoord-vec2(0.,pixel.y*9.)).a));
-     if(borderAlpha>.5)color=vec3(.64,.48,.24);
- }
- vec3 propColor=vec3(0.);
- float prop=environmentDetail==1?sculpture(eye,ray,t,propColor):t;
- if(environmentDetail==1){
-     if(galleryTheme==0)
-         prop=museumArchitecture(eye,ray,prop,propColor);
-     else
-         prop=themedArchitecture(eye,ray,prop,propColor);
- }
- if(prop<t)color=propColor;
- frag=vec4(color,1.);
+ frag=vec4(mix(sky,photo.rgb,photo.a),1.);
 }
 )";
         // Keep the regular VR home/editor operational if this optional renderer
