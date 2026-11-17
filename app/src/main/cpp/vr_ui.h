@@ -2078,14 +2078,12 @@ void main(){
                     const std::string percent=std::to_string(batchProgress)+"%";
                     label(v,percent.c_str(),782,689,2,muted);
                 }
-                box(v,170,200,684,50,hovered==156?purpleHover:
-                    batchState==5?purple:button);
-                const char* themes[]={"MUSEUM","CLUB","TIKI PARTY",
-                    "FANTASY FIRE","DUNGEON","HANGING ON TREES"};
-                std::string themeLabel="GALLERY THEME: ";
-                themeLabel+=themes[galleryTheme%6];
-                label(v,batchState==5?"CONFIRM VIEW OVER 16 IMAGES":
-                     themeLabel.c_str(),192,213,2,white);
+                if(batchState==5){
+                    box(v,170,200,684,50,hovered==156?purpleHover:purple);
+                    label(v,"CONFIRM VIEW OVER 16 IMAGES",192,213,2,white);
+                }else{
+                    label(v,"PHOTO SPHERE - QUIET STARFIELD",192,213,2,muted);
+                }
                 box(v,170,140,684,50,hovered==159?purpleHover:button);
                 label(v,"IMAGE LAYOUT SETTINGS",192,153,2,white);
             } else if(page==Page::Projects) {
