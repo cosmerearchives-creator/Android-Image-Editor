@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Generate the Museum scene deterministically for CI and package it into the APK.
+# Keep the imported professional chair separate from the room geometry.
+python3 scripts/rebuild-museum.py
 python3 scripts/verify-3d-assets.py
 python3 scripts/verify-imported-chair.py
 python3 scripts/verify-jni-contract.py
