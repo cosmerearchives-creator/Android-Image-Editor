@@ -36,7 +36,7 @@ gh variable set ANDROID_SIGNING_CERT_SHA256 --env stable-release --repo "$repo" 
 
 The sphere viewer now displays the user's gallery images around the observer against a subtle, stationary starfield. All theme selection and active museum/club/tiki/fire/dungeon/woods scenery rendering have been removed. Photo atlas gaps reveal the distant stars; opaque pixels remain unchanged by the background. Wall viewing, zoom, radius, layout, large-gallery warning, bulk conversion/export and saved-cylinder access remain available.
 
-The old imported meshes and generated scene assets are legacy code/data and are no longer loaded by the sphere viewer. A later housekeeping change can delete them without involving the visual feature. GitHub Actions verifies the photo-only sphere source contract with `scripts/verify-photo-sphere.py`. The JNI regression checks also confirm that legacy environment draw methods remain available for compatibility but are not called by the photo sphere. No local PC or Desktop Commander is needed for building.
+The old imported meshes and generated scene assets are legacy code/data and are no longer loaded by the sphere viewer. A later housekeeping change can delete them without involving the visual feature. GitHub Actions verifies the photo-only sphere source contract with `scripts/verify-photo-sphere.py`. Release publishing now uses the GitHub release ID to verify draft APK assets before making the release public. The JNI regression checks also confirm that legacy environment draw methods remain available for compatibility but are not called by the photo sphere. No local PC or Desktop Commander is needed for building.
 
 ## Publish and verify
 
