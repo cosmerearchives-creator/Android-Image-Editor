@@ -38,12 +38,9 @@ if [[ -n "$latest" ]]; then
     exit 1
   fi
 fi
-# Draft first so clients never discover a published release with a missing asset.
-gh release create "$tag" "$apk" --repo "$repo" --target "$GITHUB_SHA" \
-  --draft --title "$tag" --notes "Android Image Editor $tag"
-gh release download "$tag" --repo "$repo" --pattern "$apk" --output "$RUNNER_TEMP/$apk"
-cmp "$apk" "$RUNNER_TEMP/$apk"
-# Use the exact tag ref. The commits endpoint can resolve version-like names loosely.
+# Draft releases created by gh can have an "untagged-..." URL, and
+# gh release download/edit by tag may fail with HTTP 404 before publishing.
+# Create and verify the exact tag before creating the release.
 if ! tag_ref="$(gh api "repos/$repo/git/ref/tags/$tag" --jq .object.sha 2>/dev/null)"; then
   gh api --method POST "repos/$repo/git/refs" -f "ref=refs/tags/$tag" -f "sha=$GITHUB_SHA" --silent
   tag_ref="$(gh api "repos/$repo/git/ref/tags/$tag" --jq .object.sha)"
@@ -52,7 +49,53 @@ if [[ "$tag_ref" != "$GITHUB_SHA" ]]; then
   echo "::error::The existing tag does not point directly to this build commit."
   exit 1
 fi
-gh release edit "$tag" --repo "$repo" --verify-tag --draft=false --latest
+
+# The draft created by a previous failed attempt may still be present with a
+# different target SHA. Delete only that unpublished draft for this version,
+# and never modify a published release.
+draft_id="$(gh api "repos/$repo/releases?per_page=100" --jq ".[] | select(.tag_name == \"$tag\") | .id" | head -n 1)"
+if [[ -n "$draft_id" ]]; then
+  draft_target="$(gh api "repos/$repo/releases/$draft_id" --jq .target_commitish)"
+  draft_state="$(gh api "repos/$repo/releases/$draft_id" --jq .draft)"
+  if [[ "$draft_state" != "true" ]]; then
+    echo "::error::A published release for $tag already exists. Refusing to modify."
+    exit 1
+  fi
+  if [[ "$draft_target" != "$GITHUB_SHA" ]]; then
+    echo "Removing unpublished stale draft for $tag from prior failed build"
+    gh api --method DELETE "repos/$repo/releases/$draft_id" --silent
+    draft_id=""
+  fi
+fi
+
+if [[ -z "$draft_id" ]]; then
+  gh release create "$tag" "$apk" --repo "$repo" --target "$GITHUB_SHA" \
+    --verify-tag --draft --title "$tag" --notes "Android Image Editor $tag"
+  draft_id="$(gh api "repos/$repo/releases?per_page=100" --jq ".[] | select(.tag_name == \"$tag\") | .id" | head -n 1)"
+fi
+if [[ -z "$draft_id" ]]; then
+  echo "::error::Could not locate draft release $tag by API"
+  exit 1
+fi
+draft_state="$(gh api "repos/$repo/releases/$draft_id" --jq .draft)"
+if [[ "$draft_state" != "true" ]]; then
+  echo "::error::Expected unpublished draft before verifying APK"
+  exit 1
+fi
+
+# The numeric asset ID stays available even if the draft has an untagged URL.
+asset_id="$(gh api "repos/$repo/releases/$draft_id/assets?per_page=100" --jq ".[] | select(.name == \"$apk\") | .id" | head -n 1)"
+if [[ -z "$asset_id" ]]; then
+  echo "::error::Draft release is missing APK asset $apk"
+  exit 1
+fi
+gh api -H "Accept: application/octet-stream" \
+  "repos/$repo/releases/assets/$asset_id" > "$RUNNER_TEMP/$apk"
+cmp "$apk" "$RUNNER_TEMP/$apk"
+
+# Publish by release ID, not by the temporary draft URL or tag lookup.
+gh api --method PATCH "repos/$repo/releases/$draft_id" \
+  -F draft=false -F make_latest=true --silent
 test "$(gh api "repos/$repo/commits/$tag" --jq .sha)" = "$GITHUB_SHA"
 test "$(gh api "repos/$repo/releases/latest" --jq .tag_name)" = "$tag"
 rm -f "$apk" "$apk.idsig" "$RUNNER_TEMP/$apk"
