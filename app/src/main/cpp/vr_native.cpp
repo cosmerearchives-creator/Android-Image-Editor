@@ -1478,9 +1478,6 @@ void run(JNIEnv* env, jobject activity) {
                     batchMethod(env,activity,"requestBatchExport","(Z)V",0,false);
                 else if(page==vrui::Page::Gallery && hovered==155)
                     batchMethod(env,activity,"requestBatchExport","(Z)V",0,true);
-                else if(page==vrui::Page::Gallery && hovered==156 &&
-                        batchState.load()==5)
-                    batchMethod(env,activity,"confirmLargeBatchView","()V");
                 // Theme cycling removed: sphere galleries display only photos and stars.
                 else if(page==vrui::Page::Gallery && hovered==157)
                     batchMethod(env,activity,"requestSaveCylinder","(I)V",0);
