@@ -193,6 +193,23 @@ public final class VrActivity extends Activity {
                 public void onStopTrackingTouch(android.widget.SeekBar bar){}
             });
             layout.addView(density);
+            android.widget.TextView multiplierLabel=new android.widget.TextView(this);
+            multiplierLabel.setText("Gallery multiplier: "+BatchStore.galleryMultiplier(this)+"x");
+            layout.addView(multiplierLabel);
+            android.widget.SeekBar multiplier=new android.widget.SeekBar(this);
+            multiplier.setMax(7);
+            multiplier.setProgress(BatchStore.galleryMultiplier(this)-1);
+            multiplier.setOnSeekBarChangeListener(new android.widget.SeekBar.OnSeekBarChangeListener(){
+                public void onProgressChanged(android.widget.SeekBar bar,int value,boolean fromUser){
+                    multiplierLabel.setText("Gallery multiplier: "+(value+1)+"x");
+                }
+                public void onStartTrackingTouch(android.widget.SeekBar bar){}
+                public void onStopTrackingTouch(android.widget.SeekBar bar){}
+            });
+            layout.addView(multiplier);
+            android.widget.TextView multiplierInfo=new android.widget.TextView(this);
+            multiplierInfo.setText("Duplicates are only visual. Originals remain unchanged. Up to 96 displayed tiles.");
+            layout.addView(multiplierInfo);
             android.widget.TextView radiusLabel=new android.widget.TextView(this);
             radiusLabel.setText("Cylinder radius: "+(BatchStore.radiusCm(this)/100f)+" m");
             layout.addView(radiusLabel);
@@ -213,6 +230,7 @@ public final class VrActivity extends Activity {
                 .setPositiveButton("APPLY",(dialog,which)->{
                     BatchStore.saveLayout(getApplicationContext(),
                         spacing.getProgress(),density.getProgress()+1);
+                    BatchStore.saveGalleryMultiplier(getApplicationContext(),multiplier.getProgress()+1);
                     BatchStore.saveRadiusCm(getApplicationContext(),250+radius.getProgress()*25);
                     Toast.makeText(this,"Layout saved. Reopen View Sphere to rebuild.",
                         Toast.LENGTH_LONG).show();
@@ -565,11 +583,8 @@ public final class VrActivity extends Activity {
         if(count==0){
             reportBatchStatus(6,0,0);return;
         }
-        if(count>BatchStore.WARN_COUNT&&!confirmed){
-            pendingBatchView=mode;
-            reportBatchStatus(5,0,count);
-            return;
-        }
+        // The gallery atlas itself bounds memory and rendering cost. Large
+        // libraries no longer require an interrupting confirmation.
         pendingBatchView=0;
         activeSavedCylinder=-1;
         if(!batchBusy.compareAndSet(false,true))return;
@@ -588,6 +603,7 @@ public final class VrActivity extends Activity {
     }
     @SuppressWarnings("unused")
     public void confirmLargeBatchView(){
+        // Legacy JNI entrypoint; simply opens the chosen view without warnings.
         int mode=pendingBatchView;
         if(mode!=0)requestBatchView(mode,true);
     }
