@@ -32,6 +32,12 @@ gh variable set ANDROID_SIGNING_CERT_SHA256 --env stable-release --repo "$repo" 
   --body '<public SHA-256 fingerprint from keytool>'
 ```
 
+## v0.15.7 Randomized sphere fill
+
+The sphere layout settings now include a 1×–8× gallery multiplier. It repeats imported photos **visually**, shuffles all displayed tiles into deterministic randomized positions, and uses the same positions for color and depth atlases. Original files and editable projects are not duplicated. To keep Quest texture work bounded without interrupting the user, the multiplier adds up to 96 visual tiles (never dropping original images); the old over-16-images warning and confirmation control are removed. A new source contract check runs during CI.
+
+This increment does not yet add native video playback, looping clips, fly-through animation, or gallery reset; those remain separate functionality work.
+
 ## v0.15.6 Photo sphere — no themes
 
 The sphere viewer now displays the user's gallery images around the observer against a subtle, stationary starfield. All theme selection and active museum/club/tiki/fire/dungeon/woods scenery rendering have been removed. Photo atlas gaps reveal the distant stars; opaque pixels remain unchanged by the background. Wall viewing, zoom, radius, layout, large-gallery warning, bulk conversion/export and saved-cylinder access remain available.
