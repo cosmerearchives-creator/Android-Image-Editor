@@ -8,6 +8,7 @@ python3 scripts/verify-3d-assets.py
 python3 scripts/verify-imported-chair.py
 python3 scripts/verify-jni-contract.py
 python3 scripts/verify-photo-sphere.py
+python3 scripts/verify-gallery-multiplier.py
 
 export JAVA_HOME="${JAVA_HOME_17_X64:-$JAVA_HOME}"
 export PATH="$JAVA_HOME/bin:$PATH"
