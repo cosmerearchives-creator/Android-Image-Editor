@@ -89,7 +89,7 @@ inline int buttonAt(Page page,float x,float y,bool advancedVisible=true) {
         if(y>=470&&y<=550)return x<512?152:153;
         if(y>=360&&y<=440)return x<512?154:155;
         if(y>=265&&y<=340)return x<512?157:158;
-        if(y>=200&&y<=250)return 156;
+        // No separate large-gallery confirmation button.
         if(y>=140&&y<=190)return 159;
         if(y>=92&&y<=135)return 3;
         return -1;
@@ -2066,7 +2066,7 @@ void main(){
                     batchState==2?"AI CONVERTING IMAGES":
                     batchState==3?"BUILDING GALLERY":
                     batchState==4?"GALLERY READY":
-                    batchState==5?"LARGE GALLERY - POSSIBLE SLOWDOWN":
+
                     batchState==6?"BULK OPERATION FAILED":
                     batchState==7?"EXPORT - CHOOSE A DESTINATION":
                     batchState==8?"IMAGES IMPORTED":
@@ -2078,12 +2078,7 @@ void main(){
                     const std::string percent=std::to_string(batchProgress)+"%";
                     label(v,percent.c_str(),782,689,2,muted);
                 }
-                if(batchState==5){
-                    box(v,170,200,684,50,hovered==156?purpleHover:purple);
-                    label(v,"CONFIRM VIEW OVER 16 IMAGES",192,213,2,white);
-                }else{
-                    label(v,"PHOTO SPHERE - QUIET STARFIELD",192,213,2,muted);
-                }
+                label(v,"PHOTO SPHERE - QUIET STARFIELD",192,213,2,muted);
                 box(v,170,140,684,50,hovered==159?purpleHover:button);
                 label(v,"IMAGE LAYOUT SETTINGS",192,153,2,white);
             } else if(page==Page::Projects) {
