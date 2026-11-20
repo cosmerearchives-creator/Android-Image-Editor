@@ -24,7 +24,8 @@ import java.util.function.IntConsumer;
 
 /** Persistent, independently editable and reusable on-device batch library. */
 public final class BatchStore {
-    public static final int WARN_COUNT=16;
+    // A fixed-size atlas provides an inherent performance limit without warning dialogs.
+    private static final int MAX_MULTIPLIED_TILES=96;
     private static final int SOURCE_MAX=2048;
     private static final int DEPTH_EDGE=1024;
     private static final String PHOTO="source.png",DEPTH="depth.png",MASK="mask.bin";
@@ -32,6 +33,29 @@ public final class BatchStore {
     public static int[] layout(Context ctx){
         android.content.SharedPreferences prefs=ctx.getSharedPreferences("vr_gallery_layout",Context.MODE_PRIVATE);
         return new int[]{prefs.getInt("spacing",2),prefs.getInt("density",3)};
+    }
+    /** Display copies only; original media files are never duplicated. */
+    public static int galleryMultiplier(Context ctx){
+        return Math.max(1,Math.min(8,ctx.getSharedPreferences("vr_gallery_layout",Context.MODE_PRIVATE)
+            .getInt("multiplier",1)));
+    }
+    public static void saveGalleryMultiplier(Context ctx,int multiplier){
+        ctx.getSharedPreferences("vr_gallery_layout",Context.MODE_PRIVATE).edit()
+            .putInt("multiplier",Math.max(1,Math.min(8,multiplier))).apply();
+        sphere(ctx).delete();sphereDepth(ctx).delete();
+    }
+    /** Stable shuffle keeps the image atlas aligned with its depth atlas. */
+    private static File[] sphereTiles(Context ctx,File[] originals){
+        if(originals.length==0)return originals;
+        int desired=Math.min(MAX_MULTIPLIED_TILES,originals.length*galleryMultiplier(ctx));
+        desired=Math.max(originals.length,desired);
+        java.util.ArrayList<File> tiles=new java.util.ArrayList<>(desired);
+        tiles.addAll(Arrays.asList(originals));
+        for(int i=originals.length;i<desired;i++)tiles.add(originals[i%originals.length]);
+        long seed=0x426A3F1AL;
+        for(File item:originals)seed=seed*31L+item.getName().hashCode();
+        java.util.Collections.shuffle(tiles,new java.util.Random(seed));
+        return tiles.toArray(new File[0]);
     }
     public static int radiusCm(Context ctx){
         return ctx.getSharedPreferences("vr_gallery_layout",Context.MODE_PRIVATE)
@@ -348,8 +372,9 @@ public final class BatchStore {
     }
     private static Bitmap produce(Context ctx,boolean spherical,boolean depths,
                                   IntConsumer progress)throws IOException{
-        File[] list=entries(ctx);
-        if(list.length==0)throw new IOException("Import images first");
+        File[] originals=entries(ctx);
+        if(originals.length==0)throw new IOException("Import images first");
+        File[] list=spherical?sphereTiles(ctx,originals):originals;
         // Keep the VR wall/sphere atlases bounded even for large libraries.
         int columns=spherical?Math.max(4,(int)Math.ceil(Math.sqrt(list.length*2.0))):
                               Math.max(1,(int)Math.ceil(Math.sqrt(list.length)));
