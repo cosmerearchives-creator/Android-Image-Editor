@@ -664,7 +664,7 @@ public final class VrActivity extends Activity {
                 }
                 reportBatchStatus(8,100,BatchStore.count(getApplicationContext()));
                 runOnUiThread(()->Toast.makeText(this,
-                    added+" added, "+(picked.size()-added)+" already imported (skipped)",
+                    added+" media added, "+(picked.size()-added)+" already imported (skipped)",
                     Toast.LENGTH_LONG).show());
             }catch(Exception e){
                 Log.e(TAG,"Bulk import failed",e);
