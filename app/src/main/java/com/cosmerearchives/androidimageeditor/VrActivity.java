@@ -435,8 +435,10 @@ public final class VrActivity extends Activity {
         runOnUiThread(()->{
             try{
                 Intent intent=new Intent(Intent.ACTION_OPEN_DOCUMENT)
-                    .addCategory(Intent.CATEGORY_OPENABLE).setType("application/zip");
-                intent.addCategory(Intent.CATEGORY_OPENABLE);
+                    .addCategory(Intent.CATEGORY_OPENABLE).setType("*/*");
+                intent.putExtra(Intent.EXTRA_MIME_TYPES,new String[]{
+                    "application/zip","application/x-zip-compressed",
+                    "application/octet-stream"});
                 startActivityForResult(intent,BATCH_ZIP);
             }catch(RuntimeException e){
                 Log.e(TAG,"ZIP picker unavailable",e);
