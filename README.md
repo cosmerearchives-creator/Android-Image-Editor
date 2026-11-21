@@ -32,6 +32,17 @@ gh variable set ANDROID_SIGNING_CERT_SHA256 --env stable-release --repo "$repo" 
   --body '<public SHA-256 fingerprint from keytool>'
 ```
 
+## v0.16.0 Looping MP4 video tiles in the Quest gallery
+
+- Bulk Import now accepts standard photos and MP4 video files together from the Android document picker.
+- ZIP gallery import recognizes MP4 files alongside supported images, streams them into app-private storage with per-video and aggregate archive bounds, and opens the viewer when finished.
+- Imported MP4s preserve the original video and generate a still thumbnail used for the gallery layout and as a fallback.
+- The native OpenXR sphere renders up to **two unique active MP4 videos** simultaneously using Android MediaPlayer looping hardware-backed SurfaceTexture frames and OpenGL ES external textures. Multiple positions created by the gallery multiplier reuse the same active stream.
+- Fly-throughs reuse the live video texture for selected active video tiles; photos continue to animate as before.
+- Playback is silent for now to avoid overlapping audio. Further videos are imported and displayed as thumbnails but do not play simultaneously until a later performance/decoder scheduling update.
+- Video decoders stop when leaving the sphere. If external OES shader support is unavailable, the photo-only sphere remains functional.
+- CI verifies JNI, import and GPU playback contracts. Quest headset runtime testing is still required.
+
 ## v0.15.9 Adjustable fly-throughs and ZIP gallery import
 
 - Quest-native Gallery Settings now control fly-through frequency (Off or every 12–120 seconds) and fly-through transparency (10–100%), alongside existing spacing/density/multiplier/radius controls.
