@@ -167,7 +167,9 @@ public final class VrActivity extends Activity {
     @SuppressWarnings("unused")
     public int galleryMultiplier(){return BatchStore.galleryMultiplier(this);}
     @SuppressWarnings("unused")
-    public void adjustGallerySetting(int field,int change){
+    public void adjustGallerySetting(int control){
+        int field=control/2;
+        int change=control%2==0?-1:1;
         int[] settings=BatchStore.layout(getApplicationContext());
         if(field==0){
             BatchStore.saveLayout(this,Math.max(0,Math.min(12,settings[0]+change)),settings[1]);
