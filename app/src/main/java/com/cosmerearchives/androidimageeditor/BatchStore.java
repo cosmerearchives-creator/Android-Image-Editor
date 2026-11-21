@@ -305,6 +305,7 @@ public final class BatchStore {
         final int maxEntries=2000;
         int added=0,scanned=0;
         long totalUncompressed=0;
+        long[] totalVideoBytes={0};
         try(InputStream raw=ctx.getContentResolver().openInputStream(archive)){
             if(raw==null)throw new IOException("Cannot open ZIP");
             try(java.util.zip.ZipInputStream zip=new java.util.zip.ZipInputStream(
@@ -324,7 +325,8 @@ public final class BatchStore {
                     if(video){
                         // Stream MP4 directly to a bounded private file, never buffer
                         // a 256 MB movie in the Quest Java heap.
-                        added+=importVideoStream(ctx,zip,cancel,cache(ctx,"zip_incoming_video.mp4"));
+                        added+=importVideoStream(ctx,zip,cancel,
+                            cache(ctx,"zip_incoming_video.mp4"),totalVideoBytes);
                         zip.closeEntry();
                         progress.accept(Math.min(99,scanned*100/maxEntries));
                         continue;
@@ -404,11 +406,12 @@ public final class BatchStore {
         File temp=cache(ctx,"incoming_video.mp4");
         try(InputStream input=ctx.getContentResolver().openInputStream(uri)){
             if(input==null)throw new IOException("Cannot read MP4");
-            return importVideoStream(ctx,input,cancel,temp);
+            return importVideoStream(ctx,input,cancel,temp,null);
         }
     }
     private static int importVideoStream(Context ctx,InputStream input,
-                                         AtomicBoolean cancel,File temp)throws Exception{
+                                         AtomicBoolean cancel,File temp,
+                                         long[] archiveVideoBytes)throws Exception{
         long total=0;
         try{
             try(FileOutputStream out=new FileOutputStream(temp)){
@@ -417,6 +420,11 @@ public final class BatchStore {
                     cancelled(cancel);
                     total+=n;
                     if(total>VIDEO_MAX_BYTES)throw new IOException("MP4 exceeds 256 MB import limit");
+                    if(archiveVideoBytes!=null){
+                        archiveVideoBytes[0]+=n;
+                        if(archiveVideoBytes[0]>1024L*1024*1024)
+                            throw new IOException("ZIP contains over 1 GB of video");
+                    }
                     out.write(buf,0,n);
                 }
                 out.getFD().sync();
