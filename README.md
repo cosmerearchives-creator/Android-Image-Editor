@@ -36,7 +36,7 @@ gh variable set ANDROID_SIGNING_CERT_SHA256 --env stable-release --repo "$repo" 
 
 - Quest-native Gallery Settings now control fly-through frequency (Off or every 12–120 seconds) and fly-through transparency (10–100%), alongside existing spacing/density/multiplier/radius controls.
 - The sphere shader applies the selected interval and opacity to **moving** photos, leaving stationary photos unchanged. Settings are saved to the gallery preferences and picked up when reopening the sphere.
-- The gallery menu includes **IMPORT ZIP** using Android's system document picker. PNG, JPEG, and WebP files inside the archive join the existing content-addressed working gallery and can be viewed by selecting **VIEW SPHERE**. ZIP entries do not write arbitrary paths; content is decoded with individual-image, total-data and count limits. Existing gallery items remain unless Reset Gallery was used first.
+- The gallery menu includes **IMPORT ZIP** using Android's system document picker. PNG, JPEG, and WebP files inside the archive join the existing content-addressed working gallery and can be viewed by selecting **VIEW SPHERE**. ZIP entries do not write arbitrary paths; content is decoded with individual-image, total-data and count limits. Existing gallery items remain unless Reset Gallery was used first. Once the archive is imported, the app builds and opens the sphere automatically.
 - ZIP import currently supports still images, not playable video files. Video looping remains a separate planned feature.
 - CI checks verify ZIP importer wiring and adjustable shader inputs.
 
