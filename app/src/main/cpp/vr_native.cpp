@@ -1464,11 +1464,13 @@ void run(JNIEnv* env, jobject activity) {
                 menu.brushMode=false;
             } else if(triggerDown&&!wasPressed && !dragging && activeSlider<0 &&
                        page!=vrui::Page::Immersive && hovered>=0 && overlayHover<0) {
-                if(page==vrui::Page::GallerySettings && hovered>=160 && hovered<=167){
+                if(page==vrui::Page::GallerySettings && hovered>=160 && hovered<=171){
                     batchMethod(env,activity,"adjustGallerySetting","(I)V",hovered-160);
                     menu.gallerySpacing=gallerySettingFromJava(env,activity,"gallerySpacing");
                     menu.galleryDensity=gallerySettingFromJava(env,activity,"galleryDensity");
                     menu.galleryMultiplier=gallerySettingFromJava(env,activity,"galleryMultiplier");
+                    menu.galleryFlyInterval=gallerySettingFromJava(env,activity,"galleryFlyInterval");
+                    menu.galleryFlyOpacity=gallerySettingFromJava(env,activity,"galleryFlyOpacity");
                     menu.galleryRadius=galleryRadiusFromJava(env,activity,"galleryRadiusCm");
                 }
                 else if(page==vrui::Page::Gallery && hovered==156){
@@ -1502,11 +1504,15 @@ void run(JNIEnv* env, jobject activity) {
                     batchMethod(env,activity,"requestSaveCylinder","(I)V",0);
                 else if(page==vrui::Page::Gallery && hovered==158)
                     batchMethod(env,activity,"requestSavedCylinders","()V");
+                else if(page==vrui::Page::Gallery && hovered==172)
+                    batchMethod(env,activity,"requestZipGalleryImport","()V");
                 else if(page==vrui::Page::Gallery && hovered==159){
                     menu.galleryResetConfirm=false;
                     menu.gallerySpacing=gallerySettingFromJava(env,activity,"gallerySpacing");
                     menu.galleryDensity=gallerySettingFromJava(env,activity,"galleryDensity");
                     menu.galleryMultiplier=gallerySettingFromJava(env,activity,"galleryMultiplier");
+                    menu.galleryFlyInterval=gallerySettingFromJava(env,activity,"galleryFlyInterval");
+                    menu.galleryFlyOpacity=gallerySettingFromJava(env,activity,"galleryFlyOpacity");
                     menu.galleryRadius=galleryRadiusFromJava(env,activity,"galleryRadiusCm");
                     page=vrui::Page::GallerySettings;
                 }
@@ -1735,6 +1741,8 @@ void run(JNIEnv* env, jobject activity) {
                 menu.galleryDetail=false;
                 menu.galleryDensity=gallerySettingFromJava(env,activity,"galleryDensity");
                 menu.galleryMultiplier=gallerySettingFromJava(env,activity,"galleryMultiplier");
+                menu.galleryFlyInterval=gallerySettingFromJava(env,activity,"galleryFlyInterval");
+                menu.galleryFlyOpacity=gallerySettingFromJava(env,activity,"galleryFlyOpacity");
                 page=galleryReady==1?vrui::Page::Wall:vrui::Page::Sphere;
                 panelPosition={0.f,0.f,-1.9f};
                 panelScale=galleryReady==1?3.7f:1.f;
