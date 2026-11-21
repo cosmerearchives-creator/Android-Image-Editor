@@ -395,7 +395,20 @@ public final class VrActivity extends Activity {
     }
     @SuppressWarnings("unused")
     public void requestBatchImport(){
-        runOnUiThread(this::openBatchCustomPicker);
+        // Use the same headset-compatible system document picker as single-image
+        // import. The older custom AlertDialog could open behind the XR layer.
+        runOnUiThread(()->{
+            try{
+                Intent intent=new Intent(Intent.ACTION_OPEN_DOCUMENT)
+                    .addCategory(Intent.CATEGORY_OPENABLE)
+                    .setType("image/*")
+                    .putExtra(Intent.EXTRA_ALLOW_MULTIPLE,true);
+                startActivityForResult(intent,BATCH_PICK);
+            }catch(RuntimeException error){
+                Log.e(TAG,"Bulk document picker could not open",error);
+                Toast.makeText(this,"Could not open bulk image picker",Toast.LENGTH_LONG).show();
+            }
+        });
     }
     private void createBatchPickerDialog(){
         android.widget.LinearLayout root=new android.widget.LinearLayout(this);
