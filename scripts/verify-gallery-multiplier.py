@@ -29,7 +29,20 @@ assert "gallerySettingFromJava(" in native
 assert 'startActivityForResult(intent,BATCH_PICK)' in activity
 assert 'putExtra(Intent.EXTRA_ALLOW_MULTIPLE,true)' in activity
 shader = ui.split('const char* sphereFs=R"(',1)[1].split(')";',1)[0]
-assert "float cycle=floor(galleryTime/24.)" in shader
+assert "float cycle=floor(galleryTime/period)" in shader
+assert "if(flyInterval>0 && phase>=begin && galleryTileCount>0)" in shader
+assert "flying.a*flyOpacity" in shader
+assert 'glUniform1i(glGetUniformLocation(sphereProgram,"flyInterval"),galleryFlyInterval)' in ui
+assert 'glUniform1f(glGetUniformLocation(sphereProgram,"flyOpacity"),' in ui
+assert "public static int importZip(Context ctx,Uri archive,AtomicBoolean cancel," in store
+assert "new java.util.zip.ZipInputStream(" in store
+assert "totalUncompressed>maxArchiveInput" in store
+assert "public void requestZipGalleryImport()" in activity
+assert "if(request==BATCH_ZIP)" in activity
+assert 'batchMethod(env,activity,"requestZipGalleryImport","()V")' in native
+assert "galleryFlyInterval" in ui and "galleryFlyOpacity" in ui
+assert "public int galleryFlyInterval()" in activity
+assert "public int galleryFlyOpacity()" in activity
 assert "vec4 flying=texture(panorama,flyingUv)" in shader
 assert "planeDistance=mix(radius-.65,-.85,progress)" in shader
 print("Randomized gallery multiplier and warning removal contracts passed")
