@@ -593,6 +593,23 @@ public final class BatchStore {
         File aiMarker=new File(ctx.getFilesDir(),"vr_depth_ai_done.flag");
         if(depth.isFile())aiMarker.createNewFile();else aiMarker.delete();
     }
+    /** Empty the current working gallery without deleting device originals,
+     * independent editor projects, exports, or separately saved galleries. */
+    public static synchronized void resetGallery(Context ctx)throws IOException{
+        File[] imported=entries(ctx);
+        for(File folder:imported)deleteGalleryEntry(folder);
+        wall(ctx).delete();wallDepth(ctx).delete();
+        sphere(ctx).delete();sphereDepth(ctx).delete();
+        clearActive(ctx);
+    }
+    private static void deleteGalleryEntry(File target)throws IOException{
+        File[] children=target.listFiles();
+        if(children!=null)for(File child:children){
+            if(child.isDirectory())deleteGalleryEntry(child);
+            else if(!child.delete())throw new IOException("Couldn't clear gallery item");
+        }
+        if(!target.delete())throw new IOException("Couldn't clear gallery item folder");
+    }
     public static void clearActive(Context ctx){
         ctx.getSharedPreferences("vr_batch",0).edit().remove("active_id").apply();
     }
