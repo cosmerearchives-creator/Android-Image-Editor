@@ -292,6 +292,102 @@ public final class BatchStore {
         }
         return added;
     }
+    /**
+     * Import standard PNG/JPEG/WebP images inside a ZIP without extracting any
+     * archive paths to disk. ZIP names are labels only, preventing zip-slip.
+     * Each entry is capped before bitmap decoding; all decoded images enter
+     * the same content-addressed batch library as individual imports.
+     */
+    public static int importZip(Context ctx,Uri archive,AtomicBoolean cancel,
+                                IntConsumer progress)throws Exception{
+        final long maxCompressedOrExpandedImage=32L*1024*1024;
+        final long maxArchiveInput=1024L*1024*1024;
+        final int maxEntries=2000;
+        int added=0,scanned=0;
+        long totalUncompressed=0;
+        try(InputStream raw=ctx.getContentResolver().openInputStream(archive)){
+            if(raw==null)throw new IOException("Cannot open ZIP");
+            try(java.util.zip.ZipInputStream zip=new java.util.zip.ZipInputStream(
+                    new java.io.BufferedInputStream(raw))){
+                java.util.zip.ZipEntry entry;
+                while((entry=zip.getNextEntry())!=null){
+                    cancelled(cancel);
+                    if(++scanned>maxEntries)throw new IOException("ZIP has too many entries");
+                    if(entry.isDirectory()){zip.closeEntry();continue;}
+                    String filename=entry.getName();
+                    String lower=filename.toLowerCase(Locale.ROOT);
+                    if(!(lower.endsWith(".png")||lower.endsWith(".jpg")||
+                         lower.endsWith(".jpeg")||lower.endsWith(".webp"))){
+                        zip.closeEntry();continue;
+                    }
+                    java.io.ByteArrayOutputStream bytes=new java.io.ByteArrayOutputStream();
+                    byte[] chunk=new byte[32768];int n;long thisEntry=0;
+                    while((n=zip.read(chunk))!=-1){
+                        cancelled(cancel);
+                        thisEntry+=n;
+                        totalUncompressed+=n;
+                        if(thisEntry>maxCompressedOrExpandedImage||
+                           totalUncompressed>maxArchiveInput)
+                            throw new IOException("ZIP image or archive is too large");
+                        bytes.write(chunk,0,n);
+                    }
+                    byte[] imageBytes=bytes.toByteArray();
+                    android.graphics.BitmapFactory.Options opts=new android.graphics.BitmapFactory.Options();
+                    opts.inJustDecodeBounds=true;
+                    BitmapFactory.decodeByteArray(imageBytes,0,imageBytes.length,opts);
+                    if(opts.outWidth<=0||opts.outHeight<=0||
+                       (long)opts.outWidth*opts.outHeight>100000000L)
+                        throw new IOException("Invalid or oversized ZIP image: "+filename);
+                    int sample=1;
+                    while(opts.outWidth/sample>SOURCE_MAX*2||
+                          opts.outHeight/sample>SOURCE_MAX*2)sample*=2;
+                    android.graphics.BitmapFactory.Options decodeOpts=new android.graphics.BitmapFactory.Options();
+                    decodeOpts.inSampleSize=sample;
+                    Bitmap bitmap=BitmapFactory.decodeByteArray(imageBytes,0,imageBytes.length,decodeOpts);
+                    if(bitmap==null)throw new IOException("Cannot decode ZIP image: "+filename);
+                    Bitmap ready=bitmap;
+                    try{
+                        if(bitmap.getWidth()>SOURCE_MAX||bitmap.getHeight()>SOURCE_MAX){
+                            float ratio=Math.min((float)SOURCE_MAX/bitmap.getWidth(),
+                                (float)SOURCE_MAX/bitmap.getHeight());
+                            ready=Bitmap.createScaledBitmap(bitmap,
+                                Math.max(1,Math.round(bitmap.getWidth()*ratio)),
+                                Math.max(1,Math.round(bitmap.getHeight()*ratio)),true);
+                        }
+                        File temp=cache(ctx,"zip_incoming.png");
+                        savePng(ready,temp);
+                        String id=hash(temp);
+                        File folder=new File(root(ctx),"image_"+id.substring(0,24));
+                        if(!folder.exists()){
+                            if(!folder.mkdirs()){temp.delete();throw new IOException("Cannot create image entry");}
+                            if(!temp.renameTo(new File(folder,PHOTO))){
+                                temp.delete();throw new IOException("Cannot store ZIP image");
+                            }
+                            String safeName=filename.replace('\\','/');
+                            safeName=safeName.substring(safeName.lastIndexOf('/')+1);
+                            if(safeName.length()>110)safeName=safeName.substring(0,110);
+                            try(FileOutputStream output=new FileOutputStream(new File(folder,DISPLAY_NAME))){
+                                output.write(safeName.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                            }
+                            added++;
+                        }else temp.delete();
+                    }finally{
+                        if(ready!=bitmap)ready.recycle();
+                        bitmap.recycle();
+                    }
+                    zip.closeEntry();
+                    progress.accept(Math.min(99,scanned*100/maxEntries));
+                }
+            }
+        }
+        if(added>0){
+            wall(ctx).delete();wallDepth(ctx).delete();
+            sphere(ctx).delete();sphereDepth(ctx).delete();
+        }
+        progress.accept(100);
+        if(scanned==0)throw new IOException("ZIP is empty");
+        return added;
+    }
     private static void saveGray(byte[] pixels,File out)throws IOException{
         // Depth Anything V2 returns 256x256; our editable depth cache is 1024x1024.
         // Resample at save time, preserving the existing editor/brush contract.
