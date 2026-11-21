@@ -57,14 +57,17 @@ float galleryRadiusFromJava(JNIEnv* env,jobject activity,const char* name){
     env->DeleteLocalRef(cls);
     return std::clamp(cm,250,500)/100.f;
 }
-int galleryThemeFromJava(JNIEnv* env,jobject activity,const char* name){
+int gallerySettingFromJava(JNIEnv* env,jobject activity,const char* name){
     jclass cls=env->GetObjectClass(activity);
     jmethodID method=env->GetMethodID(cls,name,"()I");
     int result=0;
     if(method)result=env->CallIntMethod(activity,method);
     if(env->ExceptionCheck()){env->ExceptionDescribe();env->ExceptionClear();result=0;}
     env->DeleteLocalRef(cls);
-    return std::clamp(result,0,5);
+    return result;
+}
+int galleryThemeFromJava(JNIEnv* env,jobject activity,const char* name){
+    return std::clamp(gallerySettingFromJava(env,activity,name),0,5);
 }
 void refreshBatchStats(JNIEnv* env,jobject activity,vrui::Renderer& menu){
     jclass cls=env->GetObjectClass(activity);
@@ -1462,12 +1465,10 @@ void run(JNIEnv* env, jobject activity) {
             } else if(triggerDown&&!wasPressed && !dragging && activeSlider<0 &&
                        page!=vrui::Page::Immersive && hovered>=0 && overlayHover<0) {
                 if(page==vrui::Page::GallerySettings && hovered>=160 && hovered<=167){
-                    const int field=(hovered-160)/2;
-                    const int change=(hovered%2==0)?-1:1;
-                    batchMethod(env,activity,"adjustGallerySetting","(II)V",field,change);
-                    menu.gallerySpacing=galleryThemeFromJava(env,activity,"gallerySpacing");
-                    menu.galleryDensity=galleryThemeFromJava(env,activity,"galleryDensity");
-                    menu.galleryMultiplier=galleryThemeFromJava(env,activity,"galleryMultiplier");
+                    batchMethod(env,activity,"adjustGallerySetting","(I)V",hovered-160);
+                    menu.gallerySpacing=gallerySettingFromJava(env,activity,"gallerySpacing");
+                    menu.galleryDensity=gallerySettingFromJava(env,activity,"galleryDensity");
+                    menu.galleryMultiplier=gallerySettingFromJava(env,activity,"galleryMultiplier");
                     menu.galleryRadius=galleryRadiusFromJava(env,activity,"galleryRadiusCm");
                 }
                 else if(page==vrui::Page::Gallery && hovered==156){
@@ -1503,9 +1504,9 @@ void run(JNIEnv* env, jobject activity) {
                     batchMethod(env,activity,"requestSavedCylinders","()V");
                 else if(page==vrui::Page::Gallery && hovered==159){
                     menu.galleryResetConfirm=false;
-                    menu.gallerySpacing=galleryThemeFromJava(env,activity,"gallerySpacing");
-                    menu.galleryDensity=galleryThemeFromJava(env,activity,"galleryDensity");
-                    menu.galleryMultiplier=galleryThemeFromJava(env,activity,"galleryMultiplier");
+                    menu.gallerySpacing=gallerySettingFromJava(env,activity,"gallerySpacing");
+                    menu.galleryDensity=gallerySettingFromJava(env,activity,"galleryDensity");
+                    menu.galleryMultiplier=gallerySettingFromJava(env,activity,"galleryMultiplier");
                     menu.galleryRadius=galleryRadiusFromJava(env,activity,"galleryRadiusCm");
                     page=vrui::Page::GallerySettings;
                 }
@@ -1732,8 +1733,8 @@ void run(JNIEnv* env, jobject activity) {
                 }
                 menu.galleryTheme=0;
                 menu.galleryDetail=false;
-                menu.galleryDensity=galleryThemeFromJava(env,activity,"galleryDensity");
-                menu.galleryMultiplier=galleryThemeFromJava(env,activity,"galleryMultiplier");
+                menu.galleryDensity=gallerySettingFromJava(env,activity,"galleryDensity");
+                menu.galleryMultiplier=gallerySettingFromJava(env,activity,"galleryMultiplier");
                 page=galleryReady==1?vrui::Page::Wall:vrui::Page::Sphere;
                 panelPosition={0.f,0.f,-1.9f};
                 panelScale=galleryReady==1?3.7f:1.f;
