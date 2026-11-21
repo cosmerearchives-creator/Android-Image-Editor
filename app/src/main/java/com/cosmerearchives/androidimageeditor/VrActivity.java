@@ -1281,11 +1281,17 @@ public final class VrActivity extends Activity {
             batchWorker.execute(()->{
                 try{
                     int added=BatchStore.importZip(getApplicationContext(),zipUri,
-                        batchCancel,p->reportBatchStatus(1,p,BatchStore.count(getApplicationContext())));
+                        batchCancel,p->reportBatchStatus(1,p/2,BatchStore.count(getApplicationContext())));
                     int total=BatchStore.count(getApplicationContext());
-                    reportBatchStatus(8,100,total);
+                    if(total==0)throw new IOException("ZIP contains no supported images");
+                    activeSavedCylinder=-1;
+                    reportBatchStatus(3,50,total);
+                    BatchStore.build(getApplicationContext(),true,
+                        p->reportBatchStatus(3,50+p/2,total));
+                    reportBatchStatus(4,100,total);
+                    notifyBatchGalleryReady(2);
                     runOnUiThread(()->Toast.makeText(this,
-                        added+" ZIP images added. Select VIEW SPHERE to open gallery.",
+                        added+" ZIP images added; opening sphere gallery.",
                         Toast.LENGTH_LONG).show());
                 }catch(Exception e){
                     Log.e(TAG,"ZIP gallery import failed",e);
