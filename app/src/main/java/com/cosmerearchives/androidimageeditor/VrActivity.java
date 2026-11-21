@@ -23,6 +23,18 @@ public final class VrActivity extends Activity {
     private static final int ADD_COLLAGE_IMAGE = 9;
     private static final int BATCH_PICK = 10;
     private static final int BATCH_ZIP = 14;
+    private final GalleryVideoPlayer galleryVideos=new GalleryVideoPlayer();
+    /** Called only by the XR GL thread. */
+    @SuppressWarnings("unused")
+    public void startGalleryVideos(int[] textures){
+        galleryVideos.start(BatchStore.galleryVideoPaths(this),textures);
+    }
+    @SuppressWarnings("unused")
+    public void updateGalleryVideoFrames(){galleryVideos.update();}
+    @SuppressWarnings("unused")
+    public void stopGalleryVideos(){galleryVideos.stop();}
+    @SuppressWarnings("unused")
+    public int[] galleryVideoTileSlots(){return BatchStore.galleryVideoTileSlots(this);}
     private static final int EXPORT_WALL = 11;
     private static final int EXPORT_SPHERE = 12;
     private static final int INSTALL_PERMISSION = 8;
@@ -454,7 +466,8 @@ public final class VrActivity extends Activity {
             try{
                 Intent intent=new Intent(Intent.ACTION_OPEN_DOCUMENT)
                     .addCategory(Intent.CATEGORY_OPENABLE)
-                    .setType("image/*")
+                    .setType("*/*")
+                    .putExtra(Intent.EXTRA_MIME_TYPES,new String[]{"image/*","video/mp4"})
                     .putExtra(Intent.EXTRA_ALLOW_MULTIPLE,true);
                 startActivityForResult(intent,BATCH_PICK);
             }catch(RuntimeException error){
@@ -629,8 +642,26 @@ public final class VrActivity extends Activity {
         reportBatchStatus(1,0,picked.size());
         batchWorker.execute(()->{
             try{
-                int added=BatchStore.importImages(getApplicationContext(),picked,
-                    batchCancel,p->reportBatchStatus(1,p,picked.size()));
+                int added=0;
+                for(int i=0;i<picked.size();i++){
+                    Uri uri=picked.get(i);
+                    String type=getContentResolver().getType(uri);
+                    boolean video=type!=null&&type.startsWith("video/");
+                    if(!video){
+                        try(android.database.Cursor cursor=getContentResolver().query(
+                            uri,new String[]{android.provider.OpenableColumns.DISPLAY_NAME},
+                            null,null,null)){
+                            if(cursor!=null&&cursor.moveToFirst()){
+                                String name=cursor.getString(0);
+                                video=name!=null&&name.toLowerCase(java.util.Locale.ROOT).endsWith(".mp4");
+                            }
+                        }
+                    }
+                    if(video)added+=BatchStore.importVideo(getApplicationContext(),uri,batchCancel);
+                    else added+=BatchStore.importImages(getApplicationContext(),
+                        java.util.Collections.singletonList(uri),batchCancel,p->{});
+                    reportBatchStatus(1,(i+1)*100/picked.size(),picked.size());
+                }
                 reportBatchStatus(8,100,BatchStore.count(getApplicationContext()));
                 runOnUiThread(()->Toast.makeText(this,
                     added+" added, "+(picked.size()-added)+" already imported (skipped)",
