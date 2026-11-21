@@ -19,7 +19,7 @@ struct Color {float r,g,b;};
 constexpr Color white{0.96f,0.95f,1.0f}, muted{0.67f,0.63f,0.76f},
     purple{0.34f,0.22f,0.52f}, purpleHover{0.52f,0.36f,0.76f},
     panel{0.095f,0.075f,0.14f}, button{0.17f,0.14f,0.25f};
-enum class Page {Home, Open, Projects, Gallery, Immersive, AiDepth, Collage, Curves, Mask, Wall, Sphere};
+enum class Page {Home, Open, Projects, Gallery, GallerySettings, Immersive, AiDepth, Collage, Curves, Mask, Wall, Sphere};
 inline void box(std::vector<float>& vertices,float x,float y,float w,float h,Color c) {
     float a[6][2]={{x,y},{x+w,y},{x,y+h},{x+w,y},{x+w,y+h},{x,y+h}};
     for(auto& p:a) {vertices.push_back(p[0]);vertices.push_back(p[1]);
@@ -84,7 +84,16 @@ inline void label(std::vector<float>& v,const char* s,int x,int y,int scale,Colo
 }
 inline int buttonAt(Page page,float x,float y,bool advancedVisible=true) {
     if(x<170||x>854) return -1;
+    if(page==Page::GallerySettings){
+        if(y>=540&&y<=620)return x<512?160:161;
+        if(y>=440&&y<=520)return x<512?162:163;
+        if(y>=340&&y<=420)return x<512?164:165;
+        if(y>=240&&y<=320)return x<512?166:167;
+        if(y>=92&&y<=160)return 3;
+        return -1;
+    }
     if(page==Page::Gallery){
+        if(y>=200&&y<=250)return 156;
         if(y>=580&&y<=660)return x<512?150:151;
         if(y>=470&&y<=550)return x<512?152:153;
         if(y>=360&&y<=440)return x<512?154:155;
@@ -704,6 +713,8 @@ struct Renderer {
     int galleryTheme=0; // 0 museum, 1 club, 2 tiki, 3 fire, 4 dungeon, 5 trees
     float galleryRadius=3.f;
     bool galleryDetail=true;
+    int gallerySpacing=2,galleryDensity=3,galleryMultiplier=1;
+    bool galleryResetConfirm=false;
     // Optional glTF mesh pass, initialized only when a cylinder is opened.
     GLuint environmentProgram=0,environmentVao=0,environmentVbo=0,environmentTexture=0;
     GLuint environmentMaterialMaps[3]{};
@@ -1825,7 +1836,8 @@ void main(){
                 page==Page::AiDepth?"AI DEPTH":
                 page==Page::Mask?"REFINE SELECTION":
                 page==Page::Collage?"COLLAGE LAYERS":
-                page==Page::Curves?"DEPTH CURVES":"VIEW GALLERY";
+                page==Page::Curves?"DEPTH CURVES":
+                page==Page::GallerySettings?"GALLERY SETTINGS":"VIEW GALLERY";
             int n=static_cast<int>(std::strlen(title));
             if(page!=Page::Open && page!=Page::Mask)
                 label(v,title,512-n*15,page==Page::Projects?630:475,5,white);
@@ -2048,6 +2060,24 @@ void main(){
                 label(v,"APPLY",460,234,2,aiPreview?white:muted);
                 box(v,629,205,225,86,hovered==52?purpleHover:button);
                 label(v,aiState==1||aiState==2?"CANCEL":"DISCARD",646,234,2,white);
+            } else if(page==Page::GallerySettings){
+                const char* names[]={"PHOTO SPACING","COLUMN DENSITY",
+                    "GALLERY MULTIPLIER","SPHERE RADIUS"};
+                const int values[]={gallerySpacing,galleryDensity,galleryMultiplier,
+                                    int(galleryRadius*100.f)};
+                const int yy[]={540,440,340,240};
+                for(int i=0;i<4;i++){
+                    const int y=yy[i],id=160+i*2;
+                    label(v,names[i],187,y+54,2,muted);
+                    box(v,170,y,310,48,hovered==id?purpleHover:button);
+                    box(v,544,y,310,48,hovered==id+1?purpleHover:button);
+                    label(v,"-",306,y+12,3,white);
+                    label(v,"+",683,y+12,3,white);
+                    const std::string count=std::to_string(values[i])+
+                        (i==0?"%":i==2?"X":i==3?" CM":"");
+                    label(v,count.c_str(),490,y+12,2,white);
+                }
+                label(v,"APPLIES WHEN YOU REOPEN THE SPHERE",187,198,2,muted);
             } else if(page==Page::Gallery){
                 const char* actions[]={"BULK IMPORT","CONVERT MISSING",
                     "VIEW WALL","VIEW SPHERE","EXPORT WALL","EXPORT SPHERE",
@@ -2078,7 +2108,9 @@ void main(){
                     const std::string percent=std::to_string(batchProgress)+"%";
                     label(v,percent.c_str(),782,689,2,muted);
                 }
-                label(v,"PHOTO SPHERE - QUIET STARFIELD",192,213,2,muted);
+                box(v,170,200,684,50,hovered==156?purpleHover:button);
+                label(v,galleryResetConfirm?"CONFIRM RESET - EMPTY THIS GALLERY":
+                    "RESET GALLERY - REMOVE IMPORTED MEDIA",192,213,2,white);
                 box(v,170,140,684,50,hovered==159?purpleHover:button);
                 label(v,"IMAGE LAYOUT SETTINGS",192,153,2,white);
             } else if(page==Page::Projects) {
