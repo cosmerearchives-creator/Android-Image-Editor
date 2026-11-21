@@ -316,7 +316,8 @@ public final class BatchStore {
                     if(entry.isDirectory()){zip.closeEntry();continue;}
                     String filename=entry.getName();
                     String lower=filename.toLowerCase(Locale.ROOT);
-                    if(!(lower.endsWith(".png")||lower.endsWith(".jpg")||
+                    boolean video=lower.endsWith(".mp4");
+                    if(!(video||lower.endsWith(".png")||lower.endsWith(".jpg")||
                          lower.endsWith(".jpeg")||lower.endsWith(".webp"))){
                         zip.closeEntry();continue;
                     }
@@ -326,10 +327,19 @@ public final class BatchStore {
                         cancelled(cancel);
                         thisEntry+=n;
                         totalUncompressed+=n;
-                        if(thisEntry>maxCompressedOrExpandedImage||
+                        if(thisEntry>(video?VIDEO_MAX_BYTES:maxCompressedOrExpandedImage)||
                            totalUncompressed>maxArchiveInput)
                             throw new IOException("ZIP image or archive is too large");
                         bytes.write(chunk,0,n);
+                    }
+                    if(video){
+                        byte[] movie=bytes.toByteArray();
+                        File incoming=cache(ctx,"zip_incoming_video.mp4");
+                        added+=importVideoStream(ctx,new java.io.ByteArrayInputStream(movie),
+                            cancel,incoming);
+                        zip.closeEntry();
+                        progress.accept(Math.min(99,scanned*100/maxEntries));
+                        continue;
                     }
                     byte[] imageBytes=bytes.toByteArray();
                     android.graphics.BitmapFactory.Options opts=new android.graphics.BitmapFactory.Options();
@@ -387,6 +397,93 @@ public final class BatchStore {
         progress.accept(100);
         if(scanned==0)throw new IOException("ZIP is empty");
         return added;
+    }
+    private static final String VIDEO="video.mp4";
+    private static final long VIDEO_MAX_BYTES=256L*1024*1024;
+    /** Hardware playable MP4 is copied into app-private library storage. */
+    public static int importVideo(Context ctx,Uri uri,AtomicBoolean cancel)throws Exception{
+        File temp=cache(ctx,"incoming_video.mp4");
+        try(InputStream input=ctx.getContentResolver().openInputStream(uri)){
+            if(input==null)throw new IOException("Cannot read MP4");
+            return importVideoStream(ctx,input,cancel,temp);
+        }
+    }
+    private static int importVideoStream(Context ctx,InputStream input,
+                                         AtomicBoolean cancel,File temp)throws Exception{
+        long total=0;
+        try{
+            try(FileOutputStream out=new FileOutputStream(temp)){
+                byte[] buf=new byte[65536];int n;
+                while((n=input.read(buf))!=-1){
+                    cancelled(cancel);
+                    total+=n;
+                    if(total>VIDEO_MAX_BYTES)throw new IOException("MP4 exceeds 256 MB import limit");
+                    out.write(buf,0,n);
+                }
+                out.getFD().sync();
+            }
+            android.media.MediaMetadataRetriever retriever=
+                new android.media.MediaMetadataRetriever();
+            Bitmap frame=null;
+            try{
+                retriever.setDataSource(temp.getAbsolutePath());
+                frame=retriever.getFrameAtTime(0,
+                    android.media.MediaMetadataRetriever.OPTION_CLOSEST_SYNC);
+            }finally{retriever.release();}
+            if(frame==null)throw new IOException("Unable to decode MP4 thumbnail");
+            String id=hash(temp);
+            File directory=new File(root(ctx),"image_"+id.substring(0,24));
+            if(directory.exists()){frame.recycle();return 0;}
+            if(!directory.mkdirs()){frame.recycle();throw new IOException("Cannot store video");}
+            try{
+                Bitmap scaled=frame;
+                try{
+                    if(frame.getWidth()>SOURCE_MAX||frame.getHeight()>SOURCE_MAX){
+                        float ratio=Math.min((float)SOURCE_MAX/frame.getWidth(),
+                            (float)SOURCE_MAX/frame.getHeight());
+                        scaled=Bitmap.createScaledBitmap(frame,
+                            Math.max(1,Math.round(frame.getWidth()*ratio)),
+                            Math.max(1,Math.round(frame.getHeight()*ratio)),true);
+                    }
+                    savePng(scaled,new File(directory,PHOTO));
+                }finally{
+                    if(scaled!=frame)scaled.recycle();
+                    frame.recycle();
+                }
+                if(!temp.renameTo(new File(directory,VIDEO)))
+                    throw new IOException("Cannot commit imported video");
+                try(FileOutputStream out=new FileOutputStream(new File(directory,DISPLAY_NAME))){
+                    out.write("Imported MP4".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                }
+            }catch(Exception failure){
+                deleteGalleryEntry(directory);
+                throw failure;
+            }
+            wall(ctx).delete();wallDepth(ctx).delete();
+            sphere(ctx).delete();sphereDepth(ctx).delete();
+            return 1;
+        }finally{temp.delete();}
+    }
+    /** Map all repeated video tiles to up to two unique active video decoders. */
+    public static String[] galleryVideoPaths(Context ctx){
+        java.util.ArrayList<String> paths=new java.util.ArrayList<>();
+        for(File folder:entries(ctx)){
+            File video=new File(folder,VIDEO);
+            if(video.isFile()&&paths.size()<2)paths.add(video.getAbsolutePath());
+        }
+        return paths.toArray(new String[0]);
+    }
+    public static int[] galleryVideoTileSlots(Context ctx){
+        File[] tiles=sphereTiles(ctx,entries(ctx));
+        String[] paths=galleryVideoPaths(ctx);
+        int[] mapping=new int[96];
+        for(int i=0;i<Math.min(96,tiles.length);i++){
+            String path=new File(tiles[i],VIDEO).getAbsolutePath();
+            for(int slot=0;slot<paths.length;slot++){
+                if(path.equals(paths[slot])){mapping[i]=slot+1;break;}
+            }
+        }
+        return mapping;
     }
     private static void saveGray(byte[] pixels,File out)throws IOException{
         // Depth Anything V2 returns 256x256; our editable depth cache is 1024x1024.
