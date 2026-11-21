@@ -22,6 +22,7 @@ public final class VrActivity extends Activity {
     private static final int PICK_IMAGE = 7;
     private static final int ADD_COLLAGE_IMAGE = 9;
     private static final int BATCH_PICK = 10;
+    private static final int BATCH_ZIP = 14;
     private static final int EXPORT_WALL = 11;
     private static final int EXPORT_SPHERE = 12;
     private static final int INSTALL_PERMISSION = 8;
@@ -167,6 +168,10 @@ public final class VrActivity extends Activity {
     @SuppressWarnings("unused")
     public int galleryMultiplier(){return BatchStore.galleryMultiplier(this);}
     @SuppressWarnings("unused")
+    public int galleryFlyInterval(){return BatchStore.flyInterval(this);}
+    @SuppressWarnings("unused")
+    public int galleryFlyOpacity(){return BatchStore.flyOpacityPercent(this);}
+    @SuppressWarnings("unused")
     public void adjustGallerySetting(int control){
         int field=control/2;
         int change=control%2==0?-1:1;
@@ -181,6 +186,14 @@ public final class VrActivity extends Activity {
         }else if(field==3){
             BatchStore.saveRadiusCm(this,
                 Math.max(250,Math.min(500,BatchStore.radiusCm(this)+25*change)));
+        }else if(field==4){
+            int current=BatchStore.flyInterval(this);
+            BatchStore.saveFlyInterval(this,change>0?
+                (current==0?12:Math.min(120,current+12)):
+                (current<=12?0:current-12));
+        }else if(field==5){
+            BatchStore.saveFlyOpacityPercent(this,
+                Math.max(10,Math.min(100,BatchStore.flyOpacityPercent(this)+10*change)));
         }
     }
     @SuppressWarnings("unused")
@@ -415,6 +428,20 @@ public final class VrActivity extends Activity {
                 runOnUiThread(()->Toast.makeText(this,
                     "Could not clear gallery: "+error.getMessage(),Toast.LENGTH_LONG).show());
             }finally{batchBusy.set(false);}
+        });
+    }
+    @SuppressWarnings("unused")
+    public void requestZipGalleryImport(){
+        runOnUiThread(()->{
+            try{
+                Intent intent=new Intent(Intent.ACTION_OPEN_DOCUMENT)
+                    .addCategory(Intent.CATEGORY_OPENABLE).setType("application/zip");
+                intent.addCategory(Intent.CATEGORY_OPENABLE);
+                startActivityForResult(intent,BATCH_ZIP);
+            }catch(RuntimeException e){
+                Log.e(TAG,"ZIP picker unavailable",e);
+                Toast.makeText(this,"Could not open ZIP picker",Toast.LENGTH_LONG).show();
+            }
         });
     }
     @SuppressWarnings("unused")
@@ -1241,6 +1268,30 @@ public final class VrActivity extends Activity {
                 Toast.makeText(this,"Folder permission wasn't granted",
                     Toast.LENGTH_LONG).show();
             }
+            return;
+        }
+        if(request==BATCH_ZIP){
+            if(result!=RESULT_OK||data==null||data.getData()==null)return;
+            if(!batchBusy.compareAndSet(false,true))return;
+            Uri zipUri=data.getData();
+            batchCancel.set(false);
+            reportBatchStatus(1,0,BatchStore.count(getApplicationContext()));
+            batchWorker.execute(()->{
+                try{
+                    int added=BatchStore.importZip(getApplicationContext(),zipUri,
+                        batchCancel,p->reportBatchStatus(1,p,BatchStore.count(getApplicationContext())));
+                    int total=BatchStore.count(getApplicationContext());
+                    reportBatchStatus(8,100,total);
+                    runOnUiThread(()->Toast.makeText(this,
+                        added+" ZIP images added. Select VIEW SPHERE to open gallery.",
+                        Toast.LENGTH_LONG).show());
+                }catch(Exception e){
+                    Log.e(TAG,"ZIP gallery import failed",e);
+                    reportBatchStatus(6,0,BatchStore.count(getApplicationContext()));
+                    runOnUiThread(()->Toast.makeText(this,
+                        "ZIP import failed: "+e.getMessage(),Toast.LENGTH_LONG).show());
+                }finally{batchBusy.set(false);}
+            });
             return;
         }
         if(request==BATCH_PICK){
