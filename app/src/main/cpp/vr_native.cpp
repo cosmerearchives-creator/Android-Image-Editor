@@ -286,6 +286,40 @@ bool tryLoadChairAsset(JNIEnv* env,jobject activity,vrui::Renderer& renderer){
         "model and texture ready":"texture missing; chair hidden");
     return renderer.chairVertices>0&&renderer.chairMaps[0]!=0;
 }
+void stopGalleryVideos(JNIEnv* env,jobject activity,vrui::Renderer& renderer){
+    batchMethod(env,activity,"stopGalleryVideos","()V");
+    renderer.clearVideoTextures();
+}
+void startGalleryVideos(JNIEnv* env,jobject activity,vrui::Renderer& renderer){
+    jclass cls=env->GetObjectClass(activity);
+    jmethodID tiles=env->GetMethodID(cls,"galleryVideoTileSlots","()[I");
+    if(tiles){
+        jintArray array=static_cast<jintArray>(env->CallObjectMethod(activity,tiles));
+        if(array){
+            jsize count=env->GetArrayLength(array);
+            std::vector<jint> slots(size_t(count),0);
+            if(count>0)env->GetIntArrayRegion(array,0,count,slots.data());
+            renderer.setVideoTileSlots(std::vector<int>(slots.begin(),slots.end()));
+            env->DeleteLocalRef(array);
+        }
+    }
+    if(env->ExceptionCheck()){env->ExceptionDescribe();env->ExceptionClear();}
+    renderer.createVideoTextures();
+    jmethodID begin=env->GetMethodID(cls,"startGalleryVideos","([I)V");
+    if(begin){
+        jintArray textures=env->NewIntArray(2);
+        jint ids[]={static_cast<jint>(renderer.videoTextures[0]),
+                    static_cast<jint>(renderer.videoTextures[1])};
+        env->SetIntArrayRegion(textures,0,2,ids);
+        env->CallVoidMethod(activity,begin,textures);
+        env->DeleteLocalRef(textures);
+    }
+    if(env->ExceptionCheck()){env->ExceptionDescribe();env->ExceptionClear();}
+    env->DeleteLocalRef(cls);
+}
+void updateGalleryVideos(JNIEnv* env,jobject activity){
+    batchMethod(env,activity,"updateGalleryVideoFrames","()V");
+}
 bool loadBatchView(JNIEnv* env,jobject activity,vrui::Renderer& renderer,
                    int mode){
     const bool spherical=mode==2||mode==3;
@@ -1343,6 +1377,7 @@ void run(JNIEnv* env, jobject activity) {
             // Trigger remains available for painting and in-view controls.
             if(page==vrui::Page::Wall || page==vrui::Page::Sphere){
                 if(bDown&&!wasB){
+                    if(page==vrui::Page::Sphere)stopGalleryVideos(env,activity,menu);
                     page=vrui::Page::Gallery;
                     imageNeedsReload.store(true);
                     depthNeedsReload.store(true);
@@ -1555,7 +1590,8 @@ void run(JNIEnv* env, jobject activity) {
                     menu.selectionMode=false;
                     page=vrui::Page::Mask;
                 } else if(page==vrui::Page::Mask && hovered==110){
-                    if(menu.maskStrokeActive)menu.finishMaskEdit();
+                    stopGalleryVideos(env,activity,menu);
+    if(menu.maskStrokeActive)menu.finishMaskEdit();
                     page=vrui::Page::Open;
                 } else if(page==vrui::Page::Mask && hovered>=100 && hovered<=109){
                     const bool maskChanges=hovered>=104&&hovered<=109;
@@ -1732,6 +1768,7 @@ void run(JNIEnv* env, jobject activity) {
                 menu.initializeGallery();
             if(galleryReady!=0 && (galleryReady==1||menu.galleryAvailable()) &&
                loadBatchView(env,activity,menu,galleryReady)){
+                stopGalleryVideos(env,activity,menu);
                 if(galleryReady==3){
                     menu.galleryRadius=galleryRadiusFromJava(env,activity,"activeCylinderRadiusCm");
                 }else if(galleryReady==2){
@@ -1744,6 +1781,8 @@ void run(JNIEnv* env, jobject activity) {
                 menu.galleryFlyInterval=gallerySettingFromJava(env,activity,"galleryFlyInterval");
                 menu.galleryFlyOpacity=gallerySettingFromJava(env,activity,"galleryFlyOpacity");
                 page=galleryReady==1?vrui::Page::Wall:vrui::Page::Sphere;
+                if(page==vrui::Page::Sphere && galleryReady==2)
+                    startGalleryVideos(env,activity,menu);
                 panelPosition={0.f,0.f,-1.9f};
                 panelScale=galleryReady==1?3.7f:1.f;
                 panelAngle=0.f;
@@ -1816,6 +1855,8 @@ void run(JNIEnv* env, jobject activity) {
                 glDisable(GL_SCISSOR_TEST);
                 const float eyeSign=eye==0?-1.f:1.f;
                 // Both controllers have independent visible pointers.
+                if(page==vrui::Page::Sphere && sphereFrame && eye==0)
+                    updateGalleryVideos(env,activity);
                 if(page==vrui::Page::Sphere && sphereFrame){
                     const auto& view=sceneViews[eye];
                     const float quaternion[]={view.pose.orientation.x,
