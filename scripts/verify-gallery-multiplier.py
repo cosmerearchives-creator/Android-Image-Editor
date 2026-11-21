@@ -18,4 +18,18 @@ assert "BatchStore.saveGalleryMultiplier(getApplicationContext(),multiplier.getP
 assert "if(count>BatchStore.WARN_COUNT" not in activity
 assert '"CONFIRM VIEW OVER 16 IMAGES"' not in ui
 assert "confirmLargeBatchView" not in native
+assert "public static synchronized void resetGallery(Context ctx)" in store
+assert "public void requestResetGallery()" in activity
+assert 'batchMethod(env,activity,"requestResetGallery","()V")' in native
+assert "menu.galleryResetConfirm" in native
+assert "GallerySettings" in ui and "GallerySettings" in native
+assert "public void adjustGallerySetting(int control)" in activity
+assert 'batchMethod(env,activity,"adjustGallerySetting","(I)V",hovered-160)' in native
+assert "gallerySettingFromJava(" in native
+assert 'startActivityForResult(intent,BATCH_PICK)' in activity
+assert 'putExtra(Intent.EXTRA_ALLOW_MULTIPLE,true)' in activity
+shader = ui.split('const char* sphereFs=R"(',1)[1].split(')";',1)[0]
+assert "float cycle=floor(galleryTime/24.)" in shader
+assert "vec4 flying=texture(panorama,flyingUv)" in shader
+assert "planeDistance=mix(radius-.65,-.85,progress)" in shader
 print("Randomized gallery multiplier and warning removal contracts passed")
