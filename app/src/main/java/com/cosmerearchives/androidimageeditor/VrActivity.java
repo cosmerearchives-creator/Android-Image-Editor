@@ -372,6 +372,28 @@ public final class VrActivity extends Activity {
      * imported status. System UI is used only for the initial folder grant.
      */
     @SuppressWarnings("unused")
+    public void requestResetGallery(){
+        if(!batchBusy.compareAndSet(false,true)){
+            runOnUiThread(()->Toast.makeText(this,"A gallery operation is still running",Toast.LENGTH_SHORT).show());
+            return;
+        }
+        batchWorker.execute(()->{
+            try{
+                BatchStore.resetGallery(getApplicationContext());
+                activeSavedCylinder=-1;
+                reportBatchStatus(0,0,0);
+                runOnUiThread(()->Toast.makeText(this,
+                    "Gallery cleared. Your original photos and saved projects are safe.",
+                    Toast.LENGTH_LONG).show());
+            }catch(Exception error){
+                Log.e(TAG,"Gallery reset failed",error);
+                reportBatchStatus(6,0,BatchStore.count(getApplicationContext()));
+                runOnUiThread(()->Toast.makeText(this,
+                    "Could not clear gallery: "+error.getMessage(),Toast.LENGTH_LONG).show());
+            }finally{batchBusy.set(false);}
+        });
+    }
+    @SuppressWarnings("unused")
     public void requestBatchImport(){
         runOnUiThread(this::openBatchCustomPicker);
     }
