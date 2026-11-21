@@ -9,7 +9,7 @@ activity = Path("app/src/main/java/com/cosmerearchives/androidimageeditor/VrActi
 
 assert "quietStars(vec3 direction)" in ui, "Sphere starfield not present"
 shader = ui.split('const char* sphereFs=R"(', 1)[1].split(')";', 1)[0]
-assert "texture(panorama,texcoord)" in shader
+assert "liveGalleryPixel(texcoord)" in shader
 assert "mix(sky,photo.rgb,photo.a)" in shader, "Photos must cover stars at opaque pixels"
 for obsolete in ("galleryTheme", "environmentDetail", "museumArchitecture",
                  "sculpture(", "themedArchitecture(", "material(vec3"):
