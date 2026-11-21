@@ -32,6 +32,16 @@ gh variable set ANDROID_SIGNING_CERT_SHA256 --env stable-release --repo "$repo" 
   --body '<public SHA-256 fingerprint from keytool>'
 ```
 
+## v0.15.8 Gallery controls, reset, and photo fly-through
+
+- Bulk Import now uses the Android system multi-select document picker rather than a custom AlertDialog hidden behind the OpenXR layer.
+- Gallery Settings opens an in-headset VR control screen, with spacing, density, repeat multiplier, and radius adjustments. Changes apply when reopening the sphere.
+- Reset Gallery is a two-press confirmation directly in the VR gallery. It clears imported working-library media and generated gallery atlases but preserves original device media, independent editor projects, exported files, and separately saved gallery snapshots.
+- The photo sphere periodically animates one randomly selected existing gallery tile from the sphere toward and through the gallery center, using a stereo-consistent 3D plane intersection. Initial cadence is once per 24 seconds.
+- Automated source checks cover picker wiring, native VR settings, reset confirmation, and fly-through shader behavior.
+
+Video import/playback and looping are not implemented in this release and remain future work; photo fly-through is implemented first.
+
 ## v0.15.7 Randomized sphere fill
 
 The sphere layout settings now include a 1×–8× gallery multiplier. It repeats imported photos **visually**, shuffles all displayed tiles into deterministic randomized positions, and uses the same positions for color and depth atlases. Original files and editable projects are not duplicated. To keep Quest texture work bounded without interrupting the user, the multiplier adds up to 96 visual tiles (never dropping original images); the old over-16-images warning and confirmation control are removed. A new source contract check runs during CI.
