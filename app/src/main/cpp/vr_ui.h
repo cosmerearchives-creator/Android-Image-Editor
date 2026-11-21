@@ -9,6 +9,9 @@
 #include <vector>
 #include <string>
 #include <GLES3/gl3.h>
+#ifndef GL_TEXTURE_EXTERNAL_OES
+#define GL_TEXTURE_EXTERNAL_OES 0x8D65
+#endif
 #include <android/log.h>
 
 // Small self-contained OpenGL ES menu renderer, no web/assets/font dependencies.
@@ -715,6 +718,8 @@ struct Renderer {
     int galleryTheme=0; // 0 museum, 1 club, 2 tiki, 3 fire, 4 dungeon, 5 trees
     float galleryRadius=3.f;
     bool galleryDetail=true;
+    GLuint videoTextures[2]{0,0};
+    std::array<GLint,96> videoTileSlots{};
     int gallerySpacing=2,galleryDensity=3,galleryMultiplier=1;
     int galleryFlyInterval=24,galleryFlyOpacity=100;
     bool galleryResetConfirm=false;
@@ -1522,9 +1527,12 @@ struct Renderer {
         if(sphereProgram)return true;
         // Bounded cylindrical gallery: azimuth walls, planar ceiling/floor.
         const char* sphereFs=R"(#version 300 es
+#extension GL_OES_EGL_image_external_essl3 : require
 precision highp float;
 in vec2 uv;
 uniform sampler2D panorama,panoDepth;
+uniform samplerExternalOES video0,video1;
+uniform int tileVideoSlots[96];
 uniform vec4 orientation,fovTangent;
 uniform vec3 cameraPosition;
 uniform float galleryYaw,eyeSign,styleScale,galleryRadius,galleryTime,flyOpacity;
@@ -1542,6 +1550,22 @@ float hash13(vec3 p){
  p=fract(p*.1031);
  p+=dot(p,p.yzx+33.33);
  return fract((p.x+p.y)*p.z);
+}
+vec4 liveGalleryPixel(vec2 tc){
+    vec4 still=texture(panorama,tc);
+    if(tc.y<.25||tc.y>=.75)return still;
+    int col=clamp(int(floor(tc.x*float(galleryColumns))),0,galleryColumns-1);
+    int row=clamp(int(floor((tc.y-.25)*2.*float(galleryRows))),0,galleryRows-1);
+    int tile=row*galleryColumns+col;
+    if(tile<0||tile>=galleryTileCount||tile>=96)return still;
+    vec2 local=vec2(fract(tc.x*float(galleryColumns)),
+                    fract((tc.y-.25)*2.*float(galleryRows)));
+    // Android SurfaceTexture stores the video with a vertical origin.
+    vec2 videoUV=vec2(local.x,1.-local.y);
+    int slot=tileVideoSlots[tile];
+    if(slot==1)return vec4(texture(video0,videoUV).rgb,still.a);
+    if(slot==2)return vec4(texture(video1,videoUV).rgb,still.a);
+    return still;
 }
 vec3 quietStars(vec3 direction){
  float horizon=clamp(direction.y*.5+.5,0.,1.);
@@ -1603,7 +1627,7 @@ void main(){
  if(styleInverted==1)depth=1.-depth;
  texcoord.x=clamp(texcoord.x+
                  eyeSign*styleScale*(depth-.5)*.0025,.0005,.9995);
- vec4 photo=texture(panorama,texcoord);
+ vec4 photo=liveGalleryPixel(texcoord);
  vec3 color=mix(sky,photo.rgb,photo.a);
  // Every 24 seconds, gently send one randomly selected photograph from the
  // sphere toward the gallery origin and directly through the viewpoint.
@@ -1634,7 +1658,7 @@ void main(){
                  int column=index%galleryColumns,row=index/galleryColumns;
                  vec2 flyingUv=vec2((float(column)+u)/float(galleryColumns),
                      .25+.50*(float(row)+v)/float(galleryRows));
-                 vec4 flying=texture(panorama,flyingUv);
+                 vec4 flying=liveGalleryPixel(flyingUv);
                  color=mix(color,flying.rgb,flying.a*flyOpacity);
              }
          }
@@ -1717,6 +1741,30 @@ void main(){
         glBindTexture(GL_TEXTURE_2D,0);
         glActiveTexture(GL_TEXTURE0);
     }
+    void setVideoTileSlots(const std::vector<int>& slots){
+        videoTileSlots.fill(0);
+        for(size_t i=0;i<std::min(slots.size(),videoTileSlots.size());i++)
+            videoTileSlots[i]=std::clamp(slots[i],0,2);
+    }
+    void createVideoTextures(){
+        if(videoTextures[0]||videoTextures[1])return;
+        glGenTextures(2,videoTextures);
+        for(GLuint texture:videoTextures){
+            glBindTexture(GL_TEXTURE_EXTERNAL_OES,texture);
+            glTexParameteri(GL_TEXTURE_EXTERNAL_OES,GL_TEXTURE_MIN_FILTER,GL_LINEAR);
+            glTexParameteri(GL_TEXTURE_EXTERNAL_OES,GL_TEXTURE_MAG_FILTER,GL_LINEAR);
+            glTexParameteri(GL_TEXTURE_EXTERNAL_OES,GL_TEXTURE_WRAP_S,GL_CLAMP_TO_EDGE);
+            glTexParameteri(GL_TEXTURE_EXTERNAL_OES,GL_TEXTURE_WRAP_T,GL_CLAMP_TO_EDGE);
+        }
+        glBindTexture(GL_TEXTURE_EXTERNAL_OES,0);
+    }
+    void clearVideoTextures(){
+        videoTileSlots.fill(0);
+        if(videoTextures[0]||videoTextures[1]){
+            glDeleteTextures(2,videoTextures);
+            videoTextures[0]=videoTextures[1]=0;
+        }
+    }
     void drawSphere(const float* quaternion,const float* tanFov,float eyeSign,
                     const float* cameraPosition,float galleryYaw,float elapsed){
         if(!sphereTexture||!sphereProgram)return;
@@ -1727,6 +1775,10 @@ void main(){
         glUseProgram(sphereProgram);
         glUniform1i(glGetUniformLocation(sphereProgram,"panorama"),0);
         glUniform1i(glGetUniformLocation(sphereProgram,"panoDepth"),1);
+        glUniform1i(glGetUniformLocation(sphereProgram,"video0"),2);
+        glUniform1i(glGetUniformLocation(sphereProgram,"video1"),3);
+        glUniform1iv(glGetUniformLocation(sphereProgram,"tileVideoSlots"),
+                     96,videoTileSlots.data());
         glUniform4fv(glGetUniformLocation(sphereProgram,"orientation"),1,quaternion);
         glUniform4fv(glGetUniformLocation(sphereProgram,"fovTangent"),1,tanFov);
         glUniform1f(glGetUniformLocation(sphereProgram,"eyeSign"),eyeSign);
@@ -1756,6 +1808,11 @@ void main(){
         glBindTexture(GL_TEXTURE_2D,sphereTexture);
         glActiveTexture(GL_TEXTURE1);
         glBindTexture(GL_TEXTURE_2D,sphereDepthTexture);
+        glActiveTexture(GL_TEXTURE0);
+        for(int slot=0;slot<2;slot++){
+            glActiveTexture(GL_TEXTURE2+slot);
+            glBindTexture(GL_TEXTURE_EXTERNAL_OES,videoTextures[slot]);
+        }
         glActiveTexture(GL_TEXTURE0);
         glBindVertexArray(photoVao);
         glBindBuffer(GL_ARRAY_BUFFER,photoVbo);
@@ -2446,6 +2503,7 @@ void main(){
         if(environmentProgram)glDeleteProgram(environmentProgram);
         if(sphereTexture)glDeleteTextures(1,&sphereTexture);
         if(sphereDepthTexture)glDeleteTextures(1,&sphereDepthTexture);
+        if(videoTextures[0]||videoTextures[1])glDeleteTextures(2,videoTextures);
         if(sphereProgram)glDeleteProgram(sphereProgram);
         if(photoTexture)glDeleteTextures(1,&photoTexture);
         if(photoProgram)glDeleteProgram(photoProgram);
