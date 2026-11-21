@@ -1527,11 +1527,13 @@ struct Renderer {
         if(sphereProgram)return true;
         // Bounded cylindrical gallery: azimuth walls, planar ceiling/floor.
         const char* sphereFs=R"(#version 300 es
-#extension GL_OES_EGL_image_external_essl3 : require
+#extension GL_OES_EGL_image_external_essl3 : enable
 precision highp float;
 in vec2 uv;
 uniform sampler2D panorama,panoDepth;
+#ifdef GL_OES_EGL_image_external_essl3
 uniform samplerExternalOES video0,video1;
+#endif
 uniform int tileVideoSlots[96];
 uniform vec4 orientation,fovTangent;
 uniform vec3 cameraPosition;
@@ -1563,8 +1565,10 @@ vec4 liveGalleryPixel(vec2 tc){
     // Android SurfaceTexture stores the video with a vertical origin.
     vec2 videoUV=vec2(local.x,1.-local.y);
     int slot=tileVideoSlots[tile];
+#ifdef GL_OES_EGL_image_external_essl3
     if(slot==1)return vec4(texture(video0,videoUV).rgb,still.a);
     if(slot==2)return vec4(texture(video1,videoUV).rgb,still.a);
+#endif
     return still;
 }
 vec3 quietStars(vec3 direction){
