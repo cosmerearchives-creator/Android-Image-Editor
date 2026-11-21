@@ -1322,7 +1322,7 @@ public final class VrActivity extends Activity {
                     reportBatchStatus(4,100,total);
                     notifyBatchGalleryReady(2);
                     runOnUiThread(()->Toast.makeText(this,
-                        added+" ZIP images added; opening sphere gallery.",
+                        added+" ZIP media items added; opening sphere gallery.",
                         Toast.LENGTH_LONG).show());
                 }catch(Exception e){
                     Log.e(TAG,"ZIP gallery import failed",e);
