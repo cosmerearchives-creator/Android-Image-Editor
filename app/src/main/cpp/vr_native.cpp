@@ -1732,6 +1732,8 @@ void run(JNIEnv* env, jobject activity) {
                 }
                 menu.galleryTheme=0;
                 menu.galleryDetail=false;
+                menu.galleryDensity=galleryThemeFromJava(env,activity,"galleryDensity");
+                menu.galleryMultiplier=galleryThemeFromJava(env,activity,"galleryMultiplier");
                 page=galleryReady==1?vrui::Page::Wall:vrui::Page::Sphere;
                 panelPosition={0.f,0.f,-1.9f};
                 panelScale=galleryReady==1?3.7f:1.f;
