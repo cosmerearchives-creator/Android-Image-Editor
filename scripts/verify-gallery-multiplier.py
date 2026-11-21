@@ -43,6 +43,6 @@ assert 'batchMethod(env,activity,"requestZipGalleryImport","()V")' in native
 assert "galleryFlyInterval" in ui and "galleryFlyOpacity" in ui
 assert "public int galleryFlyInterval()" in activity
 assert "public int galleryFlyOpacity()" in activity
-assert "vec4 flying=texture(panorama,flyingUv)" in shader
+assert "vec4 flying=liveGalleryPixel(flyingUv)" in shader
 assert "planeDistance=mix(radius-.65,-.85,progress)" in shader
 print("Randomized gallery multiplier and warning removal contracts passed")
