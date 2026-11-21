@@ -321,6 +321,14 @@ public final class BatchStore {
                          lower.endsWith(".jpeg")||lower.endsWith(".webp"))){
                         zip.closeEntry();continue;
                     }
+                    if(video){
+                        // Stream MP4 directly to a bounded private file, never buffer
+                        // a 256 MB movie in the Quest Java heap.
+                        added+=importVideoStream(ctx,zip,cancel,cache(ctx,"zip_incoming_video.mp4"));
+                        zip.closeEntry();
+                        progress.accept(Math.min(99,scanned*100/maxEntries));
+                        continue;
+                    }
                     java.io.ByteArrayOutputStream bytes=new java.io.ByteArrayOutputStream();
                     byte[] chunk=new byte[32768];int n;long thisEntry=0;
                     while((n=zip.read(chunk))!=-1){
@@ -331,15 +339,6 @@ public final class BatchStore {
                            totalUncompressed>maxArchiveInput)
                             throw new IOException("ZIP image or archive is too large");
                         bytes.write(chunk,0,n);
-                    }
-                    if(video){
-                        byte[] movie=bytes.toByteArray();
-                        File incoming=cache(ctx,"zip_incoming_video.mp4");
-                        added+=importVideoStream(ctx,new java.io.ByteArrayInputStream(movie),
-                            cancel,incoming);
-                        zip.closeEntry();
-                        progress.accept(Math.min(99,scanned*100/maxEntries));
-                        continue;
                     }
                     byte[] imageBytes=bytes.toByteArray();
                     android.graphics.BitmapFactory.Options opts=new android.graphics.BitmapFactory.Options();
