@@ -1461,7 +1461,25 @@ void run(JNIEnv* env, jobject activity) {
                 menu.brushMode=false;
             } else if(triggerDown&&!wasPressed && !dragging && activeSlider<0 &&
                        page!=vrui::Page::Immersive && hovered>=0 && overlayHover<0) {
-                if(page==vrui::Page::Gallery && hovered==150)
+                if(page==vrui::Page::GallerySettings && hovered>=160 && hovered<=167){
+                    const int field=(hovered-160)/2;
+                    const int change=(hovered%2==0)?-1:1;
+                    batchMethod(env,activity,"adjustGallerySetting","(II)V",field,change);
+                    menu.gallerySpacing=galleryThemeFromJava(env,activity,"gallerySpacing");
+                    menu.galleryDensity=galleryThemeFromJava(env,activity,"galleryDensity");
+                    menu.galleryMultiplier=galleryThemeFromJava(env,activity,"galleryMultiplier");
+                    menu.galleryRadius=galleryRadiusFromJava(env,activity,"galleryRadiusCm");
+                }
+                else if(page==vrui::Page::Gallery && hovered==156){
+                    if(menu.galleryResetConfirm){
+                        menu.galleryResetConfirm=false;
+                        batchMethod(env,activity,"requestResetGallery","()V");
+                        batchState.store(0);
+                        menu.batchCount=0;
+                        menu.batchConverted=0;
+                    }else menu.galleryResetConfirm=true;
+                }
+                else if(page==vrui::Page::Gallery && hovered==150)
                     batchMethod(env,activity,"requestBatchImport","()V");
                 else if(page==vrui::Page::Gallery && hovered==151)
                     batchMethod(env,activity,"requestBatchConvert","()V");
@@ -1483,8 +1501,14 @@ void run(JNIEnv* env, jobject activity) {
                     batchMethod(env,activity,"requestSaveCylinder","(I)V",0);
                 else if(page==vrui::Page::Gallery && hovered==158)
                     batchMethod(env,activity,"requestSavedCylinders","()V");
-                else if(page==vrui::Page::Gallery && hovered==159)
-                    batchMethod(env,activity,"requestGalleryLayout","()V");
+                else if(page==vrui::Page::Gallery && hovered==159){
+                    menu.galleryResetConfirm=false;
+                    menu.gallerySpacing=galleryThemeFromJava(env,activity,"gallerySpacing");
+                    menu.galleryDensity=galleryThemeFromJava(env,activity,"galleryDensity");
+                    menu.galleryMultiplier=galleryThemeFromJava(env,activity,"galleryMultiplier");
+                    menu.galleryRadius=galleryRadiusFromJava(env,activity,"galleryRadiusCm");
+                    page=vrui::Page::GallerySettings;
+                }
                 else if(page==vrui::Page::Open && hovered>=132&&hovered<=134){
                     menu.depthStyle=hovered-132;
                     if(menu.hasPhoto()){
@@ -1501,7 +1525,11 @@ void run(JNIEnv* env, jobject activity) {
                     if(menu.hasPhoto() && aiDepthState.load()!=1 &&
                        aiDepthState.load()!=2)
                         aiControl(env,activity,"requestAutoConvert");
-                } else if(hovered==3) page=vrui::Page::Home;
+                } else if(hovered==3){
+                    if(page==vrui::Page::GallerySettings)page=vrui::Page::Gallery;
+                    else page=vrui::Page::Home;
+                    menu.galleryResetConfirm=false;
+                }
                 else if(page==vrui::Page::Open && hovered==70)page=vrui::Page::Collage;
                 else if(page==vrui::Page::Collage && hovered==82)page=vrui::Page::Open;
                 else if(page==vrui::Page::Collage && hovered==81)collagePicker(env,activity);
