@@ -57,6 +57,24 @@ public final class BatchStore {
         java.util.Collections.shuffle(tiles,new java.util.Random(seed));
         return tiles.toArray(new File[0]);
     }
+    /** 0 disables motion; other values are seconds between fly-through starts. */
+    public static int flyInterval(Context ctx){
+        int value=ctx.getSharedPreferences("vr_gallery_layout",Context.MODE_PRIVATE)
+            .getInt("flyInterval",24);
+        return value==0?0:Math.max(12,Math.min(120,value));
+    }
+    public static int flyOpacityPercent(Context ctx){
+        return Math.max(10,Math.min(100,ctx.getSharedPreferences("vr_gallery_layout",Context.MODE_PRIVATE)
+            .getInt("flyOpacityPercent",100)));
+    }
+    public static void saveFlyInterval(Context ctx,int seconds){
+        ctx.getSharedPreferences("vr_gallery_layout",Context.MODE_PRIVATE).edit()
+            .putInt("flyInterval",seconds==0?0:Math.max(12,Math.min(120,seconds))).apply();
+    }
+    public static void saveFlyOpacityPercent(Context ctx,int percent){
+        ctx.getSharedPreferences("vr_gallery_layout",Context.MODE_PRIVATE).edit()
+            .putInt("flyOpacityPercent",Math.max(10,Math.min(100,percent))).apply();
+    }
     public static int radiusCm(Context ctx){
         return ctx.getSharedPreferences("vr_gallery_layout",Context.MODE_PRIVATE)
             .getInt("radiusCm",300);
