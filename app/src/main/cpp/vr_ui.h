@@ -1524,8 +1524,8 @@ in vec2 uv;
 uniform sampler2D panorama,panoDepth;
 uniform vec4 orientation,fovTangent;
 uniform vec3 cameraPosition;
-uniform float galleryYaw,eyeSign,styleScale,galleryRadius;
-uniform int styleInverted;
+uniform float galleryYaw,eyeSign,styleScale,galleryRadius,galleryTime;
+uniform int styleInverted,galleryColumns,galleryRows,galleryTileCount;
 out vec4 frag;
 vec3 quat(vec3 v,vec4 q){
  vec3 t=2.0*cross(q.xyz,v);
@@ -1601,7 +1601,40 @@ void main(){
  texcoord.x=clamp(texcoord.x+
                  eyeSign*styleScale*(depth-.5)*.0025,.0005,.9995);
  vec4 photo=texture(panorama,texcoord);
- frag=vec4(mix(sky,photo.rgb,photo.a),1.);
+ vec3 color=mix(sky,photo.rgb,photo.a);
+ // Every 24 seconds, gently send one randomly selected photograph from the
+ // sphere toward the gallery origin and directly through the viewpoint.
+ // Both eyes intersect the same world-space image plane for stereo motion.
+ float cycle=floor(galleryTime/24.);
+ float phase=mod(galleryTime,24.);
+ if(phase>=9. && phase<18. && galleryTileCount>0){
+     float progress=(phase-9.)/9.;
+     progress=progress*progress*(3.-2.*progress);
+     float angle=6.2831853*hash13(vec3(cycle+13.,2.,7.));
+     vec3 axis=vec3(sin(angle),0.,cos(angle));
+     vec3 tangent=vec3(cos(angle),0.,-sin(angle));
+     float planeDistance=mix(radius-.65,-.85,progress);
+     float toward=dot(ray,axis);
+     if(abs(toward)>.0001){
+         float flyT=(planeDistance-dot(eye,axis))/toward;
+         if(flyT>.005 && flyT<t){
+             vec3 onPlane=eye+ray*flyT;
+             float u=dot(onPlane,tangent)/1.0+.5;
+             float v=(onPlane.y-.05)/.78+.5;
+             if(u>=.0&&u<=1.&&v>=.0&&v<=1.){
+                 int index=int(floor(hash13(vec3(cycle+3.,13.,4.))*
+                               float(galleryTileCount)));
+                 index=clamp(index,0,galleryTileCount-1);
+                 int column=index%galleryColumns,row=index/galleryColumns;
+                 vec2 flyingUv=vec2((float(column)+u)/float(galleryColumns),
+                     .25+.50*(float(row)+v)/float(galleryRows));
+                 vec4 flying=texture(panorama,flyingUv);
+                 color=mix(color,flying.rgb,flying.a);
+             }
+         }
+     }
+ }
+ frag=vec4(color,1.);
 }
 )";
         // Keep the regular VR home/editor operational if this optional renderer
@@ -1694,6 +1727,15 @@ void main(){
         glUniform3fv(glGetUniformLocation(sphereProgram,"cameraPosition"),1,cameraPosition);
         glUniform1f(glGetUniformLocation(sphereProgram,"galleryYaw"),galleryYaw);
         glUniform1f(glGetUniformLocation(sphereProgram,"galleryRadius"),galleryRadius);
+        const int originals=std::max(0,batchCount);
+        const int tiles=originals>0?
+            std::max(originals,std::min(96,originals*std::clamp(galleryMultiplier,1,8))):0;
+        const int columns=std::max(1,int(std::ceil(std::sqrt(
+            float(std::max(1,tiles)*std::clamp(galleryDensity,1,6))))));
+        const int rows=std::max(1,(tiles+columns-1)/columns);
+        glUniform1i(glGetUniformLocation(sphereProgram,"galleryColumns"),columns);
+        glUniform1i(glGetUniformLocation(sphereProgram,"galleryRows"),rows);
+        glUniform1i(glGetUniformLocation(sphereProgram,"galleryTileCount"),tiles);
         glUniform1i(glGetUniformLocation(sphereProgram,"galleryTheme"),galleryTheme);
         glUniform1i(glGetUniformLocation(sphereProgram,"environmentDetail"),galleryDetail?1:0);
         glUniform1f(glGetUniformLocation(sphereProgram,"galleryTime"),elapsed);
