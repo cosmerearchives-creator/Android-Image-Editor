@@ -159,6 +159,28 @@ public final class VrActivity extends Activity {
             }finally{batchBusy.set(false);}
         });
     }
+    /** VR-native layout controls avoid Android AlertDialogs behind the headset. */
+    @SuppressWarnings("unused")
+    public int gallerySpacing(){return BatchStore.layout(this)[0];}
+    @SuppressWarnings("unused")
+    public int galleryDensity(){return BatchStore.layout(this)[1];}
+    @SuppressWarnings("unused")
+    public int galleryMultiplier(){return BatchStore.galleryMultiplier(this);}
+    @SuppressWarnings("unused")
+    public void adjustGallerySetting(int field,int change){
+        int[] settings=BatchStore.layout(getApplicationContext());
+        if(field==0){
+            BatchStore.saveLayout(this,Math.max(0,Math.min(12,settings[0]+change)),settings[1]);
+        }else if(field==1){
+            BatchStore.saveLayout(this,settings[0],Math.max(1,Math.min(6,settings[1]+change)));
+        }else if(field==2){
+            BatchStore.saveGalleryMultiplier(this,
+                Math.max(1,Math.min(8,BatchStore.galleryMultiplier(this)+change)));
+        }else if(field==3){
+            BatchStore.saveRadiusCm(this,
+                Math.max(250,Math.min(500,BatchStore.radiusCm(this)+25*change)));
+        }
+    }
     @SuppressWarnings("unused")
     public void requestGalleryLayout(){
         runOnUiThread(()->{
