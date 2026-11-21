@@ -85,10 +85,12 @@ inline void label(std::vector<float>& v,const char* s,int x,int y,int scale,Colo
 inline int buttonAt(Page page,float x,float y,bool advancedVisible=true) {
     if(x<170||x>854) return -1;
     if(page==Page::GallerySettings){
-        if(y>=540&&y<=620)return x<512?160:161;
-        if(y>=440&&y<=520)return x<512?162:163;
-        if(y>=340&&y<=420)return x<512?164:165;
-        if(y>=240&&y<=320)return x<512?166:167;
+        if(y>=590&&y<=638)return x<512?160:161;
+        if(y>=505&&y<=553)return x<512?162:163;
+        if(y>=420&&y<=468)return x<512?164:165;
+        if(y>=335&&y<=383)return x<512?166:167;
+        if(y>=250&&y<=298)return x<512?168:169;
+        if(y>=165&&y<=213)return x<512?170:171;
         if(y>=92&&y<=160)return 3;
         return -1;
     }
@@ -99,7 +101,7 @@ inline int buttonAt(Page page,float x,float y,bool advancedVisible=true) {
         if(y>=360&&y<=440)return x<512?154:155;
         if(y>=265&&y<=340)return x<512?157:158;
         // No separate large-gallery confirmation button.
-        if(y>=140&&y<=190)return 159;
+        if(y>=140&&y<=190)return x<512?159:172;
         if(y>=92&&y<=135)return 3;
         return -1;
     }
@@ -714,6 +716,7 @@ struct Renderer {
     float galleryRadius=3.f;
     bool galleryDetail=true;
     int gallerySpacing=2,galleryDensity=3,galleryMultiplier=1;
+    int galleryFlyInterval=24,galleryFlyOpacity=100;
     bool galleryResetConfirm=false;
     // Optional glTF mesh pass, initialized only when a cylinder is opened.
     GLuint environmentProgram=0,environmentVao=0,environmentVbo=0,environmentTexture=0;
@@ -1524,8 +1527,8 @@ in vec2 uv;
 uniform sampler2D panorama,panoDepth;
 uniform vec4 orientation,fovTangent;
 uniform vec3 cameraPosition;
-uniform float galleryYaw,eyeSign,styleScale,galleryRadius,galleryTime;
-uniform int styleInverted,galleryColumns,galleryRows,galleryTileCount;
+uniform float galleryYaw,eyeSign,styleScale,galleryRadius,galleryTime,flyOpacity;
+uniform int styleInverted,galleryColumns,galleryRows,galleryTileCount,flyInterval;
 out vec4 frag;
 vec3 quat(vec3 v,vec4 q){
  vec3 t=2.0*cross(q.xyz,v);
@@ -1605,10 +1608,13 @@ void main(){
  // Every 24 seconds, gently send one randomly selected photograph from the
  // sphere toward the gallery origin and directly through the viewpoint.
  // Both eyes intersect the same world-space image plane for stereo motion.
- float cycle=floor(galleryTime/24.);
- float phase=mod(galleryTime,24.);
- if(phase>=9. && phase<18. && galleryTileCount>0){
-     float progress=(phase-9.)/9.;
+ float period=float(max(1,flyInterval));
+ float cycle=floor(galleryTime/period);
+ float phase=mod(galleryTime,period);
+ float duration=min(9.,period*.70);
+ float begin=period-duration;
+ if(flyInterval>0 && phase>=begin && galleryTileCount>0){
+     float progress=(phase-begin)/duration;
      progress=progress*progress*(3.-2.*progress);
      float angle=6.2831853*hash13(vec3(cycle+13.,2.,7.));
      vec3 axis=vec3(sin(angle),0.,cos(angle));
@@ -1629,7 +1635,7 @@ void main(){
                  vec2 flyingUv=vec2((float(column)+u)/float(galleryColumns),
                      .25+.50*(float(row)+v)/float(galleryRows));
                  vec4 flying=texture(panorama,flyingUv);
-                 color=mix(color,flying.rgb,flying.a);
+                 color=mix(color,flying.rgb,flying.a*flyOpacity);
              }
          }
      }
@@ -1727,6 +1733,9 @@ void main(){
         glUniform3fv(glGetUniformLocation(sphereProgram,"cameraPosition"),1,cameraPosition);
         glUniform1f(glGetUniformLocation(sphereProgram,"galleryYaw"),galleryYaw);
         glUniform1f(glGetUniformLocation(sphereProgram,"galleryRadius"),galleryRadius);
+        glUniform1i(glGetUniformLocation(sphereProgram,"flyInterval"),galleryFlyInterval);
+        glUniform1f(glGetUniformLocation(sphereProgram,"flyOpacity"),
+                    std::clamp(galleryFlyOpacity,10,100)/100.f);
         const int originals=std::max(0,batchCount);
         const int tiles=originals>0?
             std::max(originals,std::min(96,originals*std::clamp(galleryMultiplier,1,8))):0;
@@ -2104,22 +2113,25 @@ void main(){
                 label(v,aiState==1||aiState==2?"CANCEL":"DISCARD",646,234,2,white);
             } else if(page==Page::GallerySettings){
                 const char* names[]={"PHOTO SPACING","COLUMN DENSITY",
-                    "GALLERY MULTIPLIER","SPHERE RADIUS"};
+                    "GALLERY MULTIPLIER","SPHERE RADIUS",
+                    "FLY-THROUGH EVERY","FLY-THROUGH OPACITY"};
                 const int values[]={gallerySpacing,galleryDensity,galleryMultiplier,
-                                    int(galleryRadius*100.f)};
-                const int yy[]={540,440,340,240};
-                for(int i=0;i<4;i++){
+                                    int(galleryRadius*100.f),galleryFlyInterval,
+                                    galleryFlyOpacity};
+                const int yy[]={590,505,420,335,250,165};
+                for(int i=0;i<6;i++){
                     const int y=yy[i],id=160+i*2;
                     label(v,names[i],187,y+54,2,muted);
                     box(v,170,y,310,48,hovered==id?purpleHover:button);
                     box(v,544,y,310,48,hovered==id+1?purpleHover:button);
                     label(v,"-",306,y+12,3,white);
                     label(v,"+",683,y+12,3,white);
-                    const std::string count=std::to_string(values[i])+
-                        (i==0?"%":i==2?"X":i==3?" CM":"");
+                    const std::string count=(i==4&&values[i]==0?
+                        std::string("OFF"):std::to_string(values[i])+
+                        (i==0||i==5?"%":i==2?"X":i==3?" CM":i==4?" SEC":""));
                     label(v,count.c_str(),490,y+12,2,white);
                 }
-                label(v,"APPLIES WHEN YOU REOPEN THE SPHERE",187,198,2,muted);
+                label(v,"NEW SETTINGS APPLY WHEN SPHERE REOPENS",187,145,2,muted);
             } else if(page==Page::Gallery){
                 const char* actions[]={"BULK IMPORT","CONVERT MISSING",
                     "VIEW WALL","VIEW SPHERE","EXPORT WALL","EXPORT SPHERE",
@@ -2153,8 +2165,10 @@ void main(){
                 box(v,170,200,684,50,hovered==156?purpleHover:button);
                 label(v,galleryResetConfirm?"CONFIRM RESET - EMPTY THIS GALLERY":
                     "RESET GALLERY - REMOVE IMPORTED MEDIA",192,213,2,white);
-                box(v,170,140,684,50,hovered==159?purpleHover:button);
-                label(v,"IMAGE LAYOUT SETTINGS",192,153,2,white);
+                box(v,170,140,330,50,hovered==159?purpleHover:button);
+                label(v,"GALLERY SETTINGS",185,153,2,white);
+                box(v,524,140,330,50,hovered==172?purpleHover:button);
+                label(v,"IMPORT ZIP",576,153,2,white);
             } else if(page==Page::Projects) {
                 const int ys[]={495,405,315,225};
                 for(int i=0;i<4;i++){
