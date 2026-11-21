@@ -2204,7 +2204,7 @@ void main(){
                     box(v,float(x),float(y),330,i<6?80:75,hovered==ids[i]?purpleHover:button);
                     label(v,actions[i],x+18,y+25,2,white);
                 }
-                const std::string countText="IMAGES "+std::to_string(batchCount)+
+                const std::string countText="MEDIA "+std::to_string(batchCount)+
                      "   CACHED "+std::to_string(batchConverted);
                 label(v,countText.c_str(),180,736,2,muted);
                 const char* state=batchState==1?"IMPORTING IMAGES":
