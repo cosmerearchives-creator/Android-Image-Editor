@@ -273,14 +273,32 @@ public final class VrActivity extends Activity {
                 public void onStopTrackingTouch(android.widget.SeekBar bar){}
             });
             layout.addView(radius);
+            android.content.SharedPreferences videoSettings=getSharedPreferences("video_settings",0);
+            android.widget.TextView videoLabel=new android.widget.TextView(this);
+            android.widget.SeekBar videoLimit=new android.widget.SeekBar(this);
+            videoLimit.setMax(5);
+            videoLimit.setProgress(Math.max(1,Math.min(6,videoSettings.getInt("playback_limit",2)))-1);
+            videoLabel.setText("Simultaneous videos: "+(videoLimit.getProgress()+1));
+            layout.addView(videoLabel);
+            videoLimit.setOnSeekBarChangeListener(new android.widget.SeekBar.OnSeekBarChangeListener(){
+                public void onProgressChanged(android.widget.SeekBar bar,int value,boolean fromUser){
+                    videoLabel.setText("Simultaneous videos: "+(value+1));
+                }
+                public void onStartTrackingTouch(android.widget.SeekBar bar){}
+                public void onStopTrackingTouch(android.widget.SeekBar bar){}
+            });
+            layout.addView(videoLimit);
+            android.widget.ScrollView scroll=new android.widget.ScrollView(this);
+            scroll.addView(layout);
             new android.app.AlertDialog.Builder(this)
                 .setTitle("Cylinder image layout")
-                .setView(layout)
+                .setView(scroll)
                 .setPositiveButton("APPLY",(dialog,which)->{
                     BatchStore.saveLayout(getApplicationContext(),
                         spacing.getProgress(),density.getProgress()+1);
                     BatchStore.saveGalleryMultiplier(getApplicationContext(),multiplier.getProgress()+1);
                     BatchStore.saveRadiusCm(getApplicationContext(),250+radius.getProgress()*25);
+                    videoSettings.edit().putInt("playback_limit",videoLimit.getProgress()+1).apply();
                     Toast.makeText(this,"Layout saved. Reopen View Sphere to rebuild.",
                         Toast.LENGTH_LONG).show();
                 })
