@@ -718,7 +718,7 @@ struct Renderer {
     int galleryTheme=0; // 0 museum, 1 club, 2 tiki, 3 fire, 4 dungeon, 5 trees
     float galleryRadius=3.f;
     bool galleryDetail=true;
-    GLuint videoTextures[2]{0,0};
+    GLuint videoTextures[6]{};
     std::array<GLint,96> videoTileSlots{};
     int gallerySpacing=2,galleryDensity=3,galleryMultiplier=1;
     int galleryFlyInterval=24,galleryFlyOpacity=100;
@@ -1532,7 +1532,7 @@ precision highp float;
 in vec2 uv;
 uniform sampler2D panorama,panoDepth;
 #ifdef GL_OES_EGL_image_external_essl3
-uniform samplerExternalOES video0,video1;
+uniform samplerExternalOES video0,video1,video2,video3,video4,video5;
 #endif
 uniform int tileVideoSlots[96];
 uniform vec4 orientation,fovTangent;
@@ -1568,6 +1568,10 @@ vec4 liveGalleryPixel(vec2 tc){
 #ifdef GL_OES_EGL_image_external_essl3
     if(slot==1)return vec4(texture(video0,videoUV).rgb,still.a);
     if(slot==2)return vec4(texture(video1,videoUV).rgb,still.a);
+    if(slot==3)return vec4(texture(video2,videoUV).rgb,still.a);
+    if(slot==4)return vec4(texture(video3,videoUV).rgb,still.a);
+    if(slot==5)return vec4(texture(video4,videoUV).rgb,still.a);
+    if(slot==6)return vec4(texture(video5,videoUV).rgb,still.a);
 #endif
     return still;
 }
@@ -1748,11 +1752,11 @@ void main(){
     void setVideoTileSlots(const std::vector<int>& slots){
         videoTileSlots.fill(0);
         for(size_t i=0;i<std::min(slots.size(),videoTileSlots.size());i++)
-            videoTileSlots[i]=std::clamp(slots[i],0,2);
+            videoTileSlots[i]=std::clamp(slots[i],0,6);
     }
     void createVideoTextures(){
-        if(videoTextures[0]||videoTextures[1])return;
-        glGenTextures(2,videoTextures);
+        if(videoTextures[0])return;
+        glGenTextures(6,videoTextures);
         for(GLuint texture:videoTextures){
             glBindTexture(GL_TEXTURE_EXTERNAL_OES,texture);
             glTexParameteri(GL_TEXTURE_EXTERNAL_OES,GL_TEXTURE_MIN_FILTER,GL_LINEAR);
@@ -1764,9 +1768,9 @@ void main(){
     }
     void clearVideoTextures(){
         videoTileSlots.fill(0);
-        if(videoTextures[0]||videoTextures[1]){
-            glDeleteTextures(2,videoTextures);
-            videoTextures[0]=videoTextures[1]=0;
+        if(videoTextures[0]){
+            glDeleteTextures(6,videoTextures);
+            for(auto& texture:videoTextures)texture=0;
         }
     }
     void drawSphere(const float* quaternion,const float* tanFov,float eyeSign,
@@ -1781,6 +1785,10 @@ void main(){
         glUniform1i(glGetUniformLocation(sphereProgram,"panoDepth"),1);
         glUniform1i(glGetUniformLocation(sphereProgram,"video0"),2);
         glUniform1i(glGetUniformLocation(sphereProgram,"video1"),3);
+        glUniform1i(glGetUniformLocation(sphereProgram,"video2"),4);
+        glUniform1i(glGetUniformLocation(sphereProgram,"video3"),5);
+        glUniform1i(glGetUniformLocation(sphereProgram,"video4"),6);
+        glUniform1i(glGetUniformLocation(sphereProgram,"video5"),7);
         glUniform1iv(glGetUniformLocation(sphereProgram,"tileVideoSlots"),
                      96,videoTileSlots.data());
         glUniform4fv(glGetUniformLocation(sphereProgram,"orientation"),1,quaternion);
@@ -1813,7 +1821,7 @@ void main(){
         glActiveTexture(GL_TEXTURE1);
         glBindTexture(GL_TEXTURE_2D,sphereDepthTexture);
         glActiveTexture(GL_TEXTURE0);
-        for(int slot=0;slot<2;slot++){
+        for(int slot=0;slot<6;slot++){
             glActiveTexture(GL_TEXTURE2+slot);
             glBindTexture(GL_TEXTURE_EXTERNAL_OES,videoTextures[slot]);
         }
@@ -2507,7 +2515,7 @@ void main(){
         if(environmentProgram)glDeleteProgram(environmentProgram);
         if(sphereTexture)glDeleteTextures(1,&sphereTexture);
         if(sphereDepthTexture)glDeleteTextures(1,&sphereDepthTexture);
-        if(videoTextures[0]||videoTextures[1])glDeleteTextures(2,videoTextures);
+        if(videoTextures[0])glDeleteTextures(6,videoTextures);
         if(sphereProgram)glDeleteProgram(sphereProgram);
         if(photoTexture)glDeleteTextures(1,&photoTexture);
         if(photoProgram)glDeleteProgram(photoProgram);

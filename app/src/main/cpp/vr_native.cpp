@@ -307,10 +307,10 @@ void startGalleryVideos(JNIEnv* env,jobject activity,vrui::Renderer& renderer){
     renderer.createVideoTextures();
     jmethodID begin=env->GetMethodID(cls,"startGalleryVideos","([I)V");
     if(begin){
-        jintArray textures=env->NewIntArray(2);
-        jint ids[]={static_cast<jint>(renderer.videoTextures[0]),
-                    static_cast<jint>(renderer.videoTextures[1])};
-        env->SetIntArrayRegion(textures,0,2,ids);
+        jintArray textures=env->NewIntArray(6);
+        jint ids[6];
+        for(int i=0;i<6;i++)ids[i]=static_cast<jint>(renderer.videoTextures[i]);
+        env->SetIntArrayRegion(textures,0,6,ids);
         env->CallVoidMethod(activity,begin,textures);
         env->DeleteLocalRef(textures);
     }

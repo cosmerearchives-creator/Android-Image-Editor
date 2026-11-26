@@ -5,19 +5,19 @@ import android.media.MediaPlayer;
 import android.util.Log;
 import android.view.Surface;
 
-/** Two hardware-assisted, muted, looping video surfaces owned by the XR GL thread.
+/** Up to six hardware-assisted, muted, looping video surfaces owned by the XR GL thread.
  * MediaPlayer decodes directly to an external OpenGL texture, avoiding repeated
  * CPU bitmap extraction. Java SurfaceTexture operations stay on the XR thread.
  */
 public final class GalleryVideoPlayer {
     private static final String TAG="GalleryVideo";
-    private final MediaPlayer[] players=new MediaPlayer[2];
-    private final SurfaceTexture[] frames=new SurfaceTexture[2];
+    private final MediaPlayer[] players=new MediaPlayer[6];
+    private final SurfaceTexture[] frames=new SurfaceTexture[6];
 
     public synchronized void start(String[] paths,int[] textureIds){
         stop();
         if(paths==null||textureIds==null)return;
-        for(int i=0;i<Math.min(2,Math.min(paths.length,textureIds.length));i++){
+        for(int i=0;i<Math.min(6,Math.min(paths.length,textureIds.length));i++){
             if(paths[i]==null||paths[i].isEmpty()||textureIds[i]==0)continue;
             try{
                 final int slot=i;

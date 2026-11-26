@@ -477,7 +477,7 @@ public final class BatchStore {
         java.util.ArrayList<String> paths=new java.util.ArrayList<>();
         for(File folder:entries(ctx)){
             File video=new File(folder,VIDEO);
-            if(video.isFile()&&paths.size()<2)paths.add(video.getAbsolutePath());
+            if(video.isFile()&&paths.size()<Math.max(1,Math.min(6,ctx.getSharedPreferences("video_settings",0).getInt("playback_limit",2))))paths.add(video.getAbsolutePath());
         }
         return paths.toArray(new String[0]);
     }
