@@ -317,7 +317,8 @@ public final class BatchStore {
                     if(entry.isDirectory()){zip.closeEntry();continue;}
                     String filename=entry.getName();
                     String lower=filename.toLowerCase(Locale.ROOT);
-                    boolean video=lower.endsWith(".mp4");
+                    boolean video=lower.endsWith(".mp4")||lower.endsWith(".webm")||
+                        lower.endsWith(".mov")||lower.endsWith(".m4v")||lower.endsWith(".3gp");
                     if(!(video||lower.endsWith(".png")||lower.endsWith(".jpg")||
                          lower.endsWith(".jpeg")||lower.endsWith(".webp"))){
                         zip.closeEntry();continue;
@@ -405,7 +406,7 @@ public final class BatchStore {
     public static int importVideo(Context ctx,Uri uri,AtomicBoolean cancel)throws Exception{
         File temp=cache(ctx,"incoming_video.mp4");
         try(InputStream input=ctx.getContentResolver().openInputStream(uri)){
-            if(input==null)throw new IOException("Cannot read MP4");
+            if(input==null)throw new IOException("Cannot read video");
             return importVideoStream(ctx,input,cancel,temp,null);
         }
     }
@@ -419,7 +420,7 @@ public final class BatchStore {
                 while((n=input.read(buf))!=-1){
                     cancelled(cancel);
                     total+=n;
-                    if(total>VIDEO_MAX_BYTES)throw new IOException("MP4 exceeds 256 MB import limit");
+                    if(total>VIDEO_MAX_BYTES)throw new IOException("Video exceeds 256 MB import limit");
                     if(archiveVideoBytes!=null){
                         archiveVideoBytes[0]+=n;
                         if(archiveVideoBytes[0]>1024L*1024*1024)
@@ -437,7 +438,7 @@ public final class BatchStore {
                 frame=retriever.getFrameAtTime(0,
                     android.media.MediaMetadataRetriever.OPTION_CLOSEST_SYNC);
             }finally{retriever.release();}
-            if(frame==null)throw new IOException("Unable to decode MP4 thumbnail");
+            if(frame==null)throw new IOException("Unable to decode video thumbnail");
             String id=hash(temp);
             File directory=new File(root(ctx),"image_"+id.substring(0,24));
             if(directory.exists()){frame.recycle();return 0;}
@@ -460,7 +461,7 @@ public final class BatchStore {
                 if(!temp.renameTo(new File(directory,VIDEO)))
                     throw new IOException("Cannot commit imported video");
                 try(FileOutputStream out=new FileOutputStream(new File(directory,DISPLAY_NAME))){
-                    out.write("Imported MP4".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                    out.write("Imported video".getBytes(java.nio.charset.StandardCharsets.UTF_8));
                 }
             }catch(Exception failure){
                 deleteGalleryEntry(directory);
